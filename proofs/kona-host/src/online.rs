@@ -49,6 +49,9 @@ pub struct OnlineHostConfig {
     pub l1_beacon_rpc: String,
     /// World Chain L2 execution RPC URL.
     pub l2_rpc: String,
+    /// L2 consensus RPC serving `optimism_outputAtBlock`, used only as the `eth_getProof`
+    /// fallback. Must not be the execution RPC. `None` disables the fallback.
+    pub l2_consensus_rpc: Option<String>,
     /// World hardfork schedule baked into the witness.
     pub schedule: WorldRangeHardforkConfig,
     /// Rollup config hash recorded in the witness metadata.
@@ -89,6 +92,7 @@ impl OnlineHostConfig {
         l1_rpc: String,
         l1_beacon_rpc: String,
         l2_rpc: String,
+        l2_consensus_rpc: Option<String>,
         rollup_config_path: Option<PathBuf>,
         witness_timeout: Duration,
     ) -> anyhow::Result<Self> {
@@ -103,6 +107,7 @@ impl OnlineHostConfig {
             l1_rpc,
             l1_beacon_rpc,
             l2_rpc,
+            l2_consensus_rpc,
             schedule,
             rollup_config_hash,
             l2_chain_id: None,
@@ -146,6 +151,7 @@ pub fn build_online_config(
     l1_rpc: String,
     l1_beacon_rpc: String,
     l2_rpc: String,
+    l2_consensus_rpc: Option<String>,
     l2_chain_id: u64,
     schedule: &WorldRangeHardforkConfig,
     witness_timeout: Duration,
@@ -160,6 +166,7 @@ pub fn build_online_config(
             l1_rpc,
             l1_beacon_rpc,
             l2_rpc,
+            l2_consensus_rpc,
             Some(path),
             witness_timeout,
         );
@@ -171,6 +178,7 @@ pub fn build_online_config(
         l1_rpc,
         l1_beacon_rpc,
         l2_rpc,
+        l2_consensus_rpc,
         schedule: schedule.clone(),
         rollup_config_hash,
         l2_chain_id: Some(l2_chain_id),
@@ -301,10 +309,22 @@ pub async fn build_range_input(
     .await?;
     let post_block =
         get_block(&client, &config.l2_rpc, BlockTag::Number(request.end_block)).await?;
-    let pre_state =
-        output_root_witness(&client, &config.l2_rpc, request.start_block, &pre_block).await?;
-    let post_state =
-        output_root_witness(&client, &config.l2_rpc, request.end_block, &post_block).await?;
+    let pre_state = output_root_witness(
+        &client,
+        &config.l2_rpc,
+        config.l2_consensus_rpc.as_deref(),
+        request.start_block,
+        &pre_block,
+    )
+    .await?;
+    let post_state = output_root_witness(
+        &client,
+        &config.l2_rpc,
+        config.l2_consensus_rpc.as_deref(),
+        request.end_block,
+        &post_block,
+    )
+    .await?;
     let pre_root = pre_state.output_root();
     let post_root = post_state.output_root();
 
@@ -488,9 +508,12 @@ async fn get_block(client: &Client, rpc_url: &str, tag: BlockTag) -> anyhow::Res
     .with_context(|| format!("eth_getBlockByNumber returned null for {}", tag.display()))
 }
 
+/// Builds the output-root witness, preferring `eth_getProof` and falling back to
+/// `optimism_outputAtBlock` on the consensus client.
 async fn output_root_witness(
     client: &Client,
     rpc_url: &str,
+    consensus_rpc_url: Option<&str>,
     block_number: u64,
     block: &RpcBlock,
 ) -> anyhow::Result<OutputRootWitness> {
@@ -509,9 +532,21 @@ async fn output_root_witness(
         Ok(Some(proof)) => proof,
         Ok(None) => bail!("eth_getProof returned null"),
         Err(proof_err) => {
-            return output_root_witness_from_op_node(client, rpc_url, block_number, block)
-                .await
-                .with_context(|| format!("eth_getProof failed first: {proof_err}"));
+            let Some(consensus_rpc_url) = consensus_rpc_url else {
+                return Err(proof_err).context(
+                    "eth_getProof failed and no L2 consensus RPC is configured for the \
+                     optimism_outputAtBlock fallback (set --l2-consensus-rpc / \
+                     L2_CONSENSUS_RPC_URL to the L2 consensus RPC)",
+                );
+            };
+            return output_root_witness_from_op_node(
+                client,
+                consensus_rpc_url,
+                block_number,
+                block,
+            )
+            .await
+            .with_context(|| format!("eth_getProof failed first: {proof_err}"));
         }
     };
 

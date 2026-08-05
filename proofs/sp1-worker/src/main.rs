@@ -66,6 +66,11 @@ struct Cli {
     #[arg(long, env = "L2_RPC_URL")]
     l2_rpc: String,
 
+    /// L2 consensus RPC serving `optimism_outputAtBlock`, used only as the `eth_getProof`
+    /// fallback. Must not be the execution RPC.
+    #[arg(long, env = "L2_CONSENSUS_RPC_URL")]
+    l2_consensus_rpc: Option<String>,
+
     /// Ethereum L1 execution RPC URL.
     #[arg(long, env = "L1_RPC_URL")]
     l1_rpc: String,
@@ -186,6 +191,7 @@ async fn main() -> Result<()> {
         cli.l1_rpc.clone(),
         cli.l1_beacon_rpc.clone(),
         cli.l2_rpc.clone(),
+        cli.l2_consensus_rpc.clone(),
         cli.network.chain_id(),
         &schedule,
         Duration::from_secs(cli.witness_timeout_seconds),

@@ -296,6 +296,7 @@ mod tests {
             start_block: 100,
             end_block: 110,
             l2_rpc: "http://localhost:9545".to_string(),
+            l2_consensus_rpc: None,
             l1_rpc: "http://localhost:8545".to_string(),
             l1_beacon_rpc: "http://localhost:5052".to_string(),
             rollup_config: None,
