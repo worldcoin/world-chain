@@ -91,8 +91,6 @@ where
             Ok(())
         })
         .install_exex("proofs-history", async move |exex_context| {
-            // TODO: Add World Chain-specific startup validation when proof-history backfill is
-            // wired in (for example, initialized range and storage-version compatibility).
             Ok(OpProofsExEx::builder(exex_context, exex_storage)
                 .with_proofs_history_window(proofs_history_window)
                 .with_verification_interval(proofs_history_verification_interval)
