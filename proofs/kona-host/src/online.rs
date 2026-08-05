@@ -16,9 +16,15 @@ use std::{
 use crate::{OnlineBlobStore, PreimageWitnessCollector};
 use alloy_primitives::{Address, B256, address, keccak256};
 use anyhow::{Context, anyhow, bail};
-use kona_host::{DataFormat, single::SingleChainHost};
-use kona_preimage::{BidirectionalChannel, HintWriter, NativeChannel, OracleReader};
-use kona_proof::{CachingOracle, l1::OracleBlobProvider};
+use kona_host::{
+    DataFormat, OnlineHostBackend, PreimageServer,
+    single::{SingleChainHintHandler, SingleChainHost},
+};
+use kona_preimage::{
+    BidirectionalChannel, HintReader, HintWriter, NativeChannel, OracleReader, OracleServer,
+    PreimageKey, VerifyingPreimageFetcher,
+};
+use kona_proof::{CachingOracle, HintType, l1::OracleBlobProvider};
 use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -353,8 +359,13 @@ pub async fn build_range_input(
         l1_config_path: None,
     };
 
-    let witness =
-        collect_world_range_witness(host, config.schedule.clone(), config.witness_timeout).await?;
+    let witness = collect_world_range_witness(
+        host,
+        &pre_state,
+        config.schedule.clone(),
+        config.witness_timeout,
+    )
+    .await?;
 
     Ok(RangeProofInput {
         metadata: RangeMetadata {
@@ -374,12 +385,34 @@ pub async fn build_range_input(
 
 async fn collect_world_range_witness(
     host: SingleChainHost,
+    agreed_output: &OutputRootWitness,
     schedule: WorldRangeHardforkConfig,
     timeout: Duration,
 ) -> anyhow::Result<WorldRangeWitnessData> {
     let preimage = BidirectionalChannel::new()?;
     let hint = BidirectionalChannel::new()?;
-    let mut server_task = host.start_server(hint.host, preimage.host).await?;
+    let kv_store = host.create_key_value_store()?;
+
+    // Kona asks for this preimage to recover the agreed L2 head. Seeding the value avoids
+    // recomputing the post-Isthmus storage root through `eth_getProof`.
+    let agreed_output_root = agreed_output.output_root();
+    kv_store.write().await.set(
+        PreimageKey::new_keccak256(*agreed_output_root).into(),
+        output_root_preimage(agreed_output).to_vec(),
+    )?;
+
+    let providers = host.create_providers().await?;
+    let backend = OnlineHostBackend::new(host.clone(), kv_store, providers, SingleChainHintHandler)
+        .with_high_level_hint(HintType::L2PayloadWitness);
+    let mut server_task = tokio::spawn(async move {
+        PreimageServer::new(
+            OracleServer::new(preimage.host),
+            HintReader::new(hint.host),
+            Arc::new(VerifyingPreimageFetcher::new(backend)),
+        )
+        .start()
+        .await
+    });
 
     let witness = collect_witness_from_channels(preimage.client, hint.client, schedule);
     tokio::pin!(witness);
@@ -407,6 +440,14 @@ async fn collect_world_range_witness(
         server_task.abort();
     }
     result
+}
+
+fn output_root_preimage(output: &OutputRootWitness) -> [u8; 128] {
+    let mut preimage = [0u8; 128];
+    preimage[32..64].copy_from_slice(output.state_root.as_slice());
+    preimage[64..96].copy_from_slice(output.message_passer_storage_root.as_slice());
+    preimage[96..128].copy_from_slice(output.block_hash.as_slice());
+    preimage
 }
 
 async fn collect_witness_from_channels(
@@ -742,5 +783,19 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("missing withdrawalsRoot"));
+    }
+
+    #[test]
+    fn starting_output_preimage_matches_output_root() {
+        let output = OutputRootWitness {
+            state_root: B256::with_last_byte(1),
+            message_passer_storage_root: B256::with_last_byte(2),
+            block_hash: B256::with_last_byte(3),
+        };
+
+        assert_eq!(
+            keccak256(output_root_preimage(&output)),
+            output.output_root()
+        );
     }
 }
