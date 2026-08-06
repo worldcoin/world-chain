@@ -353,6 +353,9 @@ async fn signed_gas_burner(
         gas_limit,
     );
     tx_request.value = Some(U256::from(1));
+    // Keep the fuzzed gas limits below the node's 1 ETH transaction fee cap.
+    tx_request.max_fee_per_gas = Some(100_000_000_000);
+    tx_request.max_priority_fee_per_gas = Some(100_000_000_000);
 
     let wallet = EthereumWallet::from(signer(signer_index));
     let signed =
