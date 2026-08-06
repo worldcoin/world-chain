@@ -198,7 +198,11 @@ abstract contract OPStackFixtures is Test {
         return _propose(parentIndex, _rootClaimFor(target), target, 0);
     }
 
+    /// @dev Only a proven claim is challengeable, so land the TEE lane first when there is none.
     function _challenge(MultiProofGame game) internal {
+        if (game.proofBitmap() == 0) {
+            game.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
+        }
         vm.prank(challengerAccount);
         game.challenge{value: CHALLENGER_BOND}();
     }
@@ -206,8 +210,10 @@ abstract contract OPStackFixtures is Test {
     /// @dev Submits `laneCount` valid proof lanes; the mock verifiers accept a 32-byte proof
     ///      equal to the game's rootId.
     function _submitLanes(MultiProofGame game, uint8 laneCount) internal {
-        for (uint8 lane = 0; lane < laneCount; lane++) {
-            game.submitProofLane(lane, abi.encodePacked(game.rootId()));
+        bytes memory proof = abi.encodePacked(game.rootId());
+        for (uint8 lane = 0; lane < LibProof.PROOF_LANE_COUNT; lane++) {
+            if (LibProof.proofCount(game.proofBitmap()) >= laneCount) return;
+            game.submitProofLane(lane, proof);
         }
     }
 
