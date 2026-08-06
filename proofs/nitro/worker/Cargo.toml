@@ -12,7 +12,7 @@ description = "AWS Nitro TEE proving worker: leases jobs from the prover-service
 path = "src/lib.rs"
 
 [[bin]]
-name = "nitro-worker"
+name = "world-chain-proof-nitro-worker"
 path = "src/main.rs"
 
 [target.'cfg(target_os = "linux")'.dependencies]

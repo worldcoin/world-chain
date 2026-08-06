@@ -18,7 +18,7 @@ on:
       - 'proofs/succinct/elfs/**'
       - 'proofs/succinct/elf/vkeys.json'
       - 'proofs/core/**'
-      - '../../proofs/utils/kona-client/**'
+      - 'proofs/utils/kona-client/**'
       - 'proofs/primitives/**'
       - 'Cargo.lock'
       - 'Justfile'

@@ -181,7 +181,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
-          - { suffix: -sp1-worker, package: world-chain-sp1-worker, bin: sp1-worker, prefix: digests-sp1-worker }
+          - { suffix: -sp1-worker, package: world-chain-proof-sp1-worker, bin: world-chain-proof-sp1-worker, prefix: digests-sp1-worker }
           - { suffix: -proposer, package: world-chain-proposer, bin: world-chain-proposer, prefix: digests-proposer }
           - { suffix: -challenger, package: world-chain-challenger, bin: world-chain-challenger, prefix: digests-challenger }
           - { suffix: -defender, package: world-chain-defender, bin: world-chain-defender, prefix: digests-defender }

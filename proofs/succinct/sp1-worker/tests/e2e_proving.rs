@@ -19,7 +19,7 @@
 //! export ROLLUP_CONFIG=/path/to/rollup.json
 //! export SP1_PROVER=cpu                          # cpu | mock | network
 //! export SP1_PRIVATE_KEY=<your key>              # required for SP1_PROVER=network
-//! cargo test -p world-chain-sp1-worker --test e2e_proving -- --ignored --nocapture
+//! cargo test -p world-chain-proof-sp1-worker --test e2e_proving -- --ignored --nocapture
 //! ```
 //!
 //! The SP1 guest ELFs are baked into the worker at compile time via

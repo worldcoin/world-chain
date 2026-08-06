@@ -109,7 +109,7 @@ world-chain-proposer = { path = "proofs/services/proposer", default-features = f
 world-chain-challenger = { path = "proofs/services/challenger", default-features = false }
 world-chain-prover-service = { path = "proofs/services/prover-service", default-features = false }
 world-chain-proof-worker = { path = "proofs/services/worker", default-features = false }
-world-chain-sp1-worker = { path = "proofs/succinct/sp1-worker", default-features = false }
+world-chain-proof-sp1-worker = { path = "proofs/succinct/sp1-worker", default-features = false }
 world-chain-defender = { path = "proofs/services/defender", default-features = false }
 
 # reth crates.io

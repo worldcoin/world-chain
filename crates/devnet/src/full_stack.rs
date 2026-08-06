@@ -3005,7 +3005,7 @@ fn start_devnet_nitro_worker(prover_service_url: &str) -> Result<NitroWorkerTask
 /// - `AGG_ELF_PATH` — path to the compiled SP1 aggregation program ELF.
 ///
 /// These must be set before enabling `DEVNET_SP1_WORKER_PROVER`. The standalone
-/// `world-chain-sp1-worker` binary embeds ELFs at **compile time** (via
+/// `world-chain-proof-sp1-worker` binary embeds ELFs at **compile time** (via
 /// `world_chain_proof_succinct_elfs`) and does not require these variables.
 async fn start_sp1_worker(
     l1_rpc_url: &str,

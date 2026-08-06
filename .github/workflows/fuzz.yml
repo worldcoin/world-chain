@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - "proofs/nitro/enclave/**"
+      - "proofs/nitro/fuzz/**"
       - ".github/workflows/fuzz.yml"
   merge_group:
   pull_request:
     paths:
       - "proofs/nitro/enclave/**"
+      - "proofs/nitro/fuzz/**"
       - ".github/workflows/fuzz.yml"
   workflow_dispatch:
     inputs:
