@@ -342,7 +342,7 @@ proof-get-pcrs env="alphanet":
     echo "Pod: $NITRO_POD  Container: enclave-launcher" >&2
     MEASUREMENTS=$(kubectl --context="$KUBECONTEXT" exec \
         -n "$PROOF_NAMESPACE" "$NITRO_POD" -c enclave-launcher \
-        -- nitro-cli describe-eif --eif-path /home/world-chain-nitro-worker-enclave.eif \
+        -- nitro-cli describe-eif --eif-path /home/world-chain-nitro-enclave.eif \
         | jq -r '.Measurements')
     echo "PCR0=$(echo "$MEASUREMENTS" | jq -r '.PCR0')"
     echo "PCR1=$(echo "$MEASUREMENTS" | jq -r '.PCR1')"

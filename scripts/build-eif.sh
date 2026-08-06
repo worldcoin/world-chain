@@ -11,7 +11,7 @@ set -euo pipefail
 # Usage: scripts/build-eif.sh [output-dir]   (default: target/eif)
 #
 # Outputs in <output-dir>:
-#   world-chain-nitro-worker-enclave.eif   the enclave image
+#   world-chain-nitro-enclave.eif   the enclave image
 #   pcrs.json                       PCR0/PCR1/PCR2 measurements
 #
 # Env overrides:
