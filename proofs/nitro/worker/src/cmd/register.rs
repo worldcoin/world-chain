@@ -1,10 +1,10 @@
 #![cfg(target_os = "linux")]
 
 use anyhow::{Context, Result};
-use world_chain_nitro_worker::build_expected_pcrs;
 use world_chain_proof_nitro_enclave::register::{
     RegisterParams, RegistrationOutcome, register_enclave_key,
 };
+use world_chain_proof_nitro_worker::build_expected_pcrs;
 
 use crate::cmd::common::CommonArgs;
 
