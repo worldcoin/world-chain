@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
+
 /// @title LibProof
 /// @author World Contributors
 /// @custom:security-contact security@toolsforhumanity.com
@@ -34,14 +36,14 @@ library LibProof {
         bytes32 rollupConfigHash;
     }
 
-    /// Commitment binding a deployment to its chain, proof-system version, rollup
-    /// configuration, and proposal cadence.
-    function domainHash(uint256 chainId, uint256 proofSystemVersion, bytes32 rollupConfigHash, uint256 blockInterval)
+    /// Commitment binding a deployment to its chain, proof-system version, and rollup
+    /// configuration.
+    function domainHash(uint256 chainId, uint256 proofSystemVersion, bytes32 rollupConfigHash)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(chainId, proofSystemVersion, rollupConfigHash, blockInterval));
+        return keccak256(abi.encode(chainId, proofSystemVersion, rollupConfigHash));
     }
 
     function rootId(
@@ -53,6 +55,18 @@ library LibProof {
         uint256 l1OriginNumber
     ) internal pure returns (bytes32) {
         return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber, l1OriginHash, l1OriginNumber));
+    }
+
+    /// Selects the verifier backing `lane`.
+    function verifierFor(
+        ProofLane lane,
+        IWorldChainProofVerifier validityProofVerifier,
+        IWorldChainProofVerifier teeVerifier,
+        IWorldChainProofVerifier securityCouncil
+    ) internal pure returns (IWorldChainProofVerifier) {
+        if (lane == ProofLane.VALIDITY_PROOF) return validityProofVerifier;
+        if (lane == ProofLane.TEE_ATTESTATION) return teeVerifier;
+        return securityCouncil;
     }
 
     function laneMask(ProofLane lane) internal pure returns (uint8) {

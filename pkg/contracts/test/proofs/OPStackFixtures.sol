@@ -124,7 +124,6 @@ abstract contract OPStackFixtures is Test {
     function _gameConfig() internal view returns (IMultiProofGame.GameConfig memory) {
         return IMultiProofGame.GameConfig({
             rollupConfigHash: ROLLUP_CONFIG_HASH,
-            blockInterval: BLOCK_INTERVAL,
             challengePeriod: CHALLENGE_PERIOD,
             proofPeriod: PROOF_PERIOD,
             proposerBond: PROPOSER_BOND,
@@ -140,7 +139,7 @@ abstract contract OPStackFixtures is Test {
     }
 
     function _domainHash() internal pure returns (bytes32) {
-        return LibProof.domainHash(CHAIN_ID, LibProof.PROOF_SYSTEM_VERSION, ROLLUP_CONFIG_HASH, BLOCK_INTERVAL);
+        return LibProof.domainHash(CHAIN_ID, LibProof.PROOF_SYSTEM_VERSION, ROLLUP_CONFIG_HASH);
     }
 
     function _extraData(uint256 l2BlockNumber, uint256 parentIndex, uint256 attempt)

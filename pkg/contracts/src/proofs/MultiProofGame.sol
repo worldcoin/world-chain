@@ -52,6 +52,9 @@ import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 /// @dev Additional Proof Lanes may be added in the future for this game type.
 /// @custom:security-contact security@toolsforhumanity.com
 contract MultiProofGame is Clone, ISemver, IMultiProofGame {
+    using LibProof for LibProof.ProofLane;
+    using LibProof for uint8;
+
     ////////////////////////////////////////////////////////////////
     //                      STATE VARIABLES                       //
     ////////////////////////////////////////////////////////////////
@@ -71,9 +74,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     /// @notice Hash of the rollup configuration the proof lanes verify against.
     bytes32 public immutable rollupConfigHash;
-
-    /// @notice Number of L2 blocks each proposal must extend its parent by.
-    uint256 public immutable blockInterval;
 
     /// @notice Seconds a proposal may be challenged after creation.
     Duration public immutable challengePeriod;
@@ -143,8 +143,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     constructor(GameConfig memory config) {
         if (
-            config.blockInterval == 0 || config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod
-                || config.proposerBond == 0 || config.challengerBond == 0 || config.proofThreshold == 0
+            config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod || config.proposerBond == 0
+                || config.challengerBond == 0 || config.proofThreshold == 0
                 || config.proofThreshold > LibProof.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
                 || address(config.anchorStateRegistry) == address(0) || address(config.weth) == address(0)
                 || address(config.validityProofVerifier) == address(0) || address(config.teeVerifier) == address(0)
@@ -165,10 +165,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             revert InconsistentSystemConfiguration();
         }
 
-        domainHash =
-            LibProof.domainHash(chainId, LibProof.PROOF_SYSTEM_VERSION, config.rollupConfigHash, config.blockInterval);
+        domainHash = LibProof.domainHash(chainId, LibProof.PROOF_SYSTEM_VERSION, config.rollupConfigHash);
         rollupConfigHash = config.rollupConfigHash;
-        blockInterval = config.blockInterval;
         challengePeriod = Duration.wrap(config.challengePeriod);
         proofPeriod = Duration.wrap(config.proofPeriod);
         proposerBond = config.proposerBond;
@@ -306,11 +304,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             revert InvalidParentGame();
         }
 
-        // INVARIANT: Each proposal extends its parent by exactly one block interval.
+        // INVARIANT: Each proposal must advance its parent. Cadence beyond that is proposer
+        // policy: the range is fully committed by `rootId`, and proof cost scales with it.
         (, uint256 startingBlockNumber_) = startingProposal();
-        uint256 expectedL2BlockNumber = startingBlockNumber_ + blockInterval;
-        if (l2SequenceNumber_ != expectedL2BlockNumber) {
-            revert InvalidL2BlockNumber(expectedL2BlockNumber, l2SequenceNumber_);
+        if (l2SequenceNumber_ <= startingBlockNumber_) {
+            revert InvalidL2BlockNumber(startingBlockNumber_, l2SequenceNumber_);
         }
 
         // Per spec, the sequence number must fit within a uint64.
@@ -447,7 +445,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         if (laneId >= PROOF_LANE_COUNT) revert InvalidLane(laneId);
         LibProof.ProofLane lane = LibProof.ProofLane(laneId);
-        uint8 mask = LibProof.laneMask(lane);
+        uint8 mask = lane.laneMask();
         bytes32 rootId_ = rootId();
 
         // No-op on resubmission so racing provers do not revert each other.
@@ -457,7 +455,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         }
 
         // Verify the proof against the verifier configured for this lane.
-        if (!_verifierFor(lane).verify(rootId_, _transition(), proof)) {
+        IWorldChainProofVerifier verifier = lane.verifierFor(validityProofVerifier, teeVerifier, securityCouncil);
+        if (!verifier.verify(rootId_, _transition(), proof)) {
             revert InvalidProof(lane, rootId_);
         }
 
@@ -465,7 +464,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         // Update the status of the proposal. Unchallenged, a single lane is a valid proof that
         // finalizes once the challenge window closes; challenged, only the threshold is.
-        if (LibProof.hasThreshold(claimData.proofBitmap, PROOF_THRESHOLD)) {
+        if (claimData.proofBitmap.hasThreshold(PROOF_THRESHOLD)) {
             claimData.status = claimData.challenger == address(0)
                 ? ProposalStatus.UnchallengedAndValidProofProvided
                 : ProposalStatus.ChallengedAndValidProofProvided;
@@ -662,8 +661,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Determines if the game is finished.
     /// @return gameOver_ True if the active deadline has passed or the threshold is reached.
     function gameOver() public view returns (bool gameOver_) {
-        gameOver_ = claimData.deadline.raw() <= uint64(block.timestamp)
-            || LibProof.hasThreshold(claimData.proofBitmap, PROOF_THRESHOLD);
+        gameOver_ =
+            claimData.deadline.raw() <= uint64(block.timestamp) || claimData.proofBitmap.hasThreshold(PROOF_THRESHOLD);
     }
 
     /// @inheritdoc IMultiProofGame
@@ -739,15 +738,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @inheritdoc IMultiProofGame
     function proofDeadline() public view returns (Timestamp) {
         return Timestamp.wrap(createdAt.raw() + proofPeriod.raw());
-    }
-
-    /// @notice Returns the verifier configured for `lane`.
-    function _verifierFor(LibProof.ProofLane lane) internal view returns (IWorldChainProofVerifier) {
-        if (lane == LibProof.ProofLane.VALIDITY_PROOF) {
-            return validityProofVerifier;
-        }
-        if (lane == LibProof.ProofLane.TEE_ATTESTATION) return teeVerifier;
-        return securityCouncil;
     }
 
     /// @notice The transition public values a proof for this game must attest.
