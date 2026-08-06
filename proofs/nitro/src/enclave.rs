@@ -270,6 +270,10 @@ async fn handle_range(
     let witness_data: WorldRangeWitnessData =
         rkyv::from_bytes::<WorldRangeWitnessData, RkyvError>(&witness_rkyv)
             .map_err(|err| anyhow!("failed to rkyv-deserialize WorldRangeWitnessData: {err}"))?;
+    // `rkyv::from_bytes` creates owned witness structures. Release the serialized copy before
+    // constructing providers and executing the range so it does not remain resident throughout
+    // the proof.
+    drop(witness_rkyv);
 
     let world_schedule = witness_data.schedule.clone();
     let (oracle, beacon) = witness_data
