@@ -266,6 +266,8 @@ contract MultiProofGameTest is OPStackFixtures {
         address keeper = makeAddr("keeper");
         vm.prank(keeper);
         game.claimCredit(proposer);
+        assertEq(game.normalModeCredit(proposer), 0);
+        assertEq(game.refundModeCredit(proposer), 0);
 
         (Hash anchorRoot, uint256 anchorBlock) = asr.getAnchorRoot();
         assertEq(Hash.unwrap(anchorRoot), Claim.unwrap(game.rootClaim()));

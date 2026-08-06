@@ -122,16 +122,20 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice The claim made by the proposer.
     ClaimData public claimData;
 
-    /// @notice Whether `recipient` has already unlocked its credit via `claimCredit`.
-    /// @dev Credits themselves are derived, not stored — see `normalModeCredit` and
-    ///      `refundModeCredit`; this flag is the only settlement state per recipient.
-    mapping(address recipient => bool claimed) public creditClaimed;
+    /// @notice Credited balances for winning participants.
+    mapping(address recipient => uint256 amount) public normalModeCredit;
+
+    /// @notice Credited balances for refund recipients.
+    mapping(address recipient => uint256 amount) public refundModeCredit;
 
     /// @notice The bond distribution mode of the game.
     BondDistributionMode public bondDistributionMode;
 
     /// @notice A boolean for whether or not the game type was respected when the game was created.
     bool public wasRespectedGameTypeWhenCreated;
+
+    /// @notice The total bonds deposited into the game.
+    uint256 public totalBonds;
 
     ////////////////////////////////////////////////////////////////
     //                        Constructor                         //
@@ -353,8 +357,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // Set the game as initialized.
         initialized = true;
 
-        // Deposit the bond into DelayedWETH. Credits are derived from the bond immutables and
-        // the game outcome — see `refundModeCredit` and `normalModeCredit`.
+        // Deposit the bond into DelayedWETH and track refund credit.
+        refundModeCredit[gameCreator()] += msg.value;
+        totalBonds += msg.value;
         weth.deposit{value: msg.value}();
 
         // Set the game's starting timestamp.
@@ -412,7 +417,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // at the challenge, so late challenges cannot extend the game.
         claimData.deadline = proofDeadline();
 
-        // Deposit the bond into DelayedWETH.
+        // Deposit the bond into DelayedWETH and track refund credit.
+        refundModeCredit[msg.sender] += msg.value;
+        totalBonds += msg.value;
         weth.deposit{value: msg.value}();
 
         emit Challenged(msg.sender, claimData.deadline.raw());
@@ -504,6 +511,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             // An invalid parent invalidates this game regardless of its own proof state.
             status = GameStatus.CHALLENGER_WINS;
             claimData.invalidationReason = ProofLib.InvalidationReason.INVALID_PARENT;
+            normalModeCredit[gameCreator()] += proposerBond;
+            if (claimData.challenger != address(0)) {
+                normalModeCredit[claimData.challenger] += challengerBond;
+            }
         } else if (parentStatus == GameStatus.IN_PROGRESS) {
             // INVARIANT: Cannot resolve a game if the parent game has not been resolved.
             revert ParentGameNotResolved();
@@ -517,20 +528,22 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                     || claimData.status == ProposalStatus.ChallengedAndValidProofProvided
             ) {
                 status = GameStatus.DEFENDER_WINS;
+                normalModeCredit[gameCreator()] += totalBonds;
             } else if (claimData.status == ProposalStatus.Unchallenged || claimData.status == ProposalStatus.Challenged)
             {
                 // An applicable proof window expired below its requirement. A proofless
                 // proposal cannot win merely because nobody challenged it.
                 status = GameStatus.CHALLENGER_WINS;
                 claimData.invalidationReason = ProofLib.InvalidationReason.PROOF_TIMEOUT;
+                address recipient = claimData.challenger == address(0) ? protocolFeeRecipient : claimData.challenger;
+                normalModeCredit[recipient] += totalBonds;
             } else {
                 // This edge case shouldn't be reached, sanity check just in case.
                 revert InvalidProposalStatus();
             }
         }
 
-        // Mark the game as resolved. Bonds are paid out through `claimCredit` after
-        // `closeGame`
+        // Mark the game as resolved.
         claimData.status = ProposalStatus.Resolved;
         resolvedAt = Timestamp.wrap(uint64(block.timestamp));
         emit Resolved(status);
@@ -576,16 +589,17 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         uint256 recipientCredit;
         if (bondDistributionMode == BondDistributionMode.REFUND) {
-            recipientCredit = refundModeCredit(recipient);
+            recipientCredit = refundModeCredit[recipient];
         } else if (bondDistributionMode == BondDistributionMode.NORMAL) {
-            recipientCredit = normalModeCredit(recipient);
+            recipientCredit = normalModeCredit[recipient];
         } else {
             revert InvalidBondDistributionMode();
         }
 
-        // mark the credit claimed and unlock it in DelayedWETH.
+        // Zero the credit and unlock it in DelayedWETH.
         if (recipientCredit > 0) {
-            creditClaimed[recipient] = true;
+            refundModeCredit[recipient] = 0;
+            normalModeCredit[recipient] = 0;
             weth.unlock(recipient, recipientCredit);
             return;
         }
@@ -653,50 +667,12 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @inheritdoc IMultiProofGame
-    /// @dev Before `closeGame`, registry-invalid games report refund credit so keepers do not
-    ///      miss challenger refunds merely because normal-mode credit is zero.
     function credit(address recipient) external view returns (uint256 credit_) {
-        if (
-            bondDistributionMode == BondDistributionMode.REFUND
-                || (bondDistributionMode == BondDistributionMode.UNDECIDED
-                    && !anchorStateRegistry.isGameProper(IDisputeGame(address(this))))
-        ) {
-            credit_ = refundModeCredit(recipient);
+        if (bondDistributionMode == BondDistributionMode.REFUND) {
+            credit_ = refundModeCredit[recipient];
         } else {
-            credit_ = normalModeCredit(recipient);
+            credit_ = normalModeCredit[recipient];
         }
-    }
-
-    /// @inheritdoc IMultiProofGame
-    function refundModeCredit(address recipient) public view returns (uint256 amount) {
-        if (creditClaimed[recipient]) return 0;
-        if (recipient == gameCreator()) amount += proposerBond;
-        if (claimData.challenger != address(0) && recipient == claimData.challenger) amount += challengerBond;
-    }
-
-    /// @inheritdoc IMultiProofGame
-    function normalModeCredit(address recipient) public view returns (uint256 amount) {
-        if (creditClaimed[recipient]) return 0;
-
-        if (status == GameStatus.DEFENDER_WINS) {
-            // The claim is proven: the game creator takes all bonds.
-            if (recipient == gameCreator()) amount = totalBonds();
-        } else if (status == GameStatus.CHALLENGER_WINS) {
-            if (claimData.invalidationReason == ProofLib.InvalidationReason.INVALID_PARENT) {
-                amount = refundModeCredit(recipient);
-            } else if (claimData.challenger != address(0)) {
-                // Proof timeout on a challenged game: the challenger takes all bonds.
-                if (recipient == claimData.challenger) amount = totalBonds();
-            } else if (recipient == protocolFeeRecipient) {
-                // Proofless unchallenged timeout: the proposer forfeits the bond to the protocol.
-                amount = totalBonds();
-            }
-        }
-    }
-
-    /// @inheritdoc IMultiProofGame
-    function totalBonds() public view returns (uint256) {
-        return claimData.challenger == address(0) ? proposerBond : proposerBond + challengerBond;
     }
 
     /// @inheritdoc IMultiProofGame
