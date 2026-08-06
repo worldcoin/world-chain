@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-f93779d3.js";
+            window.path_to_searchindex_js = "searchindex-32652eb9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-87388434.js"></script>
@@ -803,7 +803,7 @@ else:
 <p>In the event that the block builder is offline, <code>rollup-boost</code> will fallback to the block built by the default execution client with standard OP Stack ordering rules.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="pbh-transactions"><a class="header" href="#pbh-transactions">PBH Transactions</a></h1>
-<p>The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that target the <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBHEntryPointImplV1.sol">PBHEntryPoint</a> and includes a <a href="#pbh-payload-1">PBHPayload</a> encoded in the tx calldata.</p>
+<p>The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that target the <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/pbh/PBHEntryPointImplV1.sol">PBHEntryPoint</a> and includes a <a href="#pbh-payload-1">PBHPayload</a> encoded in the tx calldata.</p>
 <!--TODO: uncomment this once the pbh sidecar is merged to main The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` either encoded in the `WorldChainTxEnvelope` or in tx calldata and target the `PBHEntryPoint`. -->
 <!--TODO: uncomment once the pbh sidecar is merged tom main ## World Chain Tx Envelope
 The `WorldChainTxEnvelope` is an EIP-2718 transaction envelope that extends the standard `OpTxEnvelope`, optionally including a `PBHSidecar`. -->
@@ -834,7 +834,7 @@ The `WorldChainTxEnvelope` is an EIP-2718 transaction envelope that extends the 
 
 </code></pre>
 <p>Upon submitting a PBH bundle to the network, the World Chain builder will ensure that all PBH bundles have valid proofs and mark the bundle for priority inclusion.</p>
-<p>Visit the <a href="#signal-hash-1">validation</a> section of the docs to see how to encode the <code>signalHash</code> for a PBH <code>UserOps</code> work, check out the <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBHEntryPointImplV1.sol#L216-L250">handleAggregatedOps()</a> function and <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBH4337Module.sol">PBH4337Module</a>.</p>
+<p>Visit the <a href="#signal-hash-1">validation</a> section of the docs to see how to encode the <code>signalHash</code> for a PBH <code>UserOps</code> work, check out the <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/pbh/PBHEntryPointImplV1.sol#L216-L250">handleAggregatedOps()</a> function and <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/pbh/PBH4337Module.sol">PBH4337Module</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="pbh-payload-1"><a href="#pbh-payload-1" class="header">PBH Payload</a></h1>
 <h2 id="pbh-payload"><a class="header" href="#pbh-payload">PBH Payload</a></h2>
@@ -3767,11 +3767,10 @@ contract EscalationGame {
 <tr><td><code>chainId</code></td><td>World Chain L2 chain ID.</td></tr>
 <tr><td><code>proofSystemVersion</code></td><td>Version of this proof system’s proof-domain encoding.</td></tr>
 <tr><td><code>rollupConfigHash</code></td><td>Hash of the rollup configuration and World Chain hardfork schedule.</td></tr>
-<tr><td><code>blockInterval</code></td><td>Distance in L2 blocks between a parent root and a proposed root.</td></tr>
 </tbody>
 </table>
 </div>
-<p>These values are set once on the game implementation (analogous to Base’s <code>CONFIG_HASH</code>, <code>L2_CHAIN_ID</code>, and <code>BLOCK_INTERVAL</code> immutables). Their hash is supplied in each game’s <code>extraData</code> and MUST equal the implementation’s immutable <code>domainHash</code>. Lane-specific constants, such as the active TEE image hash and validity-proof program key, live in the lane verifiers and are committed to by those lanes’ proof material.</p>
+<p>These values are set once on the game implementation (analogous to Base’s <code>CONFIG_HASH</code> and <code>L2_CHAIN_ID</code> immutables). Proposal cadence is deliberately absent: the game enforces only that each proposal advances its parent, so the distance between roots is proposer policy that the proposer and challenger agree on offchain. Their hash is supplied in each game’s <code>extraData</code> and MUST equal the implementation’s immutable <code>domainHash</code>. Lane-specific constants, such as the active TEE image hash and validity-proof program key, live in the lane verifiers and are committed to by those lanes’ proof material.</p>
 <h4 id="canonical-identifiers"><a class="header" href="#canonical-identifiers">Canonical identifiers</a></h4>
 <p>The contracts use two related identifiers:</p>
 <ul>
@@ -3782,8 +3781,7 @@ contract EscalationGame {
 <pre><code class="language-text">domainHash = keccak256(abi.encode(
     chainId,
     proofSystemVersion,
-    rollupConfigHash,
-    blockInterval
+    rollupConfigHash
 ))
 
 extraData = abi.encode(
