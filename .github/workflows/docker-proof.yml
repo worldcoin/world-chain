@@ -166,7 +166,7 @@ jobs:
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ github.repository }}-nitro-worker
+          image_name: ${{ env.IMAGE_NAME }}-nitro-worker
           digest_artifact_prefix: digests-nitro-worker
           digest_artifact_pattern: digests-nitro-worker-linux-*
           tags: |
@@ -194,7 +194,7 @@ jobs:
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: proofs/nitro/enclave/Dockerfile
-          digest_artifact_prefix: digests-nitro-worker-enclave
+          digest_artifact_prefix: digests-nitro-enclave
 
   merge-nitro-enclave-image:
     name: merge nitro-worker-enclave image manifest
@@ -210,7 +210,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}-nitro-enclave
-          digest_artifact_prefix: digests-nitro-worker-enclave
+          digest_artifact_prefix: digests-nitro-enclave
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
@@ -245,7 +245,7 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          file: proofs/nitro/Dockerfile.eif
+          file: proofs/nitro/enclave/Dockerfile.eif
           push: true
           platforms: linux/amd64
           tags: |
