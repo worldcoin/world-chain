@@ -38,11 +38,11 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice The `ClaimData` struct represents the data associated with the root claim.
     struct ClaimData {
-        ProposalStatus status; // 1 byte   \
-        address challenger; // 20 bytes  |
-        Timestamp deadline; // 8 bytes   |-- one slot (31 bytes)
-        uint8 proofBitmap; // 1 byte    |
-        LibProof.InvalidationReason invalidationReason; // 1 byte    /
+        ProposalStatus status; // 1 byte                            |
+        address challenger; // 20 bytes                             |
+        Timestamp deadline; // 8 bytes                              |-- one slot (31 bytes)
+        uint8 proofBitmap; // 1 byte                                |
+        LibProof.InvalidationReason invalidationReason; // 1 byte   |
     }
 
     /// @notice Per-deployment configuration, fixed as immutables on the implementation.
