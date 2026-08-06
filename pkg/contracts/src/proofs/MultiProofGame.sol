@@ -53,7 +53,7 @@ import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 /// @custom:security-contact security@toolsforhumanity.com
 contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     ////////////////////////////////////////////////////////////////
-    //                         State Vars                         //
+    //                      STATE VARIABLES                       //
     ////////////////////////////////////////////////////////////////
 
     /// @notice Semantic version.
