@@ -36,7 +36,7 @@ For a range of `N` L2 blocks the Kona host hint handler issues, **sequentially**
 
 There is **no cross-request cache**: the Kona host KV store is in-memory (`data_dir: None`,
 `online.rs:297`) and discarded after each build. The SP1 validity lane splits a range into
-sub-ranges and builds each witness sequentially (`proofs/succinct/utils/host/src/validity.rs:93`),
+sub-ranges and builds each witness sequentially (`proofs/backends/sp1/host/src/validity.rs:93`),
 so the L2 RPC cost scales with the entire block interval, and overlapping proof requests repeat
 all the work.
 

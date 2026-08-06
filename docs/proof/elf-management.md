@@ -4,8 +4,8 @@ The World Chain fault-proof system runs two SP1 guest programs:
 
 | Program | Purpose | Crate |
 |:---|:---|:---|
-| `world-chain-proof-succinct-range-ethereum` | Proves correct execution of a block range | `proofs/succinct/programs/range-ethereum` |
-| `world-chain-proof-succinct-aggregation`     | Aggregates many range proofs into one     | `proofs/succinct/programs/aggregation`     |
+| `world-chain-proof-succinct-range-ethereum` | Proves correct execution of a block range | `proofs/backends/sp1/programs/range-ethereum` |
+| `world-chain-proof-succinct-aggregation`     | Aggregates many range proofs into one     | `proofs/backends/sp1/programs/aggregation`     |
 
 Both are compiled to RISC-V ELFs by `cargo prove build` (the SP1 toolchain) and are consumed by
 the `world-chain-prover-sp1` CLI, the SP1 worker, and the devnet's full-stack tests. They are also
@@ -16,21 +16,21 @@ so the ELF bytes **are** the governance anchor for the proof lane.
 
 We use the OP Succinct upstream pattern (see [succinctlabs/op-succinct/utils/build](https://github.com/succinctlabs/op-succinct/tree/main/utils/build)):
 
-1. `proofs/succinct/elfs/build.rs` calls
+1. `proofs/backends/sp1/elfs/build.rs` calls
    [`sp1_build::build_program_with_args`](https://docs.rs/sp1-build/latest/sp1_build/fn.build_program_with_args.html)
    for each guest crate at `cargo build` time.
 2. `sp1-build` invokes `cargo prove build` against the program crate, producing a deterministic
    RISC-V ELF and emitting a `cargo:rustc-env=SP1_ELF_<package>=<path>` directive for every
    program target it built.
-3. `proofs/succinct/elfs/src/lib.rs` calls
+3. `proofs/backends/sp1/elfs/src/lib.rs` calls
    [`sp1_sdk::include_elf!`](https://docs.rs/sp1-sdk/latest/sp1_sdk/macro.include_elf.html)
    which expands to `include_bytes!(env!("SP1_ELF_<package>"))`, embedding the ELF bytes into
-   the prover binary at link time via the `world-chain-proof-succinct-elfs` crate.
+   the prover binary at link time via the `world-chain-proof-sp1-elfs` crate.
 
 Net effect: the ELFs are never on disk for the host crate to find — they're statically baked
-into every binary that links `world-chain-proof-succinct-elfs` (e.g. `world-chain-proof-sp1-worker`).
+into every binary that links `world-chain-proof-sp1-elfs` (e.g. `world-chain-proof-sp1-worker`).
 There is no committed ELF blob. The derived vkeys and ELF SHA-256s are recorded in
-`proofs/succinct/elf/vkeys.json`. The on-chain governance anchor is the SP1 vkey computed from the
+`proofs/backends/sp1/elfs/vkeys.json`. The on-chain governance anchor is the SP1 vkey computed from the
 embedded bytes (`just proof-vkeys`), which is exactly what we register on
 `OPSuccinctFaultDisputeGame` (name subject to change once World Chain ships its own proof system).
 
@@ -87,7 +87,7 @@ need a matching update before the new prover can be deployed.
 
 The workflow is just normal source-control:
 
-1. Edit the guest source or bump the SP1 toolchain `tag` in `proofs/succinct/elfs/build.rs`.
+1. Edit the guest source or bump the SP1 toolchain `tag` in `proofs/backends/sp1/elfs/build.rs`.
 2. `cargo build -p world-chain-prover-sp1` to confirm the new ELFs build.
 3. `just proof-vkeys` to print the new vkey commitments.
 4. Mention the rotated vkeys in the PR description and link the matching on-chain registry
@@ -124,7 +124,7 @@ World Chain follows this pattern directly:
 | Where the artifact lives | **Embedded into the host binary via `include_elf!()`** | **Embedded into the host binary via `include_elf!()`** |
 | Committed ELF blob       | None | None |
 
-For World Chain's Nitro lane (`proofs/nitro/`), a separate PCR-commit pattern is used for the
+For World Chain's Nitro lane (`proofs/backends/nitro/`), a separate PCR-commit pattern is used for the
 TEE enclave image; the SP1 lane follows the op-succinct embed-at-compile-time pattern, which
 avoids carrying any ELF artifacts (committed bytes or committed SHA-256s) in source control.
 
@@ -132,12 +132,12 @@ avoids carrying any ELF artifacts (committed bytes or committed SHA-256s) in sou
 
 | Path | Role |
 |:---|:---|
-| `proofs/succinct/elfs/build.rs` | Invokes `sp1_build::build_program_with_args` for each guest crate |
-| `proofs/succinct/elfs/src/lib.rs` | `range_elf()` / `aggregation_elf()` via `include_elf!()` |
-| `proofs/succinct/elf/vkeys.json` | Derived SP1 vkeys and ELF SHA-256s |
-| `proofs/succinct/utils/host/src/*_prover.rs` | CPU, mock, and network provers over the embedded ELFs |
-| `proofs/succinct/programs/range-ethereum/` | Range guest source |
-| `proofs/succinct/programs/aggregation/`    | Aggregation guest source |
+| `proofs/backends/sp1/elfs/build.rs` | Invokes `sp1_build::build_program_with_args` for each guest crate |
+| `proofs/backends/sp1/elfs/src/lib.rs` | `range_elf()` / `aggregation_elf()` via `include_elf!()` |
+| `proofs/backends/sp1/elfs/vkeys.json` | Derived SP1 vkeys and ELF SHA-256s |
+| `proofs/backends/sp1/host/src/*_prover.rs` | CPU, mock, and network provers over the embedded ELFs |
+| `proofs/backends/sp1/programs/range-ethereum/` | Range guest source |
+| `proofs/backends/sp1/programs/aggregation/`    | Aggregation guest source |
 | `Dockerfile.prover` | Builder image installs the SP1 toolchain and sets `SP1_BUILD_DOCKER=false` |
 | `Justfile` | `just proof-vkeys` prints the current vkey commitments |
 | `.github/workflows/release-proof.yml` | Release gate: rebuilds, snapshots vkeys into `manifest.json` |

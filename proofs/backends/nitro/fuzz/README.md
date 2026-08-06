@@ -9,11 +9,11 @@ first — otherwise it looks for `./fuzz/Cargo.toml` and reports a missing manif
 
 ```bash
 # from the repository root
-cargo +nightly fuzz run --fuzz-dir proofs/nitro/fuzz attestation_parse  -- -max_total_time=60
-cargo +nightly fuzz run --fuzz-dir proofs/nitro/fuzz attestation_verify -- -max_total_time=60
+cargo +nightly fuzz run --fuzz-dir proofs/backends/nitro/fuzz attestation_parse  -- -max_total_time=60
+cargo +nightly fuzz run --fuzz-dir proofs/backends/nitro/fuzz attestation_verify -- -max_total_time=60
 
 # or
-cd proofs/nitro/fuzz && cargo +nightly fuzz run attestation_parse -- -max_total_time=60
+cd proofs/backends/nitro/fuzz && cargo +nightly fuzz run attestation_parse -- -max_total_time=60
 ```
 
 Seed the corpus from a known-good document before a long run:
