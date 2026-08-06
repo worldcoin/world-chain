@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
+import {ProofLib} from "../lib/ProofLib.sol";
 
 interface IERC1271 {
     function isValidSignature(bytes32 hash, bytes calldata signature) external view returns (bytes4);
@@ -36,7 +37,12 @@ contract SecurityCouncilVerifier is IWorldChainProofVerifier {
     }
 
     /// @inheritdoc IWorldChainProofVerifier
-    function verify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
+    /// @dev The council attests the proposal identity (`rootId`) rather than the transition.
+    function verify(bytes32 rootId, ProofLib.TransitionPublicValues calldata, bytes calldata proof)
+        external
+        view
+        returns (bool)
+    {
         try IERC1271(council).isValidSignature(attestationDigest(rootId), proof) returns (bytes4 magic) {
             return magic == ERC1271_MAGIC_VALUE;
         } catch {
