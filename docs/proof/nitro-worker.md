@@ -36,22 +36,22 @@ The `nitro-worker` Kubernetes pod contains two containers:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  EC2 Node (Nitro-capable)                                               │
 │                                                                         │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │  nitro-worker Pod                                                │  │
-│  │                                                                  │  │
-│  │  ┌──────────────────────────┐  ┌──────────────────────────────┐ │  │
-│  │  │  nitro-worker (main)     │  │  enclave-launcher (sidecar)  │ │  │
-│  │  │                          │  │                              │ │  │
-│  │  │  polls prover-service    │  │  runs nitro-cli run-enclave  │ │  │
-│  │  │  builds witnesses        │  │  writes CID ─────────────────┼─┼► │
-│  │  │  sends to enclave        │  │  to /run/nitro-shared/       │ │  │
-│  │  │  reads CID ◄─────────────┼──┼──────────────────────────── │ │  │
-│  │  └────────────┬─────────────┘  └──────────────────────────────┘ │  │
-│  └───────────────┼────────────────────────────────────────────────── ┘  │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  nitro-worker Pod                                                 │  │
+│  │                                                                   │  │
+│  │  ┌──────────────────────────┐  ┌───────────────────────────────┐  │  │
+│  │  │  nitro-worker (main)     │  │  enclave-launcher (sidecar)   │  │  │
+│  │  │                          │  │                               │  │  │
+│  │  │  polls prover-service    │  │  runs nitro-cli run-enclave   │  │  │
+│  │  │  builds witnesses        │  │  writes CID ──────────────────┼──┼► │
+│  │  │  sends to enclave        │  │  to /run/nitro-shared/        │  │  │
+│  │  │  reads CID ◄─────────────┼──┼────────────────────────────   │  │  │
+│  │  └────────────┬─────────────┘  └───────────────────────────────┘  │  │
+│  └───────────────┼───────────────────────────────────────────────────┘  │
 │                  │ vsock (CID from /run/nitro-shared/enclave-cid)       │
 │                  ▼                                                      │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │  AWS Nitro Enclave  (world-chain-nitro-enclave)                   │  │
+│  │  AWS Nitro Enclave  (world-chain-proof-nitro-enclave)             │  │
 │  │                                                                   │  │
 │  │  - Listens on vsock port 5005                                     │  │
 │  │  - Re-executes Kona derivation pipeline                           │  │
@@ -732,7 +732,7 @@ a debug enclave is indistinguishable from a forged one.
 | `--poll-interval-seconds` / `POLL_INTERVAL_SECONDS` | Seconds between prover-service polls | `10` |
 | `--max-concurrent-jobs` | Max jobs proved in parallel | `1` |
 
-### `world-chain-nitro-enclave` (Enclave Binary)
+### `world-chain-proof-nitro-enclave` (Enclave Binary)
 
 | Env Var | Description | Default |
 |---------|-------------|---------|

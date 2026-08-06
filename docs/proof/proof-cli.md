@@ -309,7 +309,7 @@ Run from the repo root. The Dockerfile at `proofs/nitro/Dockerfile` compiles the
 binary inside the container.
 
 ```bash
-docker build -t world-chain-nitro-enclave \
+docker build -t world-chain-proof-nitro-enclave \
   -f proofs/nitro/Dockerfile .
 ```
 
@@ -317,8 +317,8 @@ docker build -t world-chain-nitro-enclave \
 
 ```bash
 nitro-cli build-enclave \
-  --docker-uri world-chain-nitro-enclave:latest \
-  --output-file world-chain-nitro-enclave.eif
+  --docker-uri world-chain-proof-nitro-enclave:latest \
+  --output-file world-chain-proof-nitro-enclave.eif
 ```
 
 `nitro-cli` prints the PCR measurements on success:
@@ -335,7 +335,7 @@ Save these — they are passed to `world-chain-prover-nitro prove` as `--pcr0/1/
 
 ```bash
 nitro-cli run-enclave \
-  --eif-path world-chain-nitro-enclave.eif \
+  --eif-path world-chain-proof-nitro-enclave.eif \
   --memory 16384 \
   --cpu-count 4 \
   --enclave-cid 16

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Build the world-chain-nitro-enclave EIF and emit its PCR measurements.
+# Build the world-chain-proof-nitro-enclave EIF and emit its PCR measurements.
 #
 # Builds the enclave container image from proofs/nitro/Dockerfile, then converts
 # it to an EIF with nitro-cli (built from source at a pinned tag so the EIF
@@ -11,7 +11,7 @@ set -euo pipefail
 # Usage: scripts/build-eif.sh [output-dir]   (default: target/eif)
 #
 # Outputs in <output-dir>:
-#   world-chain-nitro-worker-enclave.eif   the enclave image
+#   world-chain-proof-nitro-enclave.eif   the enclave image
 #   pcrs.json                       PCR0/PCR1/PCR2 measurements
 #
 # Env overrides:

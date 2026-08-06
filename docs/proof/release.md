@@ -14,15 +14,15 @@ and keeps measurement changes reviewable on their own.
 
 ## What a release produces
 
-| Artifact | Notes |
-|:---|:---|
-| `manifest.json` | Single source of truth binding git SHA, ELF sha256s, vkeys, PCRs, and image digests |
-| `vkeys.json` | Range vkey commitment + aggregation vkey, computed from the committed ELFs |
-| `pcrs.json` | PCR0/PCR1/PCR2 of the enclave EIF |
-| `world-chain-nitro-enclave.eif` | Enclave image, built reproducibly (see below) |
-| `world-chain-range-ethereum`, `world-chain-aggregation` | SP1 guest ELFs, rebuilt from source in CI via `sp1_build` (no committed binaries, no hash manifest — see [elf-management.md](./elf-management.md)) |
+| Artifact                                                 | Notes |
+|:---------------------------------------------------------|:---|
+| `manifest.json`                                          | Single source of truth binding git SHA, ELF sha256s, vkeys, PCRs, and image digests |
+| `vkeys.json`                                             | Range vkey commitment + aggregation vkey, computed from the committed ELFs |
+| `pcrs.json`                                              | PCR0/PCR1/PCR2 of the enclave EIF |
+| `world-chain-proof-nitro-enclave.eif`                    | Enclave image, built reproducibly (see below) |
+| `world-chain-range-ethereum`, `world-chain-aggregation`  | SP1 guest ELFs, rebuilt from source in CI via `sp1_build` (no committed binaries, no hash manifest — see [elf-management.md](./elf-management.md)) |
 | `world-chain-proof-<version>-<target>.tar.gz` (+ `.asc`) | GPG-signed `proof` CLI binaries (linux x86_64 / aarch64) |
-| `ghcr.io/worldcoin/world-chain-proof:<version>` | Multi-arch prover image (sp1 + nitro backends, ELFs baked in) |
+| `ghcr.io/worldcoin/world-chain-proof:<version>`          | Multi-arch prover image (sp1 + nitro backends, ELFs baked in) |
 
 The draft release notes include a measurements section that diffs the vkeys/PCRs against the
 previous `proof/v*` release and flags when an on-chain registry update is required.
