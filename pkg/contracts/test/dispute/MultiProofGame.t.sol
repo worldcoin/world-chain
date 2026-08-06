@@ -332,8 +332,18 @@ contract MultiProofGameTest is OPStackFixtures {
     function test_ProofThreshold_DefenderWinsAndDuplicateDoesNotCount() public {
         MultiProofGame game = _proposeAtAnchor();
 
-        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId())));
-        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId())));
+        bytes memory laneZero = _compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId()));
+        game.submitProofLane(laneZero);
+
+        // Hoisted: `expectRevert` binds to the next external call, so no getter may follow it.
+        bytes memory expected = abi.encodeWithSelector(
+            IMultiProofGame.DuplicateProofLane.selector,
+            LibProof.ProofLane.VALIDITY_PROOF,
+            game.rootId(),
+            game.proofBitmap()
+        );
+        vm.expectRevert(expected);
+        game.submitProofLane(laneZero);
         assertEq(game.proofBitmap().count(), 1);
 
         vm.prank(challengerAccount);
@@ -629,6 +639,121 @@ contract MultiProofGameTest is OPStackFixtures {
         recovered = proven.credit(proposer) + proven.credit(sybil);
         assertLt(recovered, staked, "self-challenge must lose money");
         assertEq(staked - recovered, PROPOSER_BOND - (PROPOSER_BOND * gameImpl.CHALLENGER_REWARD_BPS()) / 10_000);
+    }
+
+    /// @dev Unchallenged there is no forfeited stake, so the proposer still takes the whole pot.
+    function test_LaneReward_UnchallengedPaysNoProvers() public {
+        MultiProofGame game = _proposeAtAnchor();
+        _submitLanes(game, 2);
+        _resolveUnchallenged(game);
+
+        assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
+        assertEq(game.credit(proposer), PROPOSER_BOND);
+        assertEq(game.credit(proposer), game.totalBonds());
+        assertEq(game.credit(laneRewardRecipient(0)), 0);
+        assertEq(game.credit(laneRewardRecipient(1)), 0);
+    }
+
+    /// @dev A proposer who proves every lane themselves collects the whole forfeited bond.
+    function test_LaneReward_ProposerProvingEveryLaneTakesAll() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory proof = abi.encodePacked(game.rootId());
+
+        game.submitProofLane(_compact(0, proposer, proof));
+        _challenge(game);
+        game.submitProofLane(_compact(1, proposer, proof));
+        game.resolve();
+
+        assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
+        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND);
+        assertEq(game.credit(proposer), game.totalBonds());
+    }
+
+    /// @dev Each lane recipient withdraws independently through the two-phase DelayedWETH claim.
+    function test_LaneReward_RecipientsClaimIndependently() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory proof = abi.encodePacked(game.rootId());
+
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), proof));
+        _challenge(game);
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), proof));
+        game.resolve();
+        _passAirgap(game);
+
+        uint256 share = CHALLENGER_BOND / 3;
+        _claim(game, laneRewardRecipient(0));
+        _claim(game, laneRewardRecipient(1));
+        _claim(game, proposer);
+
+        assertEq(laneRewardRecipient(0).balance, share);
+        assertEq(laneRewardRecipient(1).balance, share);
+        assertEq(weth.balanceOf(address(game)), 0, "game must be fully drained");
+    }
+
+    /// @dev A zero recipient forfeits its share without stranding any other payout.
+    function test_LaneReward_ZeroRecipientForfeitsItsShare() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory proof = abi.encodePacked(game.rootId());
+
+        game.submitProofLane(_compact(0, address(0), proof));
+        _challenge(game);
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), proof));
+        game.resolve();
+
+        uint256 share = CHALLENGER_BOND / 3;
+        assertEq(game.credit(address(0)), share);
+        assertEq(game.credit(laneRewardRecipient(1)), share);
+        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND - 2 * share);
+    }
+
+    /// @dev `laneRecipient` records the first submitter; a duplicate no-op cannot reassign it.
+    function test_LaneReward_DuplicateCannotStealRecipient() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory proof = abi.encodePacked(game.rootId());
+        address thief = makeAddr("lane-thief");
+
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), proof));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMultiProofGame.DuplicateProofLane.selector,
+                LibProof.ProofLane.VALIDITY_PROOF,
+                game.rootId(),
+                game.proofBitmap()
+            )
+        );
+        game.submitProofLane(_compact(0, thief, proof));
+
+        assertEq(game.laneRecipient(0), laneRewardRecipient(0));
+        assertEq(game.proofBitmap().count(), 1);
+    }
+
+    /// @dev A payload too short to carry a header is rejected before any lane is derived.
+    function test_SubmitProofLane_RevertIf_HeaderTruncated() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory truncated = abi.encodePacked(uint8(0), bytes19(0));
+        assertEq(truncated.length, LibProof.PROOF_HEADER_LENGTH - 1);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMultiProofGame.InvalidProof.selector, LibProof.ProofLane.VALIDITY_PROOF, game.rootId()
+            )
+        );
+        game.submitProofLane(truncated);
+    }
+
+    /// @dev A header with no proof after it reaches the verifier and fails closed.
+    function test_SubmitProofLane_RevertIf_PayloadEmpty() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory headerOnly = _compact(0, laneRewardRecipient(0), "");
+        assertEq(headerOnly.length, LibProof.PROOF_HEADER_LENGTH);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMultiProofGame.InvalidProof.selector, LibProof.ProofLane.VALIDITY_PROOF, game.rootId()
+            )
+        );
+        game.submitProofLane(headerOnly);
     }
 
     function test_FirstProofLane_DoesNotExtendChallengeWindow() public {

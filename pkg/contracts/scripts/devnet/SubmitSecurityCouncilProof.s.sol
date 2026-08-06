@@ -38,9 +38,13 @@ contract SubmitSecurityCouncilProof is Script {
         LibProof.TransitionPublicValues memory transition;
         require(verifier.verify(rootId, transition, proof), "Council proof verification failed");
 
+        // Reward recipient for this lane; defaults to the signer when unset.
+        address recipient = vm.envOr("PROOF_RECIPIENT", signer);
+        bytes memory compact = abi.encodePacked(uint8(LibProof.ProofLane.SECURITY_COUNCIL), recipient, proof);
+
         uint256 transactionKey = vm.envOr("PRIVATE_KEY", signerKey);
         vm.startBroadcast(transactionKey);
-        game.submitProofLane(uint8(LibProof.ProofLane.SECURITY_COUNCIL), proof);
+        game.submitProofLane(compact);
         vm.stopBroadcast();
     }
 }

@@ -585,10 +585,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @notice Splits a forfeited challenger bond evenly between the proposer and each proven lane.
-    /// @dev Racing a proof onto a wrongly challenged root is paid for by the challenger who lost.
-    ///      Unchallenged there is no stake to split, so the proposer takes the pot exactly as
-    ///      before. The proposer is the residual claimant, absorbing their own bond and the
-    ///      rounding dust, which keeps `sum(credits) == totalBonds` exact.
     function _creditDefenderWins() internal {
         uint256 stake = claimData.challenger == address(0) ? 0 : challengerBond;
         // The proposer counts alongside each lane, so the divisor is never zero.

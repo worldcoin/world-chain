@@ -233,7 +233,7 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Submits a compact proof payload. Before a challenge, any accepted lane satisfies
     ///         the initial proof requirement; after a challenge, distinct lanes count toward the
-    ///         configured threshold. No-ops when the lane already counts.
+    ///         configured threshold. Reverts when the lane already counts.
     function submitProofLane(bytes calldata proof) external returns (ProposalStatus);
 
     ////////////////////////////////////////////////////////////////
