@@ -148,8 +148,9 @@ install *args='':
 #   Phase 3b  proof-approve-pcrs          – Approve PCR set on verifier
 #   Phase 3c  proof-verify-pcrs           – Assert the RUNNING enclave's PCR set is approved
 #                                            (drift check; safe to run any time)
+#   Upgrade   proof-deploy-validity-verifier – Re-key the SP1 validity lane to the built vkeys
 #   Upgrade   proof-upgrade-game          – Swap the game type 1006 implementation in place
-#                                            (run on its own; NOT part of proof-setup)
+#                                            (both run on their own; NOT part of proof-setup)
 #   Phase 4   proof-register-key          – Register the enclave's generated key on-chain
 #                                            (run separately; NOT part of proof-setup)
 #   Combined  proof-setup                 – Run deploy phases 0a–3c in sequence (does NOT
@@ -467,6 +468,30 @@ proof-activate-system env="alphanet":
     echo "Activating WIP-1006 (require fresh anchor: $REQUIRE_FRESH_ANCHOR)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
     cd pkg/contracts && forge script scripts/devnet/ActivateProofSystem.s.sol:ActivateProofSystem \
         --rpc-url "$L1_RPC_URL" --private-key "$GUARDIAN_KEY" $BROADCAST_FLAG --slow
+
+# Upgrade – Deploy a replacement SP1ValidityVerifier keyed to the committed vkeys.
+#
+# Both vkeys are immutable on the verifier and the verifier is immutable on the game, so
+# re-keying the validity lane means a new verifier followed by a new game implementation.
+# The vkeys are read from the ELF build output rather than typed in, so they cannot drift
+# from the program the SP1 workers actually run.
+proof-deploy-validity-verifier env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    : "${SP1_VERIFIER_GATEWAY:?SP1_VERIFIER_GATEWAY is required (Succinct verifier gateway)}"
+    VKEYS=proofs/backends/sp1/elfs/vkeys.json
+    export AGGREGATION_VKEY=$(jq -r '.aggregation_vkey' "$VKEYS")
+    export RANGE_VKEY_COMMITMENT=$(jq -r '.range_vkey_commitment' "$VKEYS")
+    export CURRENT_GAME_IMPLEMENTATION="${CURRENT_GAME_IMPLEMENTATION:-$(jq -r '.gameImplementation' pkg/contracts/deployments/{{env}}-proof-system.json)}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    echo "Deploying SP1ValidityVerifier (aggregation $AGGREGATION_VKEY)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
+    cd pkg/contracts && forge script scripts/devnet/DeployValidityVerifier.s.sol:DeployValidityVerifier \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Upgrade – Swap the registered game implementation for game type 1006, in place.
 #
