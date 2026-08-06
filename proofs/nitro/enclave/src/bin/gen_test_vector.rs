@@ -3,7 +3,7 @@
 //! The output is the expected `collect_hints` byte string for the fixed vector.
 use p384::ecdsa::{Signature, SigningKey, signature::Signer};
 use sha2::{Digest, Sha384};
-use world_chain_proof_nitro::p384_hints::collect_hints;
+use world_chain_proof_nitro_enclave::p384_hints::collect_hints;
 
 fn main() {
     // Fixed 48-byte private scalar (all 0x01 bytes — a known weak key, fine for test vectors)

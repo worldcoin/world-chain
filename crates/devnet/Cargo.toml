@@ -18,13 +18,13 @@ world-chain-primitives.workspace = true
 world-chain-proofs.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-kona-host-utils.workspace = true
+world-chain-proof-sp1-worker = { workspace = true, default-features = false }
 world-chain-proof-succinct-host-utils = { workspace = true, features = ["sp1"] }
 world-chain-proof-worker.workspace = true
 world-chain-proposer.workspace = true
 world-chain-prover-service.workspace = true
 world-chain-defender.workspace = true
 world-chain-rpc.workspace = true
-world-chain-sp1-worker = { workspace = true, default-features = false }
 world-chain-test-utils.workspace = true
 
 alloy-provider.workspace = true

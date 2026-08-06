@@ -1,6 +1,6 @@
 //! Wire protocol shared by the Nitro host and the in-enclave guest binary.
 //!
-//! Framing is intentionally trivial: each message is `u32` big-endian length followed by a
+//! Framing is intentionally trivial: each message is `u64` big-endian length followed by a
 //! CBOR-encoded [`EnclaveRequest`] or [`EnclaveResponse`]. We deliberately avoid using rkyv
 //! for the outer envelope so that the protocol stays decoupled from the inner witness format
 //! and can be evolved (versioned) without re-generating archived layouts. The inner witness
@@ -11,6 +11,7 @@ use alloy_primitives::B256;
 use alloy_sol_types::SolValue;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::TryReserveError;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use world_chain_proof_core::boot::TransitionPublicValues;
 
@@ -20,8 +21,18 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// Default vsock port the enclave binary listens on.
 pub const DEFAULT_VSOCK_PORT: u32 = 5005;
 
-/// Maximum frame size accepted on the wire (256 MiB).
-pub const MAX_FRAME_BYTES: u32 = 256 * 1024 * 1024;
+/// Maximum frame size accepted on the wire (2 GiB).
+///
+/// The cap prevents a malformed peer-controlled length prefix from forcing an unbounded
+/// allocation inside the enclave. Nitro deployments must provision enough memory for both the
+/// encoded frame and the decoded witness to coexist temporarily.
+pub const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024 * 1024;
+
+/// Maximum bytes passed to one vsock `write` operation.
+///
+/// Keeping writes below the Linux linear-SKB threshold avoids corruption observed when large
+/// virtio-vsock writes are represented by nonlinear, multi-descriptor socket buffers.
+const MAX_WRITE_BYTES: usize = 28 * 1024;
 
 /// Requests the host can send to the enclave.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -32,6 +43,10 @@ pub enum EnclaveRequest {
         /// Protocol version the host expects.
         version: u32,
         /// rkyv-serialized `WorldRangeWitnessData`.
+        ///
+        /// `serde_bytes` is required here so CBOR represents the witness as one byte string
+        /// instead of an array of individually encoded integers.
+        #[serde(with = "serde_bytes")]
         witness_rkyv: Vec<u8>,
         /// Optional host-computed public values the enclave must match before signing.
         expected_transition_public_values: Option<TransitionPublicValues>,
@@ -106,15 +121,20 @@ where
 {
     let mut buf = Vec::with_capacity(1024);
     ciborium::into_writer(value, &mut buf).map_err(|err| FrameError::Encode(err.to_string()))?;
-    let len: u32 = buf
+    if buf.len() > MAX_FRAME_BYTES {
+        return Err(FrameError::FrameTooLarge {
+            len: buf.len() as u64,
+            limit: MAX_FRAME_BYTES,
+        });
+    }
+    let len: u64 = buf
         .len()
         .try_into()
-        .map_err(|_| FrameError::FrameTooLarge(buf.len()))?;
-    if len > MAX_FRAME_BYTES {
-        return Err(FrameError::FrameTooLarge(buf.len()));
-    }
+        .map_err(|_| FrameError::LengthOverflow(buf.len()))?;
     writer.write_all(&len.to_be_bytes()).await?;
-    writer.write_all(&buf).await?;
+    for chunk in buf.chunks(MAX_WRITE_BYTES) {
+        writer.write_all(chunk).await?;
+    }
     writer.flush().await?;
     Ok(())
 }
@@ -125,13 +145,20 @@ where
     R: AsyncReadExt + Unpin,
     T: for<'de> Deserialize<'de>,
 {
-    let mut len_bytes = [0u8; 4];
+    let mut len_bytes = [0u8; 8];
     reader.read_exact(&mut len_bytes).await?;
-    let len = u32::from_be_bytes(len_bytes);
-    if len > MAX_FRAME_BYTES {
-        return Err(FrameError::FrameTooLarge(len as usize));
+    let wire_len = u64::from_be_bytes(len_bytes);
+    if wire_len > MAX_FRAME_BYTES as u64 {
+        return Err(FrameError::FrameTooLarge {
+            len: wire_len,
+            limit: MAX_FRAME_BYTES,
+        });
     }
-    let mut buf = vec![0u8; len as usize];
+    let len = usize::try_from(wire_len).map_err(|_| FrameError::UnsupportedLength(wire_len))?;
+    let mut buf = Vec::new();
+    buf.try_reserve_exact(len)
+        .map_err(|source| FrameError::Allocation { len, source })?;
+    buf.resize(len, 0);
     reader.read_exact(&mut buf).await?;
     let value =
         ciborium::from_reader(buf.as_slice()).map_err(|err| FrameError::Decode(err.to_string()))?;
@@ -151,8 +178,28 @@ pub enum FrameError {
     #[error("frame decode failed: {0}")]
     Decode(String),
     /// Frame exceeds the maximum allowed size.
-    #[error("frame too large: {0} bytes")]
-    FrameTooLarge(usize),
+    #[error("frame too large: {len} bytes exceeds limit of {limit} bytes")]
+    FrameTooLarge {
+        /// Encoded or peer-declared frame length.
+        len: u64,
+        /// Maximum accepted frame length.
+        limit: usize,
+    },
+    /// A local encoded buffer cannot be represented by the wire length type.
+    #[error("frame length does not fit in u64: {0} bytes")]
+    LengthOverflow(usize),
+    /// A peer-declared length cannot be represented on the current platform.
+    #[error("frame length is unsupported on this platform: {0} bytes")]
+    UnsupportedLength(u64),
+    /// Memory for an accepted frame could not be reserved.
+    #[error("failed to allocate {len} bytes for frame: {source}")]
+    Allocation {
+        /// Requested allocation length.
+        len: usize,
+        /// Allocation failure returned by `Vec`.
+        #[source]
+        source: TryReserveError,
+    },
 }
 
 /// Computes the canonical commitment used for attestation and signing.
@@ -173,8 +220,40 @@ pub fn sha256_b256(bytes: &[u8]) -> B256 {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
     use super::*;
     use alloy_primitives::B256;
+    use tokio::io::AsyncWrite;
+
+    #[derive(Default)]
+    struct RecordingWriter {
+        bytes: Vec<u8>,
+        max_write: usize,
+    }
+
+    impl AsyncWrite for RecordingWriter {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            self.max_write = self.max_write.max(buf.len());
+            self.bytes.extend_from_slice(buf);
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
 
     fn transition_public_values() -> TransitionPublicValues {
         TransitionPublicValues {
@@ -227,5 +306,88 @@ mod tests {
             transition_commitment(&values),
             *alloy_primitives::keccak256(values.abi_encode())
         );
+    }
+
+    #[test]
+    fn range_witness_is_encoded_as_a_cbor_byte_string() {
+        // Values above CBOR's inline-integer range would take two bytes each if this field were
+        // accidentally encoded as an array of integers instead of one byte string.
+        let witness_rkyv = vec![0xFF; 4096];
+        let request = EnclaveRequest::Range {
+            version: PROTOCOL_VERSION,
+            witness_rkyv: witness_rkyv.clone(),
+            expected_transition_public_values: None,
+            nonce: [0; 32],
+        };
+
+        let mut encoded = Vec::new();
+        ciborium::into_writer(&request, &mut encoded).unwrap();
+        let value: ciborium::Value = ciborium::from_reader(encoded.as_slice()).unwrap();
+        let ciborium::Value::Map(fields) = value else {
+            panic!("range request must encode as a CBOR map");
+        };
+        let encoded_witness = fields
+            .iter()
+            .find_map(|(key, value)| match key {
+                ciborium::Value::Text(key) if key == "witness_rkyv" => Some(value),
+                _ => None,
+            })
+            .expect("range request must contain witness_rkyv");
+
+        assert_eq!(encoded_witness, &ciborium::Value::Bytes(witness_rkyv));
+    }
+
+    #[tokio::test]
+    async fn frame_round_trip_uses_u64_length_and_throttled_writes() {
+        let witness_rkyv = vec![0xAB; MAX_WRITE_BYTES * 3];
+        let request = EnclaveRequest::Range {
+            version: PROTOCOL_VERSION,
+            witness_rkyv: witness_rkyv.clone(),
+            expected_transition_public_values: None,
+            nonce: [7; 32],
+        };
+        let mut writer = RecordingWriter::default();
+
+        write_frame(&mut writer, &request).await.unwrap();
+
+        assert!(writer.max_write <= MAX_WRITE_BYTES);
+        let declared_len = u64::from_be_bytes(writer.bytes[..8].try_into().unwrap());
+        assert_eq!(declared_len, (writer.bytes.len() - 8) as u64);
+
+        let mut reader = writer.bytes.as_slice();
+        let decoded: EnclaveRequest = read_frame(&mut reader).await.unwrap();
+        match decoded {
+            EnclaveRequest::Range {
+                version,
+                witness_rkyv: decoded_witness,
+                expected_transition_public_values,
+                nonce,
+            } => {
+                assert_eq!(version, PROTOCOL_VERSION);
+                assert_eq!(decoded_witness, witness_rkyv);
+                assert_eq!(expected_transition_public_values, None);
+                assert_eq!(nonce, [7; 32]);
+            }
+            other => panic!("expected range request, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_frame_is_rejected_before_reading_a_body() {
+        let oversized_len = MAX_FRAME_BYTES as u64 + 1;
+        let prefix = oversized_len.to_be_bytes();
+        let mut reader = prefix.as_slice();
+
+        let err = read_frame::<_, EnclaveRequest>(&mut reader)
+            .await
+            .expect_err("oversized length must be rejected");
+
+        assert!(matches!(
+            err,
+            FrameError::FrameTooLarge {
+                len,
+                limit: MAX_FRAME_BYTES
+            } if len == oversized_len
+        ));
     }
 }

@@ -8,13 +8,13 @@ use backon::{ExponentialBuilder, Retryable};
 use clap::Parser;
 use tracing::{error, info};
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_nitro_worker::{NitroBackend, NitroBackendConfig, build_expected_pcrs};
 use world_chain_proof_kona_host_utils::online::{
     build_online_config, hardfork_config_from_chain_spec,
 };
-use world_chain_proof_nitro::register::{
+use world_chain_proof_nitro_enclave::register::{
     RegisterParams, RegistrationOutcome, register_enclave_key,
 };
+use world_chain_proof_nitro_worker::{NitroBackend, NitroBackendConfig, build_expected_pcrs};
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
@@ -177,7 +177,7 @@ pub struct WorkerArgs {
     #[arg(
         long,
         env = "ENCLAVE_PORT",
-        default_value_t = world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT
+        default_value_t = world_chain_proof_nitro_enclave::protocol::DEFAULT_VSOCK_PORT
     )]
     enclave_port: u32,
 

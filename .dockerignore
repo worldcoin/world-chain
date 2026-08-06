@@ -1,5 +1,5 @@
 target/
-!target/eif/world-chain-nitro-worker-enclave.eif
+!target/eif/world-chain-proof-nitro-enclave.eif
 .env/
 pkg/contracts/
 assets/

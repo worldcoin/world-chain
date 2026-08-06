@@ -1,4 +1,4 @@
-//! Entry point for the `world-chain-nitro-enclave` binary.
+//! Entry point for the `world-chain-proof-nitro-enclave` binary.
 //!
 //! This file runs **inside** the Nitro Enclave. It is the same role the SP1 range program
 //! plays for the Succinct backend: it ingests a witness, drives the OP Stack derivation
@@ -6,13 +6,13 @@
 //! integrity is established by an NSM-attested `COSE_Sign1` document rather than a ZK proof.
 //!
 //! Communication with the host happens over vsock using the framing defined in
-//! [`world_chain_proof_nitro::protocol`].
+//! [`world_chain_proof_nitro_enclave::protocol`].
 //!
 //! Build with the `enclave` feature:
 //!
 //! ```sh
-//! cargo build --release --bin world-chain-nitro-enclave \
-//!     -p world-chain-proof-nitro --features enclave
+//! cargo build --release --bin world-chain-proof-nitro-enclave \
+//!     -p world-chain-proof-nitro-enclave --features enclave
 //! ```
 
 #![cfg(feature = "enclave")]
@@ -22,7 +22,7 @@ use anyhow::Result;
 #[cfg(target_os = "linux")]
 use tracing_subscriber::EnvFilter;
 #[cfg(target_os = "linux")]
-use world_chain_proof_nitro::enclave;
+use world_chain_proof_nitro_enclave::enclave;
 
 #[cfg(target_os = "linux")]
 #[tokio::main]
@@ -40,5 +40,5 @@ async fn main() -> Result<()> {
 
 #[cfg(not(target_os = "linux"))]
 fn main() {
-    eprintln!("world-chain-nitro-enclave is only supported on Linux");
+    eprintln!("world-chain-proof-nitro-enclave is only supported on Linux");
 }

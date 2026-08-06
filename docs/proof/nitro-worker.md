@@ -36,22 +36,22 @@ The `nitro-worker` Kubernetes pod contains two containers:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  EC2 Node (Nitro-capable)                                               │
 │                                                                         │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │  nitro-worker Pod                                                │  │
-│  │                                                                  │  │
-│  │  ┌──────────────────────────┐  ┌──────────────────────────────┐ │  │
-│  │  │  nitro-worker (main)     │  │  enclave-launcher (sidecar)  │ │  │
-│  │  │                          │  │                              │ │  │
-│  │  │  polls prover-service    │  │  runs nitro-cli run-enclave  │ │  │
-│  │  │  builds witnesses        │  │  writes CID ─────────────────┼─┼► │
-│  │  │  sends to enclave        │  │  to /run/nitro-shared/       │ │  │
-│  │  │  reads CID ◄─────────────┼──┼──────────────────────────── │ │  │
-│  │  └────────────┬─────────────┘  └──────────────────────────────┘ │  │
-│  └───────────────┼────────────────────────────────────────────────── ┘  │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  nitro-worker Pod                                                 │  │
+│  │                                                                   │  │
+│  │  ┌──────────────────────────┐  ┌───────────────────────────────┐  │  │
+│  │  │  nitro-worker (main)     │  │  enclave-launcher (sidecar)   │  │  │
+│  │  │                          │  │                               │  │  │
+│  │  │  polls prover-service    │  │  runs nitro-cli run-enclave   │  │  │
+│  │  │  builds witnesses        │  │  writes CID ──────────────────┼──┼► │
+│  │  │  sends to enclave        │  │  to /run/nitro-shared/        │  │  │
+│  │  │  reads CID ◄─────────────┼──┼────────────────────────────   │  │  │
+│  │  └────────────┬─────────────┘  └───────────────────────────────┘  │  │
+│  └───────────────┼───────────────────────────────────────────────────┘  │
 │                  │ vsock (CID from /run/nitro-shared/enclave-cid)       │
 │                  ▼                                                      │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │  AWS Nitro Enclave  (world-chain-nitro-enclave)                   │  │
+│  │  AWS Nitro Enclave  (world-chain-proof-nitro-enclave)             │  │
 │  │                                                                   │  │
 │  │  - Listens on vsock port 5005                                     │  │
 │  │  - Re-executes Kona derivation pipeline                           │  │
@@ -654,16 +654,17 @@ will be needed (see the [KMS improvement proposal](#future-improvement-kms-based
 ```yaml
 resources:
   limits:
-    hugepages-1Gi: <size>          # Nitro Enclaves require hugepages
+    hugepages-1Gi: 16Gi            # Matches the launcher default enclave allocation
     aws.ec2.nitro/nitro_enclaves: 1 # Device plugin for enclave access
 ```
 
 - **Hugepages (1 GiB):** Nitro Enclaves allocate memory from hugepages, not regular
-  memory.
+  memory. The launcher defaults to a 16 GiB enclave because a large frame and its decoded
+  witness coexist temporarily.
 - **Nitro Enclave device:** The `aws.ec2.nitro/nitro_enclaves` resource request tells
   the Kubernetes device plugin to expose the `/dev/nitro_enclaves` device to the pod.
-- The underlying EC2 instance must be a Nitro Enclave-capable instance type (e.g.,
-  `m5.xlarge` or larger with enclave support enabled).
+- The underlying EC2 instance must be Nitro Enclave-capable and have enough additional memory
+  for the host worker and operating system after reserving the enclave's 16 GiB.
 
 ### Shared Volume
 
@@ -731,7 +732,7 @@ a debug enclave is indistinguishable from a forged one.
 | `--poll-interval-seconds` / `POLL_INTERVAL_SECONDS` | Seconds between prover-service polls | `10` |
 | `--max-concurrent-jobs` | Max jobs proved in parallel | `1` |
 
-### `world-chain-nitro-enclave` (Enclave Binary)
+### `world-chain-proof-nitro-enclave` (Enclave Binary)
 
 | Env Var | Description | Default |
 |---------|-------------|---------|
@@ -741,8 +742,11 @@ a debug enclave is indistinguishable from a forged one.
 
 | Field | Format |
 |-------|--------|
-| Message length | 4 bytes, big-endian `u32` |
-| Message body | CBOR-encoded `EnclaveRequest` or `EnclaveResponse` |
+| Message length | 8 bytes, big-endian `u64` (hard-capped at 2 GiB) |
+| Message body | CBOR-encoded `EnclaveRequest` or `EnclaveResponse`; range witnesses use a CBOR byte string |
+
+Large frames are written to vsock in chunks of at most 28 KiB. The enclave rejects an
+oversized length prefix before allocating its receive buffer.
 
 ### `world-chain-prover-nitro` CLI Commands
 

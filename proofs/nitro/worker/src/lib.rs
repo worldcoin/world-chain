@@ -29,7 +29,7 @@ use tracing::info;
 use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input,
 };
-use world_chain_proof_nitro::{
+use world_chain_proof_nitro_enclave::{
     ExpectedPcrs, NitroRangeProofRequest,
     host::{EnclaveEndpoint, NitroProver},
 };
@@ -202,17 +202,17 @@ pub fn build_expected_pcrs(
     }
 }
 
-pub fn hex_to_pcr(s: &str) -> Result<[u8; world_chain_proof_nitro::PCR_LEN]> {
+pub fn hex_to_pcr(s: &str) -> Result<[u8; world_chain_proof_nitro_enclave::PCR_LEN]> {
     let bytes =
         hex::decode(s.trim_start_matches("0x")).with_context(|| format!("invalid PCR hex: {s}"))?;
-    if bytes.len() != world_chain_proof_nitro::PCR_LEN {
+    if bytes.len() != world_chain_proof_nitro_enclave::PCR_LEN {
         bail!(
             "PCR must be {} bytes, got {}",
-            world_chain_proof_nitro::PCR_LEN,
+            world_chain_proof_nitro_enclave::PCR_LEN,
             bytes.len()
         );
     }
-    let mut arr = [0u8; world_chain_proof_nitro::PCR_LEN];
+    let mut arr = [0u8; world_chain_proof_nitro_enclave::PCR_LEN];
     arr.copy_from_slice(&bytes);
     Ok(arr)
 }

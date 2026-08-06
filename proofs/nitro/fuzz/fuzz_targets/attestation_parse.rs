@@ -4,7 +4,7 @@
 //! contract is: never panic, never hang — return `Err` instead.
 
 use libfuzzer_sys::fuzz_target;
-use world_chain_proof_nitro::attestation::parse_attestation_doc;
+use world_chain_proof_nitro_enclave::attestation::parse_attestation_doc;
 
 fuzz_target!(|data: &[u8]| {
     // Malformed input must be rejected, not crash the host.
