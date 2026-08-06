@@ -45,7 +45,7 @@ import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 
 /// @title MultiProofGame
 /// @author World Contributors
-/// @notice A Multi Proof `IDisputeGame` supporing 3 different proof 'lanes'.
+/// @notice A Multi Proof `IDisputeGame` supporting three different proof 'lanes'.
 ///     1.) ZK Validity Proof via Succinct Prover
 ///     2.) AWS Nitro Enclave Attestation
 ///     3.) Security Council Attestations
