@@ -18746,13 +18746,13 @@ dependencies = [
  "world-chain-primitives",
  "world-chain-proof-core",
  "world-chain-proof-kona-host-utils",
+ "world-chain-proof-sp1-worker",
  "world-chain-proof-succinct-host-utils",
  "world-chain-proof-worker",
  "world-chain-proofs",
  "world-chain-proposer",
  "world-chain-prover-service",
  "world-chain-rpc",
- "world-chain-sp1-worker",
  "world-chain-test-utils",
 ]
 
@@ -19197,6 +19197,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-proof-sp1-worker"
+version = "2.4.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "anyhow",
+ "async-trait",
+ "clap",
+ "dotenvy",
+ "reqwest 0.12.28",
+ "serde_cbor",
+ "serde_json",
+ "telemetry-batteries",
+ "testcontainers",
+ "testcontainers-modules",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "world-chain-chainspec",
+ "world-chain-proof-core",
+ "world-chain-proof-kona-host-utils",
+ "world-chain-proof-metrics",
+ "world-chain-proof-succinct-host-utils",
+ "world-chain-proof-succinct-utils",
+ "world-chain-proof-worker",
+ "world-chain-proofs",
+ "world-chain-prover-service",
+]
+
+[[package]]
 name = "world-chain-proof-succinct-elfs"
 version = "2.4.0"
 dependencies = [
@@ -19451,36 +19481,6 @@ dependencies = [
  "world-chain-evm",
  "world-chain-primitives",
  "world-chain-validator",
-]
-
-[[package]]
-name = "world-chain-sp1-worker"
-version = "2.4.0"
-dependencies = [
- "alloy-primitives",
- "alloy-sol-types",
- "anyhow",
- "async-trait",
- "clap",
- "dotenvy",
- "reqwest 0.12.28",
- "serde_cbor",
- "serde_json",
- "telemetry-batteries",
- "testcontainers",
- "testcontainers-modules",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "world-chain-chainspec",
- "world-chain-proof-core",
- "world-chain-proof-kona-host-utils",
- "world-chain-proof-metrics",
- "world-chain-proof-succinct-host-utils",
- "world-chain-proof-succinct-utils",
- "world-chain-proof-worker",
- "world-chain-proofs",
- "world-chain-prover-service",
 ]
 
 [[package]]

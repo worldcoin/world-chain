@@ -56,6 +56,7 @@ use world_chain_proof_core::{
     boot::TransitionPublicValues, hash_world_rollup_config, range::WorldRangeHardforkConfig,
 };
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
+use world_chain_proof_sp1_worker::{Sp1Backend, Sp1BackendConfig};
 use world_chain_proof_succinct_host_utils::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
@@ -74,7 +75,6 @@ use world_chain_prover_service::{
     ProofBackend, ProofData, ProverService, ProverServiceConfig, RpcProverServiceClient,
     start_rpc_server,
 };
-use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig};
 use world_chain_test_utils::DEV_CHAIN_ID;
 
 use crate::{

@@ -32,6 +32,9 @@ use alloy_primitives::{Address, B256};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres;
 use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
+use world_chain_proof_sp1_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
+};
 use world_chain_proof_succinct_host_utils::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
@@ -43,9 +46,6 @@ use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
     ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
-};
-use world_chain_sp1_worker::{
-    ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
 };
 
 /// Reads a required env var, or returns `None` (with a skip message) when absent.
