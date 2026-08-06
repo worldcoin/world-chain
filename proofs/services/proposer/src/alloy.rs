@@ -368,7 +368,7 @@ where
 {
     /// Reads an L2 block number from a game contract.
     pub async fn game_l2_block_number(&self, game: Address) -> Result<u64, ProposerError> {
-        let l2_block_number = self.game(game).l2BlockNumber().call().await?;
+        let l2_block_number = self.game(game).l2SequenceNumber().call().await?;
 
         u256_to_u64(l2_block_number)
     }

@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
+
+/// @title LibProof
+/// @author World Contributors
+/// @custom:security-contact security@toolsforhumanity.com
+library LibProof {
+    /// @dev Quantifies the number of proof lanes in the MultiProofGame.
+    uint8 internal constant PROOF_LANE_COUNT = 3;
+
+    /// @dev Version of the proof-domain encoding.
+    uint256 internal constant PROOF_SYSTEM_VERSION = 1;
+
+    enum InvalidationReason {
+        NONE,
+        PROOF_TIMEOUT,
+        INVALID_PARENT
+    }
+
+    enum ProofLane {
+        VALIDITY_PROOF,
+        TEE_ATTESTATION,
+        SECURITY_COUNCIL
+    }
+
+    /// ABI-encoded public values shared by all transition proof lanes.
+    /// Must match `world_chain_proof_core::boot::TransitionPublicValues`.
+    struct TransitionPublicValues {
+        bytes32 l1Head;
+        bytes32 l2PreRoot;
+        uint64 l2PreBlockNumber;
+        bytes32 l2PostRoot;
+        uint64 l2PostBlockNumber;
+        bytes32 rollupConfigHash;
+    }
+
+    /// Commitment binding a deployment to its chain, proof-system version, rollup
+    /// configuration, and proposal cadence.
+    function domainHash(uint256 chainId, uint256 proofSystemVersion, bytes32 rollupConfigHash, uint256 blockInterval)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(chainId, proofSystemVersion, rollupConfigHash, blockInterval));
+    }
+
+    function rootId(
+        bytes32 domainHash_,
+        address parentRef,
+        bytes32 rootClaim,
+        uint256 l2BlockNumber,
+        bytes32 l1OriginHash,
+        uint256 l1OriginNumber
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber, l1OriginHash, l1OriginNumber));
+    }
+
+    /// Selects the verifier backing `lane`.
+    function verifierFor(
+        ProofLane lane,
+        IWorldChainProofVerifier validityProofVerifier,
+        IWorldChainProofVerifier teeVerifier,
+        IWorldChainProofVerifier securityCouncil
+    ) internal pure returns (IWorldChainProofVerifier) {
+        if (lane == ProofLane.VALIDITY_PROOF) return validityProofVerifier;
+        if (lane == ProofLane.TEE_ATTESTATION) return teeVerifier;
+        return securityCouncil;
+    }
+
+    function laneMask(ProofLane lane) internal pure returns (uint8) {
+        return uint8(1) << uint8(lane);
+    }
+
+    function proofCount(uint8 bitmap) internal pure returns (uint8 count) {
+        for (uint8 i = 0; i < PROOF_LANE_COUNT; i++) {
+            if ((bitmap & (uint8(1) << i)) != 0) {
+                count++;
+            }
+        }
+    }
+
+    function hasThreshold(uint8 bitmap, uint8 threshold) internal pure returns (bool) {
+        return proofCount(bitmap) >= threshold;
+    }
+}

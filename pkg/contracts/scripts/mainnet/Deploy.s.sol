@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import {Script} from "@forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {PBHEntryPointImplV1} from "../../src/PBHEntryPointImplV1.sol";
-import {PBHSignatureAggregator} from "../../src/PBHSignatureAggregator.sol";
+import {PBHEntryPointImplV1} from "../../src/pbh/PBHEntryPointImplV1.sol";
+import {PBHSignatureAggregator} from "../../src/pbh/PBHSignatureAggregator.sol";
 import {console} from "forge-std/console.sol";
 import {IWorldID} from "@world-id-contracts/interfaces/IWorldID.sol";
 import {IPBHEntryPoint} from "../../src/interfaces/IPBHEntryPoint.sol";

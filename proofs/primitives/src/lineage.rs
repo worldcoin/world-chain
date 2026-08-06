@@ -266,11 +266,11 @@ where
 
     let implementation =
         IMultiProofGame::IMultiProofGameInstance::new(implementation_address, provider.clone());
-    let (domain_hash, anchor_registry, domain) = provider
+    let (domain_hash, anchor_registry, block_interval) = provider
         .multicall()
         .add(implementation.domainHash())
         .add(implementation.anchorStateRegistry())
-        .add(implementation.domain())
+        .add(implementation.blockInterval())
         .aggregate()
         .await
         .map_err(|error| LineageError::Contract(error.to_string()))?;
@@ -279,10 +279,9 @@ where
             "registered game implementation has no anchor registry".into(),
         ));
     }
-    let block_interval = domain
-        .blockInterval
+    let block_interval = block_interval
         .try_into()
-        .map_err(|_| LineageError::Contract("domain.blockInterval overflows u64".into()))?;
+        .map_err(|_| LineageError::Contract("blockInterval overflows u64".into()))?;
     if block_interval == 0 {
         return Err(LineageError::ZeroBlockInterval);
     }

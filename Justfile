@@ -379,7 +379,6 @@ proof-deploy-mocks env="alphanet":
     set -euo pipefail
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
-    export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
@@ -417,9 +416,6 @@ proof-deploy-system env="alphanet":
     : "${VALIDITY_PROOF_VERIFIER:?VALIDITY_PROOF_VERIFIER is required (e.g. SP1ValidityVerifier; devnet: proof-deploy-mocks)}"
     : "${TEE_VERIFIER:?TEE_VERIFIER is required (e.g. NitroProofVerifier from proof-deploy-nitro)}"
     : "${SECURITY_COUNCIL_VERIFIER:?SECURITY_COUNCIL_VERIFIER is required (council attestation verifier)}"
-    : "${STAKING_REGISTRY:?STAKING_REGISTRY is required (IWorldChainStakingRegistry implementation)}"
-    export PROOF_SYSTEM_BLOCK_INTERVAL="${PROOF_SYSTEM_BLOCK_INTERVAL:-10}"
-    export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
     export CHALLENGE_PERIOD="${CHALLENGE_PERIOD:-86400}"
     export PROOF_PERIOD="${PROOF_PERIOD:-604800}"
     export PROPOSER_BOND="${PROPOSER_BOND:-10000000000000000}"
@@ -738,10 +734,9 @@ proof-setup env="alphanet":
     # Any lane without a real verifier falls back to a test double, deployed explicitly
     # here rather than silently inside proof-deploy-system. Each unset lane is named so a
     # mocked deployment is obvious in the log.
-    if [ -z "${VALIDITY_PROOF_VERIFIER:-}" ] || [ -z "${SECURITY_COUNCIL_VERIFIER:-}" ] \
-       || [ -z "${STAKING_REGISTRY:-}" ]; then
+    if [ -z "${VALIDITY_PROOF_VERIFIER:-}" ] || [ -z "${SECURITY_COUNCIL_VERIFIER:-}" ]; then
         echo "=== Step 1b: Deploying test doubles for unset lanes ===" >&2
-        for v in VALIDITY_PROOF_VERIFIER SECURITY_COUNCIL_VERIFIER STAKING_REGISTRY; do
+        for v in VALIDITY_PROOF_VERIFIER SECURITY_COUNCIL_VERIFIER; do
             eval "val=\${$v:-}"
             [ -z "$val" ] && echo "  MOCKED: $v" >&2
         done
@@ -749,9 +744,8 @@ proof-setup env="alphanet":
         MOCKS="pkg/contracts/deployments/{{env}}-proof-mocks.json"
         : "${VALIDITY_PROOF_VERIFIER:=$(jq -r '.validityProofVerifier' "$MOCKS")}"
         : "${SECURITY_COUNCIL_VERIFIER:=$(jq -r '.securityCouncil' "$MOCKS")}"
-        : "${STAKING_REGISTRY:=$(jq -r '.stakingRegistry' "$MOCKS")}"
     fi
-    export VALIDITY_PROOF_VERIFIER SECURITY_COUNCIL_VERIFIER STAKING_REGISTRY
+    export VALIDITY_PROOF_VERIFIER SECURITY_COUNCIL_VERIFIER
 
     echo "=== Step 2: Deploying proof system contracts ===" >&2
     just dry_run={{dry_run}} proof-deploy-system {{env}}
