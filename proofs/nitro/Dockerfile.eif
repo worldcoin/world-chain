@@ -8,7 +8,7 @@
 # Environment variables (defaults shown):
 #   EIF_PATH              /home/world-chain-nitro-worker-enclave.eif
 #   ENCLAVE_CPU_COUNT     2
-#   ENCLAVE_MEMORY_SIZE   512   (MiB)
+#   ENCLAVE_MEMORY_SIZE   16384 (MiB)
 #   ENCLAVE_DEBUG_MODE    false  (set to "true" or "1" to pass --debug-mode)
 
 FROM public.ecr.aws/amazonlinux/amazonlinux:2023
@@ -22,7 +22,7 @@ COPY target/eif/world-chain-nitro-worker-enclave.eif /home/world-chain-nitro-wor
 # Defaults; override at runtime via -e / K8s env:.
 ENV EIF_PATH="/home/world-chain-nitro-worker-enclave.eif" \
     ENCLAVE_CPU_COUNT=2 \
-    ENCLAVE_MEMORY_SIZE=512 \
+    ENCLAVE_MEMORY_SIZE=16384 \
     ENCLAVE_DEBUG_MODE=false
 
 COPY <<'EOF' /home/run.sh
