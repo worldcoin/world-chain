@@ -1,8 +1,6 @@
-use crate::{error::DefenderError, traits::DefenderClient, types::GameMetadata};
-use alloy_primitives::{Bytes, U256};
-use alloy_sol_types::SolValue;
+use crate::{traits::DefenderClient, types::GameMetadata};
+use alloy_primitives::Bytes;
 use tracing::{error, info, warn};
-use world_chain_proof_core::boot::TransitionPublicValues;
 use world_chain_proofs::ProofLane;
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
@@ -171,17 +169,7 @@ where
 
         match self
             .execution_client
-            .submit_proof(
-                game,
-                lane as u8,
-                match encode_proof(metadata, &response.proof) {
-                    Ok(proof) => proof,
-                    Err(error) => {
-                        error!(game_address = %game, proof_id = %id, ?lane, %error, "prover returned an invalid proof payload");
-                        return LaneState::Abandoned;
-                    }
-                },
-            )
+            .submit_proof(game, lane as u8, encode_proof(&response.proof))
             .await
         {
             Ok(submission) => {
@@ -260,101 +248,32 @@ fn proof_request(game: &GameMetadata, backend: ProofBackend) -> ProofRequest {
 }
 
 /// Encodes the verifier-specific payload passed to `submitProofLane`.
-fn encode_proof(metadata: &GameMetadata, proof: &ProofData) -> Result<Bytes, DefenderError> {
-    let l1_origin_number = U256::from(metadata.l1_origin_number);
+fn encode_proof(proof: &ProofData) -> Bytes {
     match proof {
-        ProofData::Sp1 {
-            proof,
-            public_values,
-        } => Ok((
-            metadata.domain_hash,
-            metadata.parent_ref,
-            l1_origin_number,
-            public_values.clone(),
-            proof.clone(),
-        )
-            .abi_encode_params()
-            .into()),
-        ProofData::Nitro {
-            attestation: _,
-            public_values,
-            signature,
-        } => {
-            // The prover API transports public values as bytes, but NitroProofVerifier embeds
-            // TransitionPublicValues as a static tuple. Encoding the bytes directly would add a
-            // dynamic ABI offset and produce a payload the verifier cannot decode.
-            let transition = <TransitionPublicValues as SolValue>::abi_decode(public_values)
-                .map_err(|error| DefenderError::ProofEncoding(error.to_string()))?;
-            Ok((
-                metadata.domain_hash,
-                metadata.parent_ref,
-                l1_origin_number,
-                transition,
-                signature.clone(),
-            )
-                .abi_encode_params()
-                .into())
-        }
+        ProofData::Sp1 { proof, .. } => proof.clone(),
+        ProofData::Nitro { signature, .. } => signature.clone(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, B256};
 
     #[test]
-    fn nitro_encoding_matches_verifier_payload() {
-        let transition = TransitionPublicValues {
-            l1Head: B256::repeat_byte(0x11),
-            l2PreRoot: B256::repeat_byte(0x22),
-            l2PreBlockNumber: 10,
-            l2PostRoot: B256::repeat_byte(0x33),
-            l2PostBlockNumber: 20,
-            rollupConfigHash: B256::repeat_byte(0x44),
+    fn proof_encoding_forwards_verifier_payload() {
+        let sp1_proof = Bytes::from_static(b"sp1 proof");
+        let sp1 = ProofData::Sp1 {
+            proof: sp1_proof.clone(),
+            public_values: Bytes::from_static(b"public values"),
         };
-        let metadata = GameMetadata {
-            address: Address::repeat_byte(0x55),
-            domain_hash: B256::repeat_byte(0x66),
-            parent_ref: Address::repeat_byte(0x77),
-            root_claim: transition.l2PostRoot,
-            l2_block_number: transition.l2PostBlockNumber,
-            l1_origin_hash: transition.l1Head,
-            l1_origin_number: 42,
-            challenge_deadline: 100,
-            proof_deadline: 200,
-            proof_threshold: 2,
-        };
-        let signature = Bytes::from(vec![0x88; 65]);
-        let proof = ProofData::Nitro {
+        assert_eq!(encode_proof(&sp1), sp1_proof);
+
+        let signature = Bytes::from_static(b"nitro signature");
+        let nitro = ProofData::Nitro {
             attestation: Bytes::from_static(b"attestation"),
-            public_values: transition.abi_encode().into(),
+            public_values: Bytes::from_static(b"public values"),
             signature: signature.clone(),
         };
-
-        let encoded = encode_proof(&metadata, &proof).expect("valid Nitro proof payload");
-
-        // NitroProofVerifier does `abi.decode(proof, (bytes32, address, uint256,
-        // TransitionPublicValues, bytes))`, which is the params encoding. Asserting against
-        // `.abi_encode()` here would be tautological — and would have passed while the
-        // implementation shipped the single-value form, whose leading 0x20 offset makes the
-        // verifier's decode revert and `verify` return false.
-        assert_eq!(
-            &encoded[..32],
-            metadata.domain_hash.as_slice(),
-            "payload must start with domainHash, not an ABI offset"
-        );
-        // 3 head words + 6 transition words + signature offset/length + 3 signature words.
-        assert_eq!(encoded.len(), 448, "verifier-accepted payload size");
-
-        let (domain_hash, parent_ref, l1_origin_number, decoded_transition, decoded_signature) =
-            <(B256, Address, U256, TransitionPublicValues, Bytes)>::abi_decode_params(&encoded)
-                .expect("verifier-compatible params encoding");
-
-        assert_eq!(domain_hash, metadata.domain_hash);
-        assert_eq!(parent_ref, metadata.parent_ref);
-        assert_eq!(l1_origin_number, U256::from(metadata.l1_origin_number));
-        assert_eq!(decoded_transition, transition);
-        assert_eq!(decoded_signature, signature);
+        assert_eq!(encode_proof(&nitro), signature);
     }
 }
