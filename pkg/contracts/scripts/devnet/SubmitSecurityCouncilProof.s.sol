@@ -3,9 +3,9 @@ pragma solidity 0.8.28;
 
 import {Script} from "forge-std/Script.sol";
 
-import {SecurityCouncilVerifier} from "../../src/proofs/council/SecurityCouncilVerifier.sol";
-import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
-import {LibProof} from "../../src/proofs/lib/LibProof.sol";
+import {SecurityCouncilVerifier} from "../../src/dispute/council/SecurityCouncilVerifier.sol";
+import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
+import {LibProof} from "../../src/dispute/lib/LibProof.sol";
 
 interface ICouncilSafe {
     function getMessageHash(bytes calldata message) external view returns (bytes32);
@@ -34,7 +34,9 @@ contract SubmitSecurityCouncilProof is Script {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, safeMessageHash);
         bytes memory proof = abi.encodePacked(r, s, v);
 
-        require(verifier.verify(rootId, proof), "Council proof verification failed");
+        // The council lane attests over `rootId` alone; the transition is ignored by this verifier.
+        LibProof.TransitionPublicValues memory transition;
+        require(verifier.verify(rootId, transition, proof), "Council proof verification failed");
 
         uint256 transactionKey = vm.envOr("PRIVATE_KEY", signerKey);
         vm.startBroadcast(transactionKey);

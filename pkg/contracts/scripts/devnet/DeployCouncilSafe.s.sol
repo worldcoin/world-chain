@@ -5,7 +5,7 @@ import {Script} from "forge-std/Script.sol";
 
 import {
     SecurityCouncilVerifier
-} from "../../src/proofs/council/SecurityCouncilVerifier.sol";
+} from "../../src/dispute/council/SecurityCouncilVerifier.sol";
 
 import {Safe} from "@safe-global/safe-contracts/contracts/Safe.sol";
 import {

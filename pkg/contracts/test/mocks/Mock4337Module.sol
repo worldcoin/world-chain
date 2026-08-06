@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {PBHSafe4337Module} from "../../src/PBH4337Module.sol";
+import {PBHSafe4337Module} from "../../src/pbh/PBH4337Module.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
 import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {ValidationData} from "@account-abstraction/contracts/core/Helpers.sol";

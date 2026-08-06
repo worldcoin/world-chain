@@ -7,9 +7,9 @@ import {CertManager} from "@nitro-validator/CertManager.sol";
 import {ICertManager} from "@nitro-validator/ICertManager.sol";
 import {IP384Verifier} from "@nitro-validator/IP384Verifier.sol";
 import {P384Verifier} from "@nitro-validator/P384Verifier.sol";
-import {NitroAttestationVerifier} from "../../src/proofs/nitro/NitroAttestationVerifier.sol";
-import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
-import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
+import {NitroAttestationVerifier} from "../../src/dispute/nitro/NitroAttestationVerifier.sol";
+import {NitroEnclaveKeyRegistry} from "../../src/dispute/nitro/NitroEnclaveKeyRegistry.sol";
+import {NitroProofVerifier} from "../../src/dispute/nitro/NitroProofVerifier.sol";
 
 /// @title DeployNitro
 /// @notice Deploys the on-chain AWS Nitro attestation stack for WIP-1006:

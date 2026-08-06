@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import {Script} from "forge-std/Script.sol";
 
-import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
+import {MockRootIdVerifier} from "../../test/mocks/MockRootIdVerifier.sol";
 
 /// @notice Deploys the proof-lane test doubles for a local devnet and writes their addresses,
 ///         for `DeployProofSystem.s.sol` to consume via `VALIDITY_PROOF_VERIFIER`,

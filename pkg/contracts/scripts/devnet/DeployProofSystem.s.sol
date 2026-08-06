@@ -4,11 +4,11 @@ pragma solidity 0.8.28;
 import {Script} from "forge-std/Script.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
-import {GameTypes} from "../../src/proofs/GameTypes.sol";
-import {LibProof} from "../../src/proofs/lib/LibProof.sol";
-import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
-import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
-import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
+import {GameTypes} from "../../src/dispute/GameTypes.sol";
+import {LibProof} from "../../src/dispute/lib/LibProof.sol";
+import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
+import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
+import {IWorldChainProofVerifier} from "../../src/dispute/interfaces/IWorldChainProofVerifier.sol";
 
 import {GameType} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
