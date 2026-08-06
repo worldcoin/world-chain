@@ -129,7 +129,7 @@ where
             .root_state(address)
             .await
             .map_err(|error| GameScanError {
-                error,
+                error: Box::new(error),
                 challenge_deadline: None,
             })?;
         if root_state != RootState::Proposed {
@@ -141,7 +141,7 @@ where
             .challenge_deadline(address)
             .await
             .map_err(|error| GameScanError {
-                error,
+                error: Box::new(error),
                 challenge_deadline: None,
             })?;
         if now >= challenge_deadline {
@@ -150,11 +150,11 @@ where
 
         if game.l2_block_number > latest_finalized_l2_block {
             return Err(GameScanError {
-                error: ChallengerError::L2BlockNotFinalized {
+                error: Box::new(ChallengerError::L2BlockNotFinalized {
                     game: address,
                     latest_finalized: latest_finalized_l2_block,
                     given_block: game.l2_block_number,
-                },
+                }),
                 challenge_deadline: Some(challenge_deadline),
             });
         }
@@ -169,7 +169,7 @@ where
             }
             Ok(_root) => Ok(GameScanOutcome::Valid),
             Err(error) => Err(GameScanError {
-                error: ChallengerError::OutputRoot(error),
+                error: Box::new(ChallengerError::OutputRoot(error)),
                 challenge_deadline: Some(challenge_deadline),
             }),
         }

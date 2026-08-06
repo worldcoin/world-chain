@@ -71,6 +71,7 @@ impl ChallengerError {
 /// Error returned while processing a single game.
 #[derive(Debug)]
 pub(crate) struct GameScanError {
-    pub error: ChallengerError,
+    /// Boxed to keep `Result<_, GameScanError>` small (`clippy::result_large_err`).
+    pub error: Box<ChallengerError>,
     pub challenge_deadline: Option<u64>,
 }
