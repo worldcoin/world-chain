@@ -297,14 +297,8 @@ contract MultiProofGameTest is OPStackFixtures {
         game.closeGame();
     }
 
-    function test_Challenge_RequiresStakeBondAndOpenWindow() public {
+    function test_Challenge_RequiresBondAndOpenWindow() public {
         MultiProofGame game = _proposeAtAnchor();
-        address unstaked = makeAddr("unstaked");
-        vm.deal(unstaked, CHALLENGER_BOND);
-
-        vm.prank(unstaked);
-        vm.expectRevert(abi.encodeWithSelector(IMultiProofGame.UnstakedChallenger.selector, unstaked));
-        game.challenge{value: CHALLENGER_BOND}();
 
         vm.prank(challengerAccount);
         vm.expectRevert(IncorrectBondAmount.selector);

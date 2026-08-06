@@ -84,7 +84,6 @@ contract ActivateProofSystem is Script {
         );
         require(address(gameImpl.teeVerifier()).code.length > 0, "ActivateProofSystem: TEE verifier missing");
         require(address(gameImpl.securityCouncil()).code.length > 0, "ActivateProofSystem: council verifier missing");
-        require(address(gameImpl.stakingRegistry()).code.length > 0, "ActivateProofSystem: staking registry missing");
         require(address(gameImpl.weth()).code.length > 0, "ActivateProofSystem: DelayedWETH missing");
 
         IDisputeGame anchorGame = config.anchorStateRegistry.anchorGame();

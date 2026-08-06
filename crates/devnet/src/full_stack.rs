@@ -142,7 +142,7 @@ const CHALLENGER_PRIVATE_KEY: &str =
 /// Dedicated key (address `0x743dAA55063C608894C125Cf8eC82Afe83B2d5c5`), distinct
 /// from the proposer (Anvil account #1) and the op-challenger (Anvil account #9),
 /// so the in-process challenger never races them on L1 nonces. The matching
-/// address is funded via the L1 genesis and staked in the `MockStakingRegistry`.
+/// address is funded via the L1 genesis.
 const WORLD_CHALLENGER_PRIVATE_KEY: &str =
     "0x7c0c9c6f3f4d8a2b1e5d9a8c7b6e5f4a3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f";
 /// Signing key for the in-process World Chain proof-system defender.
@@ -277,7 +277,6 @@ struct WorldProofMocksDeployment {
     validity_proof_verifier: String,
     tee_verifier: String,
     security_council: String,
-    staking_registry: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -287,7 +286,6 @@ struct WorldProofSystemDeployment {
     validity_proof_verifier: String,
     tee_verifier: String,
     security_council: String,
-    staking_registry: String,
     proof_system_factory: String,
     rollup_config_hash: String,
     l2_chain_id: u64,
@@ -1064,10 +1062,6 @@ async fn deploy_world_proof_mocks(
         .arg("--evm-version")
         .arg("cancun")
         .env("PRIVATE_KEY", DEVNET_PRIVATE_KEY)
-        .env(
-            "WORLD_CHALLENGER_ADDRESS",
-            world_challenger_address()?.to_string(),
-        )
         .env("PROOF_MOCKS_DEPLOYMENT_OUT", &deployment_rel_path)
         .output()
         .await
@@ -1110,7 +1104,6 @@ async fn deploy_world_proof_mocks(
         validity = %mocks.validity_proof_verifier,
         tee = %mocks.tee_verifier,
         council = %mocks.security_council,
-        staking = %mocks.staking_registry,
         "World Chain proof-lane test doubles deployed (accept any proof — devnet only)"
     );
 
@@ -1199,18 +1192,12 @@ async fn deploy_world_proof_system(
         .env("GUARDIAN_KEY", SUPERCHAIN_GUARDIAN_PRIVATE_KEY)
         .env("SET_RESPECTED_GAME_TYPE", "true")
         .env(
-            "WORLD_CHALLENGER_ADDRESS",
-            world_challenger_address()?.to_string(),
-        )
-        // Previously defaulted to WORLD_CHALLENGER_ADDRESS inside the script; now explicit.
-        .env(
             "PROTOCOL_FEE_RECIPIENT",
             world_challenger_address()?.to_string(),
         )
         .env("VALIDITY_PROOF_VERIFIER", &mocks.validity_proof_verifier)
         .env("TEE_VERIFIER", &mocks.tee_verifier)
         .env("SECURITY_COUNCIL_VERIFIER", &mocks.security_council)
-        .env("STAKING_REGISTRY", &mocks.staking_registry)
         .env("WORLD_CHAIN_L2_CHAIN_ID", DEV_CHAIN_ID.to_string())
         .env("ROLLUP_CONFIG_HASH", &rollup_config_hash_hex)
         .env(
@@ -2664,8 +2651,7 @@ async fn start_challenger(
 
 /// Spawns the in-process World Chain proof-system proposer.
 ///
-/// The proposer signs with the dev proposer key (Anvil account #1), which
-/// `DeployProofSystem.s.sol` stakes in the `MockStakingRegistry` and funds via
+/// The proposer signs with the dev proposer key (Anvil account #1), funded via
 /// `fundDevAccounts`. Output roots are read from the op-node rollup RPC and
 /// proposals are created through `DisputeGameFactory.create` on L1.
 async fn start_world_chain_proposer(
@@ -2742,8 +2728,7 @@ async fn start_world_chain_proposer(
 /// Spawns the in-process World Chain proof-system challenger.
 ///
 /// The challenger signs with [`WORLD_CHALLENGER_PRIVATE_KEY`], a dedicated dev
-/// account that is funded through the L1 genesis (see [`fund_world_challenger`])
-/// and staked in the `MockStakingRegistry` by `DeployProofSystem.s.sol`. It scans
+/// account that is funded through the L1 genesis (see [`fund_world_challenger`]). It scans
 /// indexed factory games, recomputes the expected
 /// output root from the op-node rollup RPC, and challenges any game whose
 /// `rootClaim` disagrees by calling `MultiProofGame.challenge` on L1.
@@ -3469,7 +3454,6 @@ fn build_components(
             )
             .with_endpoint("tee-verifier", deployment.tee_verifier.clone())
             .with_endpoint("security-council", deployment.security_council.clone())
-            .with_endpoint("staking-registry", deployment.staking_registry.clone())
             .with_note(format!(
                 "WIP-1006 threshold {PROOF_THRESHOLD}/3, proof_system_version={}",
                 deployment.proof_system_version
@@ -3494,8 +3478,7 @@ fn build_components(
             .with_note(format!(
                 "native in-process proposer creating WIP-1006 games every {} L2 blocks via DisputeGameFactory.create",
                 deployment.block_interval
-            ))
-            .with_note("signs with the dev proposer key staked in the MockStakingRegistry"),
+            )),
         );
         components.push(
             DevnetComponent::new(
@@ -3503,12 +3486,12 @@ fn build_components(
                 DevnetComponentKind::WorldChainChallenger,
                 DevnetComponentStatus::Running,
             )
-            .with_endpoint("dispute-game-factory", deployment.proof_system_factory.clone())
+            .with_endpoint(
+                "dispute-game-factory",
+                deployment.proof_system_factory.clone(),
+            )
             .with_endpoint("anchor", deployment.anchor_state_registry.clone())
-            .with_note("native in-process challenger disputing invalid WIP-1006 games")
-            .with_note(
-                "signs with a dedicated dev key funded in the L1 genesis and staked in the MockStakingRegistry",
-            ),
+            .with_note("native in-process challenger disputing invalid WIP-1006 games"),
         );
     }
 

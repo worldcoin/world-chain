@@ -3,7 +3,6 @@ pragma solidity 0.8.28;
 
 import {ProofLib} from "../lib/ProofLib.sol";
 import {IWorldChainProofVerifier} from "./IWorldChainProofVerifier.sol";
-import {IWorldChainStakingRegistry} from "./IWorldChainStakingRegistry.sol";
 
 import {BondDistributionMode, Duration, GameStatus, Hash, Timestamp} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
@@ -61,7 +60,6 @@ interface IMultiProofGame is IDisputeGame {
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
-        IWorldChainStakingRegistry stakingRegistry;
         IAnchorStateRegistry anchorStateRegistry;
         IDelayedWETH weth;
     }
@@ -74,7 +72,6 @@ interface IMultiProofGame is IDisputeGame {
     error NotDisputeGameFactory(address caller);
     error InvalidL2BlockNumber(uint256 expectedL2BlockNumber, uint256 actualL2BlockNumber);
     error GameNotRetryable(bytes32 uuidPreimageHash);
-    error UnstakedChallenger(address challenger);
     error InvalidLane(uint8 lane);
     error InvalidProof(ProofLib.ProofLane lane, bytes32 rootId);
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
@@ -154,9 +151,6 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Verifier backing the security-council lane.
     function securityCouncil() external view returns (IWorldChainProofVerifier);
-
-    /// @notice Registry that gates who may challenge.
-    function stakingRegistry() external view returns (IWorldChainStakingRegistry);
 
     /// @notice Factory that created this clone and the only permitted initializer.
     function disputeGameFactory() external view returns (IDisputeGameFactory);
@@ -242,8 +236,7 @@ interface IMultiProofGame is IDisputeGame {
     //                    Challenge and proofs                    //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Disputes the proposal. Requires a staked caller, an open challenge window, and
-    ///         exactly `challengerBond`.
+    /// @notice Disputes the proposal during the open challenge window for exactly `challengerBond`.
     function challenge() external payable returns (ProposalStatus);
 
     /// @notice Submits `proof` for `laneId`. Before a challenge, any accepted lane satisfies the

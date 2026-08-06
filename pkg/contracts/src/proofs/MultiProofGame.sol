@@ -5,7 +5,6 @@ import {ProofLib} from "./lib/ProofLib.sol";
 import {GameTypes} from "./GameTypes.sol";
 import {IMultiProofGame} from "./interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
-import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistry.sol";
 
 import {Clone} from "@solady/utils/Clone.sol";
 import {
@@ -96,9 +95,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     IWorldChainProofVerifier public immutable teeVerifier;
     IWorldChainProofVerifier public immutable securityCouncil;
 
-    /// @notice Registry that gates who may challenge.
-    IWorldChainStakingRegistry public immutable stakingRegistry;
-
     /// @notice Factory that created this clone and the only permitted initializer.
     IDisputeGameFactory public immutable disputeGameFactory;
 
@@ -147,8 +143,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                 || config.proposerBond == 0 || config.challengerBond == 0 || config.proofThreshold == 0
                 || config.proofThreshold > ProofLib.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
                 || address(config.anchorStateRegistry) == address(0) || address(config.weth) == address(0)
-                || address(config.stakingRegistry) == address(0) || address(config.validityProofVerifier) == address(0)
-                || address(config.teeVerifier) == address(0) || address(config.securityCouncil) == address(0)
+                || address(config.validityProofVerifier) == address(0) || address(config.teeVerifier) == address(0)
+                || address(config.securityCouncil) == address(0)
         ) {
             revert InvalidActivationParameters();
         }
@@ -178,7 +174,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         validityProofVerifier = config.validityProofVerifier;
         teeVerifier = config.teeVerifier;
         securityCouncil = config.securityCouncil;
-        stakingRegistry = config.stakingRegistry;
         disputeGameFactory = factory;
         anchorStateRegistry = config.anchorStateRegistry;
         weth = config.weth;
@@ -403,11 +398,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         // INVARIANT: Can only challenge a game that has not been challenged yet.
         if (claimData.challenger != address(0)) revert ClaimAlreadyChallenged();
-
-        // INVARIANT: Only staked challengers may open a dispute.
-        if (!stakingRegistry.isStaked(msg.sender)) {
-            revert UnstakedChallenger(msg.sender);
-        }
 
         // If the required bond is not met, revert.
         if (msg.value != challengerBond) revert IncorrectBondAmount();

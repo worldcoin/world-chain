@@ -116,7 +116,6 @@ impl WorldContractsDeploymentConfig {
                 "MockRootIdVerifier(VALIDITY_PROOF)",
                 "MockRootIdVerifier(TEE_ATTESTATION)",
                 "MockRootIdVerifier(SECURITY_COUNCIL)",
-                "MockStakingRegistry",
             ]);
         }
         if self.fee_vaults {

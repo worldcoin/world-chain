@@ -9,7 +9,6 @@ import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
 import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
-import {IWorldChainStakingRegistry} from "../../src/proofs/interfaces/IWorldChainStakingRegistry.sol";
 
 import {GameType} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
@@ -30,16 +29,14 @@ import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 /// `setImplementation(WC_GAME_TYPE, address(0))` is the kill switch: it stops new game
 /// creation without touching in-flight games.
 ///
-/// The three proof-lane verifiers and the staking registry are **inputs**, not outputs: this
-/// script never deploys them. Every one is a required env address and must already hold code.
+/// The three proof-lane verifiers are **inputs**, not outputs: this script never deploys them.
+/// Every one is a required env address and must already hold code.
 /// That is deliberate — a script that can mint its own verifiers can silently register a game
 /// type that accepts any proof. Supply real contracts:
 ///
 ///   `VALIDITY_PROOF_VERIFIER`   — e.g. `SP1ValidityVerifier`
 ///   `TEE_VERIFIER`              — e.g. `NitroProofVerifier` (see `DeployNitro.s.sol`)
 ///   `SECURITY_COUNCIL_VERIFIER` — council-controlled attestation verifier
-///   `STAKING_REGISTRY`          — `IWorldChainStakingRegistry` implementation
-///
 /// For a local devnet, deploy the test doubles with `DeployProofMocks.s.sol` first and pass
 /// its output addresses in. That keeps the choice to run against mocks explicit and auditable
 /// at the call site instead of hidden inside this script.
@@ -71,7 +68,6 @@ contract DeployProofSystem is Script {
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
-        IWorldChainStakingRegistry stakingRegistry;
         IDisputeGameFactory disputeGameFactory;
         IAnchorStateRegistry anchorStateRegistry;
         ISystemConfig systemConfig;
@@ -94,8 +90,8 @@ contract DeployProofSystem is Script {
         deployment.disputeGameFactory = config.disputeGameFactory;
         deployment.anchorStateRegistry = config.anchorStateRegistry;
 
-        // 1. DelayedWETH + game implementation, from the deployer key. Verifiers and the
-        // staking registry are pre-existing inputs validated in `_validateConfig`.
+        // 1. DelayedWETH + game implementation, from the deployer key. Verifiers are
+        // pre-existing inputs validated in `_validateConfig`.
         vm.startBroadcast(config.privateKey);
 
         // The dedicated DelayedWETH proxy is administered by the chain's existing ProxyAdmin.
@@ -157,11 +153,10 @@ contract DeployProofSystem is Script {
         config.proofThreshold = vm.envOr("PROOF_THRESHOLD", uint256(DEFAULT_PROOF_THRESHOLD)).toUint8();
         // Required: there is no sane default owner for proof-timeout forfeitures.
         config.protocolFeeRecipient = vm.envAddress("PROTOCOL_FEE_RECIPIENT");
-        // Proof lanes and staking: required inputs, never deployed here.
+        // Proof lanes are required inputs, never deployed here.
         config.validityProofVerifier = IWorldChainProofVerifier(vm.envAddress("VALIDITY_PROOF_VERIFIER"));
         config.teeVerifier = IWorldChainProofVerifier(vm.envAddress("TEE_VERIFIER"));
         config.securityCouncil = IWorldChainProofVerifier(vm.envAddress("SECURITY_COUNCIL_VERIFIER"));
-        config.stakingRegistry = IWorldChainStakingRegistry(vm.envAddress("STAKING_REGISTRY"));
         config.disputeGameFactory = IDisputeGameFactory(vm.envAddress("DISPUTE_GAME_FACTORY"));
         config.anchorStateRegistry = IAnchorStateRegistry(vm.envAddress("ANCHOR_STATE_REGISTRY"));
         config.systemConfig = ISystemConfig(vm.envAddress("SYSTEM_CONFIG"));
@@ -183,7 +178,6 @@ contract DeployProofSystem is Script {
         _requireContract(address(config.validityProofVerifier), "VALIDITY_PROOF_VERIFIER");
         _requireContract(address(config.teeVerifier), "TEE_VERIFIER");
         _requireContract(address(config.securityCouncil), "SECURITY_COUNCIL_VERIFIER");
-        _requireContract(address(config.stakingRegistry), "STAKING_REGISTRY");
 
         // The 2-of-3 threshold only means anything if the lanes are independent: pointing two
         // lanes at one verifier lets a single party satisfy both and resolve on its own.
@@ -238,7 +232,6 @@ contract DeployProofSystem is Script {
             validityProofVerifier: config.validityProofVerifier,
             teeVerifier: config.teeVerifier,
             securityCouncil: config.securityCouncil,
-            stakingRegistry: config.stakingRegistry,
             anchorStateRegistry: config.anchorStateRegistry,
             weth: deployment.weth
         });
@@ -259,7 +252,6 @@ contract DeployProofSystem is Script {
         vm.serializeAddress(root, "validityProofVerifier", address(config.validityProofVerifier));
         vm.serializeAddress(root, "teeVerifier", address(config.teeVerifier));
         vm.serializeAddress(root, "securityCouncil", address(config.securityCouncil));
-        vm.serializeAddress(root, "stakingRegistry", address(config.stakingRegistry));
         vm.serializeAddress(root, "protocolFeeRecipient", config.protocolFeeRecipient);
         vm.serializeAddress(root, "gameImplementation", address(deployment.gameImpl));
         vm.serializeAddress(root, "delayedWeth", address(deployment.weth));
