@@ -35,6 +35,18 @@ Rollup:
       --rollup.enable-tx-conditional
           Enable transaction conditional support on sequencer
 
+      --rollup.retain-forwarded-txs
+          Retain RPC-submitted transactions in the local pool after forwarding them to the sequencer.
+          
+          This flag only has an effect when `rollup.sequencer` is present.
+
+      --rollup.operator-sdm-opt-in <OPERATOR_SDM_OPT_IN>
+          Local operator opt-in for SDM `PostExec` production at process boot. The admin RPC (`admin_setOperatorSdmOptIn`) can still toggle it at runtime. Defaults to disabled
+          
+          [env: OP_RETH_OPERATOR_SDM_OPT_IN=]
+          [default: false]
+          [possible values: true, false]
+
       --rollup.interop-http <INTEROP_HTTP_URL>
           HTTP endpoint(s) for the interop filter, used to validate the interop messages referenced by incoming transactions. Repeat the flag to configure multiple endpoints; each check is fanned out to all of them and combined by quorum agreement (see `--rollup.interop-min-responses`). When none are set, interop transaction validation is disabled: a node that builds blocks will then include transactions carrying invalid interop messages, producing invalid blocks. It is only safe to leave this unset on nodes that do not build blocks
 

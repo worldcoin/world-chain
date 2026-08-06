@@ -1597,6 +1597,10 @@ mod tests {
             self.disconnect_peer(peer);
         }
 
+        fn ban_peer(&self, _peer: PeerId) {}
+
+        fn unban_peer(&self, _peer: PeerId) {}
+
         fn connect_peer_kind(
             &self,
             _peer: PeerId,
