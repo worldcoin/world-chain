@@ -50,7 +50,6 @@ interface IMultiProofGame is IDisputeGame {
     ///      this configuration rides in the CWIA payload.
     struct GameConfig {
         bytes32 rollupConfigHash;
-        uint256 blockInterval;
         uint64 challengePeriod;
         uint64 proofPeriod;
         uint256 proposerBond;
@@ -70,7 +69,7 @@ interface IMultiProofGame is IDisputeGame {
 
     error InvalidActivationParameters();
     error NotDisputeGameFactory(address caller);
-    error InvalidL2BlockNumber(uint256 expectedL2BlockNumber, uint256 actualL2BlockNumber);
+    error InvalidL2BlockNumber(uint256 startingBlockNumber, uint256 actualL2BlockNumber);
     error GameNotRetryable(bytes32 uuidPreimageHash);
     error InvalidLane(uint8 lane);
     error InvalidProof(LibProof.ProofLane lane, bytes32 rootId);
@@ -118,15 +117,12 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Total number of proof lanes defined by the protocol.
     function PROOF_LANE_COUNT() external view returns (uint8);
 
-    /// @notice Commitment binding this deployment to its chain, proof-system version, rollup
-    ///         configuration, and proposal cadence.
+    /// @notice Commitment binding this deployment to its chain, proof-system version, and
+    ///         rollup configuration.
     function domainHash() external view returns (bytes32);
 
     /// @notice Hash of the rollup configuration the proof lanes verify against.
     function rollupConfigHash() external view returns (bytes32);
-
-    /// @notice Number of L2 blocks each proposal must extend its parent by.
-    function blockInterval() external view returns (uint256);
 
     /// @notice Seconds a proposal may be challenged after creation.
     function challengePeriod() external view returns (Duration);

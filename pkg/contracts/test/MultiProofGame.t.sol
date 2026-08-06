@@ -28,6 +28,8 @@ import {
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 
 contract MultiProofGameTest is OPStackFixtures {
+    using LibProof for uint8;
+
     function test_Create_RegistersCanonicalGame() public {
         MultiProofGame game = _proposeAtAnchor();
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
@@ -66,7 +68,7 @@ contract MultiProofGameTest is OPStackFixtures {
         dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
     }
 
-    function test_Create_RejectsWrongDomainAndInterval() public {
+    function test_Create_RejectsWrongDomainAndNonAdvancingBlock() public {
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         bytes32 wrongDomain = keccak256("wrong-domain");
 
@@ -78,12 +80,29 @@ contract MultiProofGameTest is OPStackFixtures {
             WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), abi.encode(wrongDomain, target, address(asr), uint256(0))
         );
 
-        uint256 wrongTarget = target + 1;
-        vm.prank(proposer);
-        vm.expectRevert(abi.encodeWithSelector(IMultiProofGame.InvalidL2BlockNumber.selector, target, wrongTarget));
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(wrongTarget)), _extraData(wrongTarget, type(uint256).max, 0)
-        );
+        uint256[2] memory nonAdvancing = [STARTING_ANCHOR_BLOCK, STARTING_ANCHOR_BLOCK - 1];
+        for (uint256 i = 0; i < nonAdvancing.length; i++) {
+            vm.prank(proposer);
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    IMultiProofGame.InvalidL2BlockNumber.selector, STARTING_ANCHOR_BLOCK, nonAdvancing[i]
+                )
+            );
+            dgf.create{value: PROPOSER_BOND}(
+                WC_GAME_TYPE,
+                Claim.wrap(_rootClaimFor(nonAdvancing[i])),
+                _extraData(nonAdvancing[i], type(uint256).max, 0)
+            );
+        }
+
+        // Cadence is proposer policy: any strictly advancing block number is proposable.
+        uint256[2] memory advancing = [STARTING_ANCHOR_BLOCK + 1, target + 1];
+        for (uint256 i = 0; i < advancing.length; i++) {
+            vm.prank(proposer);
+            dgf.create{value: PROPOSER_BOND}(
+                WC_GAME_TYPE, Claim.wrap(_rootClaimFor(advancing[i])), _extraData(advancing[i], type(uint256).max, 0)
+            );
+        }
     }
 
     function test_Create_RejectsUnregisteredAndBlacklistedParents() public {
@@ -131,16 +150,6 @@ contract MultiProofGameTest is OPStackFixtures {
         parent.closeGame();
 
         uint256 target = parent.l2SequenceNumber() + BLOCK_INTERVAL;
-        vm.prank(proposer);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IMultiProofGame.InvalidL2BlockNumber.selector, STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL, target
-            )
-        );
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), _extraData(target, type(uint256).max, 0)
-        );
-
         bytes memory previousAnchorParentExtraData = _extraData(target, 0, 0);
         vm.prank(proposer);
         MultiProofGame previousAnchorChild = MultiProofGame(
@@ -168,11 +177,6 @@ contract MultiProofGameTest is OPStackFixtures {
 
         config = _gameConfig();
         config.protocolFeeRecipient = address(0);
-        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
-        new MultiProofGame(config);
-
-        config = _gameConfig();
-        config.blockInterval = 0;
         vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
 
@@ -333,7 +337,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         game.submitProofLane(0, abi.encodePacked(game.rootId()));
         game.submitProofLane(0, abi.encodePacked(game.rootId()));
-        assertEq(LibProof.proofCount(game.proofBitmap()), 1);
+        assertEq(game.proofBitmap().proofCount(), 1);
 
         game.submitProofLane(1, abi.encodePacked(game.rootId()));
         game.resolve();
@@ -571,7 +575,6 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(Claim.unwrap(game.rootClaimByChainId(CHAIN_ID + 1)), Claim.unwrap(game.rootClaim()));
 
         assertEq(game.rollupConfigHash(), ROLLUP_CONFIG_HASH);
-        assertEq(game.blockInterval(), BLOCK_INTERVAL);
         assertEq(game.domainHash(), _domainHash());
     }
 
