@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
-import {ProofLib} from "../lib/ProofLib.sol";
+import {LibProof} from "../lib/LibProof.sol";
 
 /// @title MockRootIdVerifier
 /// @author World Contributors
@@ -23,7 +23,7 @@ contract MockRootIdVerifier is IWorldChainProofVerifier {
         acceptedRoots[rootId] = accepted;
     }
 
-    function verify(bytes32 rootId, ProofLib.TransitionPublicValues calldata, bytes calldata proof)
+    function verify(bytes32 rootId, LibProof.TransitionPublicValues calldata, bytes calldata proof)
         external
         view
         returns (bool)

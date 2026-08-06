@@ -3,11 +3,11 @@ pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
-import {ProofLib} from "../lib/ProofLib.sol";
+import {LibProof} from "../lib/LibProof.sol";
 
 /// Must match `world_chain_proof_core::types::AggregationPublicValues`.
 struct AggregationPublicValues {
-    ProofLib.TransitionPublicValues transitionPublicValues;
+    LibProof.TransitionPublicValues transitionPublicValues;
     bytes32 multiBlockVKey;
 }
 
@@ -49,7 +49,7 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     ///      the game-supplied transition and this verifier's range-program commitment, so the
     ///      proof can only verify if it attests exactly that transition. Invalid or malformed
     ///      proofs revert inside the gateway and surface as `false`.
-    function verify(bytes32, ProofLib.TransitionPublicValues calldata transition, bytes calldata proof)
+    function verify(bytes32, LibProof.TransitionPublicValues calldata transition, bytes calldata proof)
         external
         view
         returns (bool)

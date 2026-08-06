@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-/// @title ProofLib
+/// @title LibProof
 /// @author World Contributors
 /// @custom:security-contact security@toolsforhumanity.com
-library ProofLib {
+library LibProof {
     /// @dev Quantifies the number of proof lanes in the MultiProofGame.
     uint8 internal constant PROOF_LANE_COUNT = 3;
 

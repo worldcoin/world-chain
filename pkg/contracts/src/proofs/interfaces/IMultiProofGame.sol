@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {ProofLib} from "../lib/ProofLib.sol";
+import {LibProof} from "../lib/LibProof.sol";
 import {IWorldChainProofVerifier} from "./IWorldChainProofVerifier.sol";
 
 import {BondDistributionMode, Duration, GameStatus, Hash, Timestamp} from "@optimism-bedrock/src/dispute/lib/Types.sol";
@@ -42,7 +42,7 @@ interface IMultiProofGame is IDisputeGame {
         address challenger; // 20 bytes  |
         Timestamp deadline; // 8 bytes   |-- one slot (31 bytes)
         uint8 proofBitmap; // 1 byte    |
-        ProofLib.InvalidationReason invalidationReason; // 1 byte    /
+        LibProof.InvalidationReason invalidationReason; // 1 byte    /
     }
 
     /// @notice Per-deployment configuration, fixed as immutables on the implementation.
@@ -73,7 +73,7 @@ interface IMultiProofGame is IDisputeGame {
     error InvalidL2BlockNumber(uint256 expectedL2BlockNumber, uint256 actualL2BlockNumber);
     error GameNotRetryable(bytes32 uuidPreimageHash);
     error InvalidLane(uint8 lane);
-    error InvalidProof(ProofLib.ProofLane lane, bytes32 rootId);
+    error InvalidProof(LibProof.ProofLane lane, bytes32 rootId);
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
     error InconsistentSystemConfiguration();
 
@@ -100,10 +100,10 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Emitted when a proof lane is accepted; `proofBitmap` carries the updated lane
     ///         set, from which indexers can derive threshold status.
-    event ProofSubmitted(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
+    event ProofSubmitted(LibProof.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
 
     /// @notice Emitted when a lane that already counts toward the threshold is resubmitted.
-    event DuplicateProofLane(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
+    event DuplicateProofLane(LibProof.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
 
     /// @notice Emitted when the bond distribution mode is locked in.
     event GameClosed(BondDistributionMode bondDistributionMode);
@@ -203,11 +203,11 @@ interface IMultiProofGame is IDisputeGame {
             address challenger,
             Timestamp deadline,
             uint8 proofBitmap,
-            ProofLib.InvalidationReason invalidationReason
+            LibProof.InvalidationReason invalidationReason
         );
 
     /// @notice Why the game was invalidated, if it was.
-    function invalidationReason() external view returns (ProofLib.InvalidationReason);
+    function invalidationReason() external view returns (LibProof.InvalidationReason);
 
     /// @notice Bitmap of the proof lanes that count toward the threshold.
     function proofBitmap() external view returns (uint8);
@@ -230,7 +230,7 @@ interface IMultiProofGame is IDisputeGame {
     function resolutionStatus()
         external
         view
-        returns (bool resolvable, GameStatus outcome, ProofLib.InvalidationReason reason);
+        returns (bool resolvable, GameStatus outcome, LibProof.InvalidationReason reason);
 
     ////////////////////////////////////////////////////////////////
     //                    Challenge and proofs                    //

@@ -6,7 +6,7 @@ import {Test} from "@forge-std/Test.sol";
 import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
 import {GameTypes} from "../../src/proofs/GameTypes.sol";
-import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
+import {LibProof} from "../../src/proofs/lib/LibProof.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
 import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
 import {MockSystemConfig} from "../mocks/MockSystemConfig.sol";
@@ -140,7 +140,7 @@ abstract contract OPStackFixtures is Test {
     }
 
     function _domainHash() internal pure returns (bytes32) {
-        return ProofLib.domainHash(CHAIN_ID, ProofLib.PROOF_SYSTEM_VERSION, ROLLUP_CONFIG_HASH, BLOCK_INTERVAL);
+        return LibProof.domainHash(CHAIN_ID, LibProof.PROOF_SYSTEM_VERSION, ROLLUP_CONFIG_HASH, BLOCK_INTERVAL);
     }
 
     function _extraData(uint256 l2BlockNumber, uint256 parentIndex, uint256 attempt)
@@ -215,7 +215,7 @@ abstract contract OPStackFixtures is Test {
     /// @dev Warps past the challenge window and resolves (unchallenged path).
     function _resolveUnchallenged(MultiProofGame game) internal {
         if (game.proofBitmap() == 0) {
-            game.submitProofLane(uint8(ProofLib.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
+            game.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
         }
         if (block.timestamp < game.challengeDeadline().raw()) {
             vm.warp(game.challengeDeadline().raw());
