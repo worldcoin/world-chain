@@ -68,7 +68,7 @@ contract MultiProofGameTest is OPStackFixtures {
         dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
     }
 
-    function test_Create_RejectsWrongDomainAndNonAdvancingBlock() public {
+    function test_Create_RejectsWrongDomainAndBlockInterval() public {
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         bytes32 wrongDomain = keccak256("wrong-domain");
 
@@ -80,27 +80,17 @@ contract MultiProofGameTest is OPStackFixtures {
             WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), abi.encode(wrongDomain, target, address(asr), uint256(0))
         );
 
-        uint256[2] memory nonAdvancing = [STARTING_ANCHOR_BLOCK, STARTING_ANCHOR_BLOCK - 1];
-        for (uint256 i = 0; i < nonAdvancing.length; i++) {
+        uint256[4] memory wrongTargets =
+            [STARTING_ANCHOR_BLOCK, STARTING_ANCHOR_BLOCK - 1, STARTING_ANCHOR_BLOCK + 1, target + 1];
+        for (uint256 i = 0; i < wrongTargets.length; i++) {
             vm.prank(proposer);
             vm.expectRevert(
-                abi.encodeWithSelector(
-                    IMultiProofGame.InvalidL2BlockNumber.selector, STARTING_ANCHOR_BLOCK, nonAdvancing[i]
-                )
+                abi.encodeWithSelector(IMultiProofGame.InvalidL2BlockNumber.selector, target, wrongTargets[i])
             );
             dgf.create{value: PROPOSER_BOND}(
                 WC_GAME_TYPE,
-                Claim.wrap(_rootClaimFor(nonAdvancing[i])),
-                _extraData(nonAdvancing[i], type(uint256).max, 0)
-            );
-        }
-
-        // Cadence is proposer policy: any strictly advancing block number is proposable.
-        uint256[2] memory advancing = [STARTING_ANCHOR_BLOCK + 1, target + 1];
-        for (uint256 i = 0; i < advancing.length; i++) {
-            vm.prank(proposer);
-            dgf.create{value: PROPOSER_BOND}(
-                WC_GAME_TYPE, Claim.wrap(_rootClaimFor(advancing[i])), _extraData(advancing[i], type(uint256).max, 0)
+                Claim.wrap(_rootClaimFor(wrongTargets[i])),
+                _extraData(wrongTargets[i], type(uint256).max, 0)
             );
         }
     }
@@ -166,6 +156,11 @@ contract MultiProofGameTest is OPStackFixtures {
 
     function test_Constructor_RejectsInvalidConfiguration() public {
         IMultiProofGame.GameConfig memory config = _gameConfig();
+        config.blockInterval = 0;
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
         config.proofThreshold = 0;
         vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
@@ -307,16 +302,11 @@ contract MultiProofGameTest is OPStackFixtures {
         MultiProofGame game = _proposeAtAnchor();
 
         vm.prank(challengerAccount);
-        vm.expectRevert(IMultiProofGame.NoProofToChallenge.selector);
-        game.challenge{value: CHALLENGER_BOND}();
-
-        game.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
-
-        vm.prank(challengerAccount);
         vm.expectRevert(IncorrectBondAmount.selector);
         game.challenge{value: CHALLENGER_BOND - 1}();
 
         _challenge(game);
+        assertEq(game.proofBitmap(), 0);
         assertEq(game.refundModeCredit(challengerAccount), CHALLENGER_BOND);
         assertEq(weth.balanceOf(address(game)), PROPOSER_BOND + CHALLENGER_BOND);
 
@@ -327,10 +317,12 @@ contract MultiProofGameTest is OPStackFixtures {
 
     function test_Challenge_DoesNotExtendProofDeadline() public {
         MultiProofGame game = _proposeAtAnchor();
+        uint64 challengeDeadline = game.challengeDeadline().raw();
         uint64 proofDeadline = game.proofDeadline().raw();
-        vm.warp(game.challengeDeadline().raw() - 1);
+        vm.warp(challengeDeadline - 1);
         _challenge(game);
 
+        assertEq(game.challengeDeadline().raw(), challengeDeadline);
         assertEq(game.proofDeadline().raw(), proofDeadline);
         (,, Timestamp deadline,,) = game.claimData();
         assertEq(deadline.raw(), proofDeadline);
@@ -589,6 +581,7 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(Claim.unwrap(game.rootClaimByChainId(CHAIN_ID + 1)), Claim.unwrap(game.rootClaim()));
 
         assertEq(game.rollupConfigHash(), ROLLUP_CONFIG_HASH);
+        assertEq(game.blockInterval(), BLOCK_INTERVAL);
         assertEq(game.domainHash(), _domainHash());
     }
 
@@ -597,20 +590,21 @@ contract MultiProofGameTest is OPStackFixtures {
         address sybil = makeAddr("proposer-sybil");
         vm.deal(sybil, 10 ether);
 
-        // Proofless: unchallengeable, so the whole bond is forfeited.
+        // Challenging a proofless proposal still burns part of the proposer's bond.
         MultiProofGame proofless = _proposeAtAnchor();
         vm.prank(sybil);
-        vm.expectRevert(IMultiProofGame.NoProofToChallenge.selector);
         proofless.challenge{value: CHALLENGER_BOND}();
 
-        vm.warp(proofless.challengeDeadline().raw());
+        vm.warp(proofless.proofDeadline().raw());
         proofless.resolve();
-        assertEq(proofless.credit(sybil), 0);
-        assertEq(proofless.credit(protocolFeeRecipient), PROPOSER_BOND, "full bond forfeited");
+        uint256 staked = PROPOSER_BOND + CHALLENGER_BOND;
+        uint256 recovered = proofless.credit(proposer) + proofless.credit(sybil);
+        assertLt(recovered, staked, "self-challenge must lose money");
+        assertEq(staked - recovered, PROPOSER_BOND - (PROPOSER_BOND * gameImpl.CHALLENGER_REWARD_BPS()) / 10_000);
 
         // Proven but below threshold: self-challenging returns less than the pair staked.
-        uint256 target = STARTING_ANCHOR_BLOCK + 2 * BLOCK_INTERVAL;
-        MultiProofGame proven = _propose(type(uint256).max, _rootClaimFor(target), target, 0);
+        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        MultiProofGame proven = _propose(type(uint256).max, keccak256("proven-self-challenge"), target, 0);
         proven.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(proven.rootId()));
         vm.prank(sybil);
         proven.challenge{value: CHALLENGER_BOND}();
@@ -618,14 +612,12 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.warp(proven.proofDeadline().raw());
         proven.resolve();
 
-        uint256 staked = PROPOSER_BOND + CHALLENGER_BOND;
-        uint256 recovered = proven.credit(proposer) + proven.credit(sybil);
+        recovered = proven.credit(proposer) + proven.credit(sybil);
         assertLt(recovered, staked, "self-challenge must lose money");
         assertEq(staked - recovered, PROPOSER_BOND - (PROPOSER_BOND * gameImpl.CHALLENGER_REWARD_BPS()) / 10_000);
     }
 
-    /// @dev A late first lane still leaves challengers a full `challengePeriod`.
-    function test_FirstProofLane_OpensAFullChallengeWindow() public {
+    function test_FirstProofLane_DoesNotExtendChallengeWindow() public {
         MultiProofGame game = _proposeAtAnchor();
         uint64 initialDeadline = game.challengeDeadline().raw();
         assertEq(initialDeadline, game.createdAt().raw() + CHALLENGE_PERIOD);
@@ -633,8 +625,9 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.warp(initialDeadline - 1);
         game.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
 
-        assertEq(game.challengeDeadline().raw(), uint64(block.timestamp) + CHALLENGE_PERIOD);
-        assertFalse(game.gameOver());
+        assertEq(game.challengeDeadline().raw(), initialDeadline);
+        vm.warp(initialDeadline);
+        assertTrue(game.gameOver());
 
         assertEq(game.proofDeadline().raw(), game.createdAt().raw() + PROOF_PERIOD);
     }

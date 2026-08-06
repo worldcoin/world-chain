@@ -58,6 +58,7 @@ contract DeployProofSystem is Script {
         uint256 privateKey;
         uint256 l2ChainId;
         bytes32 rollupConfigHash;
+        uint256 blockInterval;
         uint64 challengePeriod;
         uint64 proofPeriod;
         uint256 proposerBond;
@@ -78,6 +79,7 @@ contract DeployProofSystem is Script {
 
     uint64 internal constant DEFAULT_CHALLENGE_PERIOD = 1 days;
     uint64 internal constant DEFAULT_PROOF_PERIOD = 7 days;
+    uint256 internal constant DEFAULT_BLOCK_INTERVAL = 450;
     uint256 internal constant DEFAULT_PROPOSER_BOND = 0.01 ether;
     uint256 internal constant DEFAULT_CHALLENGER_BOND = 0.001 ether;
     uint8 internal constant DEFAULT_PROOF_THRESHOLD = 2;
@@ -143,6 +145,7 @@ contract DeployProofSystem is Script {
         config.privateKey = vm.envUint("PRIVATE_KEY");
         config.l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
         config.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
+        config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", DEFAULT_BLOCK_INTERVAL);
         config.challengePeriod = vm.envOr("CHALLENGE_PERIOD", uint256(DEFAULT_CHALLENGE_PERIOD)).toUint64();
         config.proofPeriod = vm.envOr("PROOF_PERIOD", uint256(DEFAULT_PROOF_PERIOD)).toUint64();
         config.proposerBond = vm.envOr("PROPOSER_BOND", DEFAULT_PROPOSER_BOND);
@@ -205,6 +208,7 @@ contract DeployProofSystem is Script {
             "DeployProofSystem: ProxyAdmin owner key mismatch"
         );
         require(config.protocolFeeRecipient != address(0), "DeployProofSystem: protocol fee recipient required");
+        require(config.blockInterval > 0, "DeployProofSystem: block interval required");
         require(config.challengePeriod > 0, "DeployProofSystem: challenge period required");
         require(config.proofPeriod > config.challengePeriod, "DeployProofSystem: proof period must exceed challenge");
         require(config.proposerBond > 0, "DeployProofSystem: proposer bond required");
@@ -218,6 +222,7 @@ contract DeployProofSystem is Script {
     {
         return IMultiProofGame.GameConfig({
             rollupConfigHash: config.rollupConfigHash,
+            blockInterval: config.blockInterval,
             challengePeriod: config.challengePeriod,
             proofPeriod: config.proofPeriod,
             proposerBond: config.proposerBond,
@@ -255,6 +260,7 @@ contract DeployProofSystem is Script {
         vm.serializeBytes32(root, "rollupConfigHash", config.rollupConfigHash);
         vm.serializeUint(root, "l2ChainId", config.l2ChainId);
         vm.serializeUint(root, "proofSystemVersion", LibProof.PROOF_SYSTEM_VERSION);
+        vm.serializeUint(root, "blockInterval", config.blockInterval);
         vm.serializeUint(root, "challengePeriod", config.challengePeriod);
         vm.serializeUint(root, "proofPeriod", config.proofPeriod);
         vm.serializeUint(root, "proposerBond", config.proposerBond);

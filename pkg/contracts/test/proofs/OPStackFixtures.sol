@@ -124,6 +124,7 @@ abstract contract OPStackFixtures is Test {
     function _gameConfig() internal view returns (IMultiProofGame.GameConfig memory) {
         return IMultiProofGame.GameConfig({
             rollupConfigHash: ROLLUP_CONFIG_HASH,
+            blockInterval: BLOCK_INTERVAL,
             challengePeriod: CHALLENGE_PERIOD,
             proofPeriod: PROOF_PERIOD,
             proposerBond: PROPOSER_BOND,
@@ -139,7 +140,7 @@ abstract contract OPStackFixtures is Test {
     }
 
     function _domainHash() internal pure returns (bytes32) {
-        return LibProof.domainHash(CHAIN_ID, LibProof.PROOF_SYSTEM_VERSION, ROLLUP_CONFIG_HASH);
+        return LibProof.domainHash(CHAIN_ID, LibProof.PROOF_SYSTEM_VERSION, ROLLUP_CONFIG_HASH, BLOCK_INTERVAL);
     }
 
     function _extraData(uint256 l2BlockNumber, uint256 parentIndex, uint256 attempt)
@@ -198,11 +199,7 @@ abstract contract OPStackFixtures is Test {
         return _propose(parentIndex, _rootClaimFor(target), target, 0);
     }
 
-    /// @dev Only a proven claim is challengeable, so land the TEE lane first when there is none.
     function _challenge(MultiProofGame game) internal {
-        if (game.proofBitmap() == 0) {
-            game.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
-        }
         vm.prank(challengerAccount);
         game.challenge{value: CHALLENGER_BOND}();
     }

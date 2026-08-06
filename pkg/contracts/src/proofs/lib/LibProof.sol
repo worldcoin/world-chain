@@ -36,14 +36,14 @@ library LibProof {
         bytes32 rollupConfigHash;
     }
 
-    /// Commitment binding a deployment to its chain, proof-system version, and rollup
-    /// configuration.
-    function domainHash(uint256 chainId, uint256 proofSystemVersion, bytes32 rollupConfigHash)
+    /// Commitment binding a deployment to its chain, proof-system version, rollup
+    /// configuration, and proposal cadence.
+    function domainHash(uint256 chainId, uint256 proofSystemVersion, bytes32 rollupConfigHash, uint256 blockInterval)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(chainId, proofSystemVersion, rollupConfigHash));
+        return keccak256(abi.encode(chainId, proofSystemVersion, rollupConfigHash, blockInterval));
     }
 
     function rootId(
