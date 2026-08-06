@@ -1,6 +1,6 @@
 //! Enclave-side library code.
 //!
-//! This is the worker loop the `world-chain-nitro-enclave` binary runs inside the Nitro
+//! This is the worker loop the `world-chain-proof-nitro-enclave` binary runs inside the Nitro
 //! Enclave. It listens on vsock, runs the same OP Succinct Lite range logic the SP1 guest
 //! does, and attests the result via the local NSM device.
 //!

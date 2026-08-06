@@ -3,10 +3,10 @@
 # Used by Kubernetes pods to launch the enclave on Nitro-enabled EC2 instances.
 #
 # Build context: target/eif/  (produced by scripts/build-eif.sh)
-# Required file in context: world-chain-nitro-enclave.eif
+# Required file in context: world-chain-proof-nitro-enclave.eif
 #
 # Environment variables (defaults shown):
-#   EIF_PATH              /home/world-chain-nitro-enclave.eif
+#   EIF_PATH              /home/world-chain-proof-nitro-enclave.eif
 #   ENCLAVE_CPU_COUNT     2
 #   ENCLAVE_MEMORY_SIZE   16384 (MiB)
 #   ENCLAVE_DEBUG_MODE    false  (set to "true" or "1" to pass --debug-mode)
@@ -17,10 +17,10 @@ RUN dnf install -y aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel jq && \
     dnf clean all
 
 # EIF file from the build context (target/eif/).
-COPY target/eif/world-chain-nitro-enclave.eif /home/world-chain-nitro-enclave.eif
+COPY target/eif/world-chain-proof-nitro-enclave.eif /home/world-chain-proof-nitro-enclave.eif
 
 # Defaults; override at runtime via -e / K8s env:.
-ENV EIF_PATH="/home/world-chain-nitro-enclave.eif" \
+ENV EIF_PATH="/home/world-chain-proof-nitro-enclave.eif" \
     ENCLAVE_CPU_COUNT=2 \
     ENCLAVE_MEMORY_SIZE=16384 \
     ENCLAVE_DEBUG_MODE=false

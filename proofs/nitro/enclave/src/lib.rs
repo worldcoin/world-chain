@@ -20,7 +20,7 @@
 //!   on an attestation document.
 //! - [`host`] — `NitroProver` implementation that talks to a running enclave over vsock.
 //!
-//! The enclave-side guest is the `world-chain-nitro-enclave` binary (`src/enclave.rs`).
+//! The enclave-side guest is the `world-chain-proof-nitro-enclave` binary (`src/enclave.rs`).
 
 // clap is used by the p384-hints binary; reference it here so the
 // `unused_crate_dependencies` lint does not fire on the lib target.
@@ -84,7 +84,7 @@ pub type PcrDigest = [u8; PCR_LEN];
 /// before any production use.
 //
 // TODO(nitro): replace with real PCR values produced by `nitro-cli build-enclave` once we
-// have a reproducible EIF build for the world-chain-nitro-enclave image.
+// have a reproducible EIF build for the world-chain-proof-nitro-enclave image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExpectedPcrs {
     /// EIF measurement.

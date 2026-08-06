@@ -1,4 +1,4 @@
-//! Entry point for the `world-chain-nitro-enclave` binary.
+//! Entry point for the `world-chain-proof-nitro-enclave` binary.
 //!
 //! This file runs **inside** the Nitro Enclave. It is the same role the SP1 range program
 //! plays for the Succinct backend: it ingests a witness, drives the OP Stack derivation
@@ -40,5 +40,5 @@ async fn main() -> Result<()> {
 
 #[cfg(not(target_os = "linux"))]
 fn main() {
-    eprintln!("world-chain-nitro-enclave is only supported on Linux");
+    eprintln!("world-chain-proof-nitro-enclave is only supported on Linux");
 }

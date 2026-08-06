@@ -1,15 +1,15 @@
 # syntax=docker/dockerfile:1.7
 #
-# Container image used to produce the world-chain-nitro-enclave EIF.
+# Container image used to produce the world-chain-proof-nitro-enclave EIF.
 #
 # Build:
-#   docker build -t world-chain-nitro-enclave \
+#   docker build -t world-chain-proof-nitro-enclave \
 #     -f proofs/nitro/Dockerfile .
 #
 # Convert to an EIF:
 #   nitro-cli build-enclave \
-#     --docker-uri world-chain-nitro-enclave:latest \
-#     --output-file world-chain-nitro-enclave.eif
+#     --docker-uri world-chain-proof-nitro-enclave:latest \
+#     --output-file world-chain-proof-nitro-enclave.eif
 #
 # Or use scripts/build-eif.sh, which does both and emits the PCR measurements.
 #
