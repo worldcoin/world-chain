@@ -165,7 +165,7 @@ pub struct WorkerArgs {
     rollup_config_hash: Option<B256>,
 
     /// L2 blocks between a proposal's parent and its claimed block (the proof system's
-    /// `blockInterval` domain constant).
+    /// proposer cadence).
     #[arg(long, env = "BLOCK_INTERVAL")]
     block_interval: u64,
 

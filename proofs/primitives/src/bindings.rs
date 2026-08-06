@@ -54,7 +54,6 @@ sol! {
         function PROOF_LANE_COUNT() external view returns (uint8);
         function domainHash() external view returns (bytes32);
         function rollupConfigHash() external view returns (bytes32);
-        function blockInterval() external view returns (uint256);
         function challengePeriod() external view returns (uint64);
         function proofPeriod() external view returns (uint64);
         function proposerBond() external view returns (uint256);

@@ -51,8 +51,6 @@ pub struct SelectedLineageGame {
 pub struct RegisteredLineageConfig {
     /// Hash of the proof domain encoded into every game factory key.
     pub domain_hash: B256,
-    /// Number of L2 blocks covered by each proposal transition.
-    pub block_interval: u64,
     /// Registry that owns the selected anchor checkpoint.
     pub anchor_registry: Address,
 }
@@ -123,7 +121,8 @@ pub enum LineageError {
 /// Contract reads required to select a proposal lineage.
 #[async_trait]
 pub trait LineageProvider: Send + Sync {
-    /// Proposal interval committed by the registered proof domain.
+    /// Proposal cadence in L2 blocks. Offchain policy: the game only enforces that each
+    /// proposal advances its parent, so proposer and challenger must be configured alike.
     fn lineage_block_interval(&self) -> u64;
 
     async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError>;
@@ -261,11 +260,10 @@ where
 
     let implementation =
         IMultiProofGame::IMultiProofGameInstance::new(implementation_address, provider.clone());
-    let (domain_hash, anchor_registry, block_interval) = provider
+    let (domain_hash, anchor_registry) = provider
         .multicall()
         .add(implementation.domainHash())
         .add(implementation.anchorStateRegistry())
-        .add(implementation.blockInterval())
         .aggregate()
         .await
         .map_err(|error| LineageError::Contract(error.to_string()))?;
@@ -274,16 +272,9 @@ where
             "registered game implementation has no anchor registry".into(),
         ));
     }
-    let block_interval = block_interval
-        .try_into()
-        .map_err(|_| LineageError::Contract("blockInterval overflows u64".into()))?;
-    if block_interval == 0 {
-        return Err(LineageError::ZeroBlockInterval);
-    }
 
     Ok(RegisteredLineageConfig {
         domain_hash,
-        block_interval,
         anchor_registry,
     })
 }

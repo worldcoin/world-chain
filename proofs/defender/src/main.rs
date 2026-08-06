@@ -47,6 +47,11 @@ struct Cli {
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
+    /// L2 blocks each proposal advances by. Offchain policy: the game only enforces that a
+    /// proposal advances its parent, so proposer and challenger MUST agree on this value.
+    #[arg(long, env = "PROOF_SYSTEM_BLOCK_INTERVAL")]
+    block_interval: u64,
+
     /// Hex-encoded private key the defender signs L1 transactions with.
     #[arg(long, env = "DEFENDER_KEY", hide_env_values = true)]
     defender_key: PrivateKeySigner,
@@ -100,9 +105,14 @@ async fn main() -> Result<()> {
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, defender_address).await;
 
-    let client = AlloyDefenderClient::new(provider, cli.factory_address, cli.l1_tx_confirmations)
-        .await
-        .context("failed to connect defender to the registered proof system")?;
+    let client = AlloyDefenderClient::new(
+        provider,
+        cli.factory_address,
+        cli.l1_tx_confirmations,
+        cli.block_interval,
+    )
+    .await
+    .context("failed to connect defender to the registered proof system")?;
     let output_roots = VerifyingConsensusProvider::new(
         OptimismConsensusClient::new(cli.output_root_rpc.clone()),
         cli.verifying_output_root_rpc

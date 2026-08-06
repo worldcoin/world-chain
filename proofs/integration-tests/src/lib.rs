@@ -98,7 +98,6 @@ pub fn test_domain() -> ProofDomain {
         chain_id: CHAIN_ID,
         proof_system_version: PROOF_SYSTEM_VERSION,
         rollup_config_hash: B256::repeat_byte(0x99),
-        block_interval: BLOCK_INTERVAL,
     }
 }
 

@@ -121,8 +121,6 @@ pub struct ProofDomain {
     pub proof_system_version: u64,
     /// Hash of the rollup config and World Chain hardfork schedule.
     pub rollup_config_hash: B256,
-    /// Distance in L2 blocks between parent and proposed roots.
-    pub block_interval: u64,
 }
 
 impl ProofDomain {
@@ -133,7 +131,6 @@ impl ProofDomain {
             U256::from(self.chain_id),
             U256::from(self.proof_system_version),
             self.rollup_config_hash,
-            U256::from(self.block_interval),
         )
             .abi_encode_params();
         keccak256(encoded)
@@ -352,7 +349,6 @@ mod tests {
             rollup_config_hash: b256!(
                 "1111111111111111111111111111111111111111111111111111111111111111"
             ),
-            block_interval: 10,
         };
         let proposal = ProposalCommitment {
             parent_ref: address!("0000000000000000000000000000000000001006"),
@@ -372,12 +368,12 @@ mod tests {
         // `LibProof.domainHash` and `LibProof.rootId`.
         assert_eq!(
             domain.hash(),
-            b256!("2eadd7e0cde9ca6f758216655e263e8d197480ebc4d3478403000447fe62f4be")
+            b256!("c25297d931a8fb94b0b228d43d432f0b4fb91d8c36bed6ab6d2ab26188d3e73a")
         );
         let root_id = commitment.root_id(domain.hash());
         assert_eq!(
             root_id,
-            b256!("6cccba67d43368ae81da6cf22798e228b82b953c51c1bbce76959b166b888dd3")
+            b256!("878d21dcc05fe455b3f7a1cdef42edc1b63a7c3afcf96a852764b45c9d1d3fed")
         );
 
         assert_ne!(B256::ZERO, proposal.game_uuid(domain.hash()));

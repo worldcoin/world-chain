@@ -42,6 +42,11 @@ struct Cli {
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
+    /// L2 blocks each proposal advances by. Offchain policy: the game only enforces that a
+    /// proposal advances its parent, so proposer and challenger MUST agree on this value.
+    #[arg(long, env = "PROOF_SYSTEM_BLOCK_INTERVAL")]
+    block_interval: u64,
+
     /// Hex-encoded private key the proposer signs L1 transactions with.
     #[arg(long, env = "PROPOSER_KEY", hide_env_values = true)]
     proposer_key: PrivateKeySigner,
@@ -102,9 +107,14 @@ async fn main() -> Result<()> {
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, proposer_address).await;
 
-    let contracts = AlloyProofSystemClient::new(provider, cli.factory_address, cli.confirmations)
-        .await
-        .context("failed to bind the World Chain proof system")?;
+    let contracts = AlloyProofSystemClient::new(
+        provider,
+        cli.factory_address,
+        cli.confirmations,
+        cli.block_interval,
+    )
+    .await
+    .context("failed to bind the World Chain proof system")?;
     let bond_manager_config = BondManagerConfig {
         poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
         initial_scan_limit: cli.bond_manager_initial_scan_limit,
@@ -131,7 +141,7 @@ async fn main() -> Result<()> {
         anchor = %registered.anchor_registry,
         proposer = %proposer_address,
         domain_hash = %registered.domain_hash,
-        block_interval = registered.block_interval,
+        block_interval = cli.block_interval,
         max_resolutions_per_tick = cli.max_resolutions_per_tick,
         bond_manager_poll_interval_seconds = cli.bond_manager_poll_interval_seconds,
         bond_manager_initial_scan_limit = cli.bond_manager_initial_scan_limit,

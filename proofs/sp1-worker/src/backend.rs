@@ -24,7 +24,7 @@ use world_chain_prover_service::{
 #[derive(Clone, Copy, Debug)]
 pub struct Sp1BackendConfig {
     /// L2 blocks between a proposal's parent and its claimed block (the proof system's
-    /// `blockInterval` domain constant). The proved range is
+    /// proposer cadence). The proved range is
     /// `(l2_block_number - block_interval, l2_block_number]`.
     pub block_interval: u64,
     /// Number of equal-length sub-ranges proved independently before aggregation.

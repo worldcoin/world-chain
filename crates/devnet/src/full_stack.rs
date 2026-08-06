@@ -103,6 +103,7 @@ const CONDUCTOR_HEALTHCHECK_UNSAFE_INTERVAL_SECS: &str = "300";
 const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
 const PROVER_SERVICE_POSTGRES_PORT: u16 = 5432;
+/// Proposal cadence for the devnet proposer and defender; offchain policy, not onchain config.
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -290,7 +291,6 @@ struct WorldProofSystemDeployment {
     rollup_config_hash: String,
     l2_chain_id: u64,
     proof_system_version: u64,
-    block_interval: u64,
 }
 
 /// In-process World Chain proof-system proposer task. Aborted on devnet drop.
@@ -700,7 +700,7 @@ impl FullStackWorldDevnet {
             sp1_worker_prover_kind()?,
             prover_service_url.as_deref(),
         ) {
-            (Some(deployment), Some(kind), Some(prover_service_url)) => {
+            (Some(_), Some(kind), Some(prover_service_url)) => {
                 let l2_rpc = sequencers
                     .first()
                     .map(|sequencer| sequencer.rpc_url.clone())
@@ -713,7 +713,6 @@ impl FullStackWorldDevnet {
                         &l2_rpc,
                         prover_service_url,
                         &artifacts.rollup_path,
-                        deployment,
                         kind,
                     )
                     .await?,
@@ -1200,10 +1199,6 @@ async fn deploy_world_proof_system(
         .env("SECURITY_COUNCIL_VERIFIER", &mocks.security_council)
         .env("WORLD_CHAIN_L2_CHAIN_ID", DEV_CHAIN_ID.to_string())
         .env("ROLLUP_CONFIG_HASH", &rollup_config_hash_hex)
-        .env(
-            "PROOF_SYSTEM_BLOCK_INTERVAL",
-            PROOF_SYSTEM_BLOCK_INTERVAL.to_string(),
-        )
         .env("PROOF_SYSTEM_DEPLOYMENT_OUT", &deployment_rel_path);
 
     info!(
@@ -2672,9 +2667,14 @@ async fn start_world_chain_proposer(
         .connect_http(Url::parse(l1_rpc_url)?);
 
     let required_confirmations = 1;
-    let contracts = AlloyProofSystemClient::new(provider, factory_address, required_confirmations)
-        .await
-        .wrap_err("failed to bind the World Chain proof system")?;
+    let contracts = AlloyProofSystemClient::new(
+        provider,
+        factory_address,
+        required_confirmations,
+        PROOF_SYSTEM_BLOCK_INTERVAL,
+    )
+    .await
+    .wrap_err("failed to bind the World Chain proof system")?;
     let mut bond_manager = BondManager::new(
         BondManagerConfig {
             poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
@@ -2697,7 +2697,7 @@ async fn start_world_chain_proposer(
         anchor = %registered.anchor_registry,
         proposer = %proposer_address,
         domain_hash = %registered.domain_hash,
-        block_interval = registered.block_interval,
+        block_interval = PROOF_SYSTEM_BLOCK_INTERVAL,
         "starting native World Chain proof-system proposer"
     );
 
@@ -2843,6 +2843,7 @@ async fn start_world_chain_defender(
         provider,
         factory_address,
         DEFAULT_DEFENDER_L1_TX_CONFIRMATIONS,
+        PROOF_SYSTEM_BLOCK_INTERVAL,
     )
     .await
     .map_err(|error| eyre!("failed to connect defender to proof system: {error}"))?;
@@ -2997,7 +2998,6 @@ async fn start_sp1_worker(
     l2_rpc_url: &str,
     prover_service_url: &str,
     rollup_path: &Path,
-    deployment: &WorldProofSystemDeployment,
     kind: Sp1ProverKind,
 ) -> Result<Sp1WorkerTask> {
     let rollup_config: Value = read_json(rollup_path)?;
@@ -3018,13 +3018,13 @@ async fn start_sp1_worker(
             let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16)
                 .await
                 .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
-            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+            start_sp1_worker_with_prover(prover_service_url, kind, host, prover)
         }
         Sp1ProverKind::Mock => {
             let prover = MockSuccinctProver::new(SP1ProofMode::Groth16)
                 .await
                 .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
-            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+            start_sp1_worker_with_prover(prover_service_url, kind, host, prover)
         }
         Sp1ProverKind::Network => {
             let private_key = std::env::var(SP1_PRIVATE_KEY_ENV).wrap_err_with(|| {
@@ -3033,14 +3033,13 @@ async fn start_sp1_worker(
             let prover = NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key)
                 .await
                 .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
-            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+            start_sp1_worker_with_prover(prover_service_url, kind, host, prover)
         }
     }
 }
 
 fn start_sp1_worker_with_prover<P>(
     prover_service_url: &str,
-    deployment: &WorldProofSystemDeployment,
     kind: Sp1ProverKind,
     host: OnlineHostConfig,
     prover: P,
@@ -3052,7 +3051,7 @@ where
         host,
         prover,
         Sp1BackendConfig {
-            block_interval: deployment.block_interval,
+            block_interval: PROOF_SYSTEM_BLOCK_INTERVAL,
             split_count: 1,
             allow_unfinalized: false,
             session_poll_interval: Duration::from_secs(10),
@@ -3077,7 +3076,7 @@ where
 
     info!(
         prover_service = %prover_service_url,
-        block_interval = deployment.block_interval,
+        block_interval = PROOF_SYSTEM_BLOCK_INTERVAL,
         prover = %kind,
         submit_proof_retry_max_retries = retry_config.max_attempts,
         submit_proof_retry_initial_delay_ms = retry_config.initial_delay.as_millis(),
@@ -3460,7 +3459,7 @@ fn build_components(
             ))
             .with_note(format!(
                 "l2_chain_id={}, block_interval={}",
-                deployment.l2_chain_id, deployment.block_interval
+                deployment.l2_chain_id, PROOF_SYSTEM_BLOCK_INTERVAL
             ))
             .with_note(format!(
                 "rollup_config_hash={}",
@@ -3477,7 +3476,7 @@ fn build_components(
             .with_endpoint("anchor", deployment.anchor_state_registry.clone())
             .with_note(format!(
                 "native in-process proposer creating WIP-1006 games every {} L2 blocks via DisputeGameFactory.create",
-                deployment.block_interval
+                PROOF_SYSTEM_BLOCK_INTERVAL
             )),
         );
         components.push(

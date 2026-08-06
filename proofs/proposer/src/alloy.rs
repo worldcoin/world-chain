@@ -25,6 +25,8 @@ pub struct AlloyProofSystemClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     registered: RegisteredLineageConfig,
+    /// Proposal cadence in L2 blocks; offchain policy, not enforced by the game.
+    block_interval: u64,
     /// Number of confirmations to require after sending a tx onchain.
     confirmations: u64,
     provider: P,
@@ -43,6 +45,7 @@ where
         provider: P,
         factory_address: Address,
         confirmations: u64,
+        block_interval: u64,
     ) -> Result<Self, ProposerError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
@@ -58,6 +61,7 @@ where
             factory,
             anchor,
             registered,
+            block_interval,
             confirmations,
             provider,
         })
@@ -261,7 +265,7 @@ where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
     fn lineage_block_interval(&self) -> u64 {
-        self.registered.block_interval
+        self.block_interval
     }
 
     async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError> {
