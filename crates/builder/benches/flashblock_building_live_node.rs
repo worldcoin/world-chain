@@ -46,6 +46,7 @@ fn deterministic_payload_attributes(
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::ZERO),
             slot_number: None,
+            target_gas_limit: None,
         },
         transactions: Some(transactions),
         no_tx_pool: Some(true),
@@ -159,7 +160,7 @@ fn bench_build_flashblock_case<F>(
                     cancel: Default::default(),
                     best_payload: None,
                     execution_cache: None,
-                    trie_handle: None,
+                    state_root_handle: None,
                 };
 
                 let (outcome, access_list) = builder

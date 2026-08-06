@@ -123,7 +123,7 @@ where
             cancel,
             best_payload,
             execution_cache: _,
-            trie_handle: _,
+            state_root_handle: _,
         } = args;
         self.metrics.increment_attempts();
         let build_started = Instant::now();
@@ -222,7 +222,7 @@ where
             cancel: Default::default(),
             best_payload: None,
             execution_cache: None,
-            trie_handle: None,
+            state_root_handle: None,
         };
         let converted_args = convert_build_args(args)?;
         self.build_payload(
@@ -291,7 +291,7 @@ fn convert_build_args(
         config,
         cached_reads,
         execution_cache,
-        trie_handle,
+        state_root_handle,
         cancel,
         best_payload,
     } = args;
@@ -309,7 +309,7 @@ fn convert_build_args(
         },
         cached_reads,
         execution_cache,
-        trie_handle,
+        state_root_handle,
         cancel,
         best_payload,
     })
@@ -634,6 +634,7 @@ where
         execution_output: Arc::new(execution_outcome.clone()),
         hashed_state: Arc::new(hashed_state),
         trie_updates: Arc::new(trie_updates),
+        changed_paths: None,
     };
 
     let payload = OpBuiltPayload::new(

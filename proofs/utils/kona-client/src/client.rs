@@ -1,13 +1,13 @@
 use alloy_consensus::BlockBody;
+use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::B256;
-use alloy_rlp::Decodable;
 use anyhow::Result;
 use kona_derive::{Pipeline, PipelineError, PipelineErrorKind, Signal, SignalReceiver};
 use kona_driver::{Driver, DriverError, DriverPipeline, DriverResult, Executor, TipCursor};
 use kona_genesis::RollupConfig;
 use kona_preimage::{CommsClient, PreimageKey};
 use kona_proof::{HintType, errors::OracleProviderError};
-use kona_protocol::L2BlockInfo;
+use kona_protocol::{FromBlockError, L2BlockInfo};
 use op_alloy_consensus::{OpBlock, OpTxEnvelope, OpTxType};
 use std::fmt::Debug;
 use tracing::{error, info, warn};
@@ -156,7 +156,11 @@ where
                     .as_ref()
                     .unwrap_or(&Vec::new())
                     .iter()
-                    .map(|tx| OpTxEnvelope::decode(&mut tx.as_ref()).map_err(DriverError::Rlp))
+                    .map(|tx| {
+                        OpTxEnvelope::decode_2718(&mut tx.as_ref()).map_err(|err| {
+                            DriverError::FromBlock(FromBlockError::TxEnvelopeDecodeError(err))
+                        })
+                    })
                     .collect::<DriverResult<Vec<OpTxEnvelope>, E::Error>>()?,
                 ommers: Vec::new(),
                 withdrawals: None,

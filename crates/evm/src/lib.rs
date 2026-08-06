@@ -228,6 +228,8 @@ impl<E: EvmBounds> ConfigureEvm for WorldChainEvmConfig<E> {
 }
 
 impl<E: EvmBounds + ConfigurePostExecEvm> ConfigurePostExecEvm for WorldChainEvmConfig<E> {
+    type Snapshot = E::Snapshot;
+
     fn post_exec_executor_for_block<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
@@ -237,7 +239,7 @@ impl<E: EvmBounds + ConfigurePostExecEvm> ConfigurePostExecEvm for WorldChainEvm
         impl BlockExecutor<
             Transaction = <Self::Primitives as NodePrimitives>::SignedTx,
             Receipt = <Self::Primitives as NodePrimitives>::Receipt,
-        > + PostExecExecutorExt
+        > + PostExecExecutorExt<Snapshot = Self::Snapshot>
         + 'a,
         Self::Error,
     > {
@@ -254,7 +256,7 @@ impl<E: EvmBounds + ConfigurePostExecEvm> ConfigurePostExecEvm for WorldChainEvm
     ) -> Result<
         impl BlockBuilder<
             Primitives = Self::Primitives,
-            Executor: PostExecExecutorExt
+            Executor: PostExecExecutorExt<Snapshot = Self::Snapshot>
                           + BlockExecutor<
                 Evm: Evm<DB: core::ops::DerefMut<Target = State<DB>>>,
                 Result: reth_optimism_evm::PreRefundGasUsed,

@@ -114,10 +114,10 @@ is set; when disabled it is a pure pass-through and the node behaves byte-identi
 
 ## Component versions
 
-- reth (paradigmxyz): tag `v2.3.0` (`9384bc5`).
-- op-reth (ethereum-optimism/optimism fork): rev `423d93e`.
+- reth (paradigmxyz): rev `f2eecc6` (the revision selected by op-reth v2.4.1).
+- op-reth (ethereum-optimism/optimism fork): tag `op-reth/v2.4.1` (`a9a8dad`).
 - `alloy_rpc_types_debug::ExecutionWitness { state, codes, keys, headers }` (all `Vec<Bytes>`),
-  via `alloy-rpc-types-debug` `2.0.5`.
+  via `alloy-rpc-types-debug` `2.1.1`.
 - `reth_revm::witness::ExecutionWitnessRecord` { `hashed_state`, `codes`, `keys`,
   `lowest_block_number` }; `record_executed_state` / `from_executed_state`.
 - `StateProofProvider::witness(input, hashed_state, mode)` (`storage-api/src/trie.rs`) produces the

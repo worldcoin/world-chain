@@ -72,7 +72,7 @@ hex.workspace = true
 crossbeam-channel.workspace = true
 
 [build-dependencies]
-vergen.workspace = true
+vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }
 vergen-git2.workspace = true
 
 [dev-dependencies]
