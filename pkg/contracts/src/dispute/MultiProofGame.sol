@@ -46,9 +46,30 @@ import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 /// @title MultiProofGame
 /// @author World Contributors
 /// @notice A Multi Proof `IDisputeGame` supporting three different proof 'lanes'.
-///     1.) ZK Validity Proof via Succinct Prover
-///     2.) AWS Nitro Enclave Attestation
-///     3.) Security Council Attestations
+///
+/// Each Lane corresponds to a single bit position in `ClaimData.proofBitmap`, at `1 << uint8(LibProof.ProofLane)`:
+///
+///     bit  7   6   5   4   3   2   1   0
+///          └───────┬───────┘   │   │   └── 0x01  VALIDITY_PROOF    (lane 1)
+///              reserved        │   └────── 0x02  TEE_ATTESTATION   (lane 2)
+///                              └────────── 0x04  SECURITY_COUNCIL  (lane 3)
+///
+/// A proposal advances through `ClaimData.status`:
+///
+///   Unchallenged ──── submitProofLane (any 1 lane) ───► UnchallengedAndValidProofProvided
+///        │ ⇒ CHALLENGER_WINS                                          │ ⇒ DEFENDER_WINS
+///        │                                                            │
+///        └──── challenge() ────► Challenged ◄──── challenge() ────────┘
+///                                    │ ⇒ CHALLENGER_WINS
+///                                    │       (when bitmap < PROOF_THRESHOLD)
+///                                    │
+///                                    │
+///                                    │
+///                                    │
+///                                    └──── submitProofLane reaching PROOF_THRESHOLD ───► ChallengedAndValidProofProvided
+///                                                                                        ⇒ DEFENDER_WINS
+///
+///
 /// @dev Additional Proof Lanes may be added in the future for this game type.
 /// @custom:security-contact security@toolsforhumanity.com
 contract MultiProofGame is Clone, ISemver, IMultiProofGame {
