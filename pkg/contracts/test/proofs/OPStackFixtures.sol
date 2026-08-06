@@ -8,9 +8,7 @@ import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
 import {GameTypes} from "../../src/proofs/GameTypes.sol";
 import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
-import {IWorldChainStakingRegistry} from "../../src/proofs/interfaces/IWorldChainStakingRegistry.sol";
 import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
-import {MockStakingRegistry} from "../../src/proofs/mocks/MockStakingRegistry.sol";
 import {MockSystemConfig} from "../mocks/MockSystemConfig.sol";
 
 import {Claim, GameStatus, GameType, Hash, Proposal} from "@optimism-bedrock/src/dispute/lib/Types.sol";
@@ -53,7 +51,6 @@ abstract contract OPStackFixtures is Test {
     IAnchorStateRegistry internal asr;
     IDelayedWETH internal weth;
 
-    MockStakingRegistry internal stakingRegistry;
     MockRootIdVerifier internal validityVerifier;
     MockRootIdVerifier internal teeVerifier;
     MockRootIdVerifier internal councilVerifier;
@@ -99,8 +96,6 @@ abstract contract OPStackFixtures is Test {
         );
 
         // World Chain proof-system periphery + game implementation.
-        stakingRegistry = new MockStakingRegistry();
-        stakingRegistry.setStaked(challengerAccount, true);
         validityVerifier = new MockRootIdVerifier(false);
         teeVerifier = new MockRootIdVerifier(false);
         councilVerifier = new MockRootIdVerifier(false);
@@ -139,7 +134,6 @@ abstract contract OPStackFixtures is Test {
             validityProofVerifier: IWorldChainProofVerifier(address(validityVerifier)),
             teeVerifier: IWorldChainProofVerifier(address(teeVerifier)),
             securityCouncil: IWorldChainProofVerifier(address(councilVerifier)),
-            stakingRegistry: IWorldChainStakingRegistry(address(stakingRegistry)),
             anchorStateRegistry: asr,
             weth: weth
         });
