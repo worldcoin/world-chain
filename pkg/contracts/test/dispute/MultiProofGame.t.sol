@@ -342,8 +342,16 @@ contract MultiProofGameTest is OPStackFixtures {
         game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
-        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND);
-        assertEq(game.credit(proposer), game.totalBonds());
+
+        // Two lanes plus the proposer split the forfeited challenger bond three ways.
+        uint256 share = CHALLENGER_BOND / 3;
+        assertEq(game.credit(laneRewardRecipient(0)), share);
+        assertEq(game.credit(laneRewardRecipient(1)), share);
+        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND - 2 * share);
+        assertEq(
+            game.credit(proposer) + game.credit(laneRewardRecipient(0)) + game.credit(laneRewardRecipient(1)),
+            game.totalBonds()
+        );
     }
 
     function test_Challenge_AfterInitialProofStillRequiresThreshold() public {

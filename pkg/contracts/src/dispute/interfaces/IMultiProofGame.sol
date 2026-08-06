@@ -77,6 +77,9 @@ interface IMultiProofGame is IDisputeGame {
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
     error InconsistentSystemConfiguration();
 
+    /// @notice Thrown when a lane that already counts toward the threshold is resubmitted.
+    error DuplicateProofLane(LibProof.ProofLane lane, bytes32 rootId, Bitmap proofBitmap);
+
     ////////////////////////////////////////////////////////////////
     //                         Events                             //
     ////////////////////////////////////////////////////////////////
@@ -87,12 +90,6 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Emitted when a proof lane is accepted; `proofBitmap` carries the updated lane
     ///         set, from which indexers can derive threshold status.
     event Proved(LibProof.ProofLane indexed lane, bytes32 indexed rootId, address recipient, Bitmap proofBitmap);
-
-    /// @notice Emitted when a lane that already counts toward the threshold is resubmitted.
-    event DuplicateProofLane(LibProof.ProofLane indexed lane, bytes32 indexed rootId, Bitmap proofBitmap);
-
-    /// @notice Emitted per lane when a forfeited challenger bond is split on `DEFENDER_WINS`.
-    event LaneRewarded(LibProof.ProofLane indexed lane, address indexed recipient, uint256 amount);
 
     /// @notice Emitted when the bond distribution mode is locked in.
     event GameClosed(BondDistributionMode bondDistributionMode);

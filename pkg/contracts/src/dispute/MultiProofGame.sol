@@ -475,10 +475,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (compact.laneId >= PROOF_LANE_COUNT) revert InvalidLane(compact.laneId);
         LibProof.ProofLane lane = LibProof.ProofLane(compact.laneId);
 
-        // No-op on resubmission so racing provers do not revert each other.
         if (claimData.proofBitmap.has(lane)) {
-            emit DuplicateProofLane(lane, rootId_, claimData.proofBitmap);
-            return claimData.status;
+            revert DuplicateProofLane(lane, rootId_, claimData.proofBitmap);
         }
 
         // Verify the proof against the verifier configured for this lane.
@@ -603,7 +601,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                 address recipient = laneRecipient[laneId];
                 normalModeCredit[recipient] += share;
                 distributed += share;
-                emit LaneRewarded(LibProof.ProofLane(laneId), recipient, share);
             }
         }
 
