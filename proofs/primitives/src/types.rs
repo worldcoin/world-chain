@@ -21,9 +21,14 @@ pub const MULTI_PROOF_GAME_TYPE: u32 = 1006;
 /// Maximum number of sequential retry attempts probed for one transition.
 pub const MAX_ATTEMPT_SCAN: u64 = 64;
 
-/// The `MultiProofGame.WorldChainGameCreated` event.
+/// Byte length of the `submitProofLane` compact header.
+///
+/// Must match `LibProof.PROOF_HEADER_LENGTH`.
+pub const PROOF_HEADER_LENGTH: usize = 21;
+
+/// Proposal context fixed when a `MultiProofGame` is created.
 #[derive(Debug, Clone, Copy)]
-pub struct WorldChainGameCreated {
+pub struct GameCreation {
     pub root_id: B256,
     pub game: Address,
     pub game_creator: Address,
@@ -35,33 +40,81 @@ pub struct WorldChainGameCreated {
     pub attempt: u64,
 }
 
-/// A game root state.
+/// Stock OP Stack `GameStatus`, as returned by `status()` and `resolutionStatus().outcome`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RootState {
-    None,
-    Proposed,
-    Challenged,
-    Finalized,
-    Invalidated,
+#[repr(u8)]
+pub enum GameStatus {
+    InProgress = 0,
+    /// The root claim was successfully challenged.
+    ChallengerWins = 1,
+    /// The root claim could not be contested.
+    DefenderWins = 2,
 }
 
 #[derive(Debug, Error)]
-pub enum RootStateError {
-    #[error("Invalid root state: {0}")]
-    InvalieRootState(u8),
+pub enum GameStatusError {
+    #[error("Invalid game status: {0}")]
+    InvalidGameStatus(u8),
 }
 
-impl TryFrom<u8> for RootState {
-    type Error = RootStateError;
+impl TryFrom<u8> for GameStatus {
+    type Error = GameStatusError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(RootState::None),
-            1 => Ok(RootState::Proposed),
-            2 => Ok(RootState::Challenged),
-            3 => Ok(RootState::Finalized),
-            4 => Ok(RootState::Invalidated),
-            _ => Err(RootStateError::InvalieRootState(value)),
+            0 => Ok(Self::InProgress),
+            1 => Ok(Self::ChallengerWins),
+            2 => Ok(Self::DefenderWins),
+            _ => Err(GameStatusError::InvalidGameStatus(value)),
+        }
+    }
+}
+
+/// `IMultiProofGame.ProposalStatus`, the per-proposal state machine behind `claimData`.
+///
+/// Distinct from [`GameStatus`]: it splits an in-progress game into challenged and unchallenged,
+/// which the game's `GameStatus` cannot express.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ProposalStatus {
+    Unchallenged = 0,
+    Challenged = 1,
+    UnchallengedAndValidProofProvided = 2,
+    ChallengedAndValidProofProvided = 3,
+    Resolved = 4,
+}
+
+impl ProposalStatus {
+    /// Whether a challenger can still dispute this proposal.
+    ///
+    /// A proven proposal stays challengeable until its window closes: an accepted lane only
+    /// finalizes an unchallenged root, so a challenge still forces the full threshold.
+    #[must_use]
+    pub const fn is_challengeable(self) -> bool {
+        matches!(
+            self,
+            Self::Unchallenged | Self::UnchallengedAndValidProofProvided
+        )
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ProposalStatusError {
+    #[error("Invalid proposal status: {0}")]
+    InvalidProposalStatus(u8),
+}
+
+impl TryFrom<u8> for ProposalStatus {
+    type Error = ProposalStatusError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Unchallenged),
+            1 => Ok(Self::Challenged),
+            2 => Ok(Self::UnchallengedAndValidProofProvided),
+            3 => Ok(Self::ChallengedAndValidProofProvided),
+            4 => Ok(Self::Resolved),
+            _ => Err(ProposalStatusError::InvalidProposalStatus(value)),
         }
     }
 }
@@ -205,6 +258,20 @@ impl ProofLane {
     }
 }
 
+/// Encodes the compact payload `MultiProofGame.submitProofLane` takes.
+///
+/// Mirrors `LibProof.decodeCompact`: lane id at byte 0, reward recipient at bytes 1..21, then
+/// the lane-specific bytes its verifier consumes. Packed, not ABI-encoded — a leading offset
+/// word would shift every field the assembly decoder reads.
+#[must_use]
+pub fn encode_compact_proof(lane: ProofLane, recipient: Address, proof: &[u8]) -> Bytes {
+    let mut encoded = Vec::with_capacity(PROOF_HEADER_LENGTH + proof.len());
+    encoded.push(lane as u8);
+    encoded.extend_from_slice(recipient.as_slice());
+    encoded.extend_from_slice(proof);
+    encoded.into()
+}
+
 /// Count distinct lanes in a proof bitmap.
 #[must_use]
 pub const fn proof_count(bitmap: u8) -> u8 {
@@ -251,37 +318,47 @@ impl TryFrom<u8> for InvalidationReason {
     }
 }
 
+/// Decoded `MultiProofGame.resolutionStatus()`: what a resolve call would do right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolutionStatus {
     pub resolvable: bool,
-    pub root_state: RootState,
+    /// The outcome a resolve call would produce, or the outcome already reached.
+    pub outcome: GameStatus,
     pub invalidation_reason: InvalidationReason,
 }
 
 impl ResolutionStatus {
-    /// Returns true whether this resolution status is positive resolvable:
-    /// - `resolvable` is true AND
-    /// - the expected root state outcome is `Finalized`.
+    /// Whether resolving now would uphold the root claim.
     pub fn positive_resolvable(&self) -> bool {
-        self.resolvable && self.root_state == RootState::Finalized
+        self.resolvable && self.outcome == GameStatus::DefenderWins
     }
 
     /// Returns whether the game can be resolved as invalid because its parent is invalid.
     pub fn invalid_parent_resolvable(&self) -> bool {
         self.resolvable
-            && self.root_state == RootState::Invalidated
+            && self.outcome == GameStatus::ChallengerWins
             && self.invalidation_reason == InvalidationReason::InvalidParent
     }
 
     /// Returns whether the game has already reached a terminal state.
     ///
-    /// The root state may describe the expected outcome of a game that is currently resolvable,
-    /// so a terminal root state is considered resolved only when `resolvable` is false.
+    /// `outcome` describes the expected result while a game is still resolvable, so a terminal
+    /// outcome only means resolved once `resolvable` is false.
     pub fn is_resolved(&self) -> bool {
-        !self.resolvable
-            && (self.root_state == RootState::Finalized
-                || self.root_state == RootState::Invalidated)
+        !self.resolvable && self.outcome != GameStatus::InProgress
     }
+}
+
+/// Decoded `MultiProofGame.claimData()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClaimData {
+    pub status: ProposalStatus,
+    /// Zero when the proposal has not been disputed.
+    pub challenger: Address,
+    /// Challenge deadline while unchallenged, proof deadline once challenged.
+    pub deadline: u64,
+    pub proof_bitmap: u8,
+    pub invalidation_reason: InvalidationReason,
 }
 
 #[cfg(test)]
@@ -296,6 +373,93 @@ mod tests {
         assert_eq!(proof_count(bitmap), 2);
         assert!(has_threshold(bitmap));
         assert!(!has_threshold(ProofLane::TeeAttestation.mask()));
+    }
+
+    #[test]
+    fn game_status_matches_op_stack_ordering() {
+        // `resolutionStatus().outcome` and `status()` are OP Stack `GameStatus`, not a
+        // proposal-level state: decoding them with any other ordering silently mislabels
+        // every game.
+        assert_eq!(GameStatus::try_from(0).unwrap(), GameStatus::InProgress);
+        assert_eq!(GameStatus::try_from(1).unwrap(), GameStatus::ChallengerWins);
+        assert_eq!(GameStatus::try_from(2).unwrap(), GameStatus::DefenderWins);
+        assert!(GameStatus::try_from(3).is_err());
+    }
+
+    #[test]
+    fn proposal_status_matches_contract_ordering() {
+        // Mirrors `IMultiProofGame.ProposalStatus`.
+        assert_eq!(
+            ProposalStatus::try_from(0).unwrap(),
+            ProposalStatus::Unchallenged
+        );
+        assert_eq!(
+            ProposalStatus::try_from(1).unwrap(),
+            ProposalStatus::Challenged
+        );
+        assert_eq!(
+            ProposalStatus::try_from(2).unwrap(),
+            ProposalStatus::UnchallengedAndValidProofProvided
+        );
+        assert_eq!(
+            ProposalStatus::try_from(3).unwrap(),
+            ProposalStatus::ChallengedAndValidProofProvided
+        );
+        assert_eq!(
+            ProposalStatus::try_from(4).unwrap(),
+            ProposalStatus::Resolved
+        );
+        assert!(ProposalStatus::try_from(5).is_err());
+
+        // A challenger may still dispute a proposal that already carries one lane.
+        assert!(ProposalStatus::UnchallengedAndValidProofProvided.is_challengeable());
+        assert!(!ProposalStatus::Challenged.is_challengeable());
+    }
+
+    #[test]
+    fn resolution_status_reads_outcomes_not_proposal_states() {
+        let finalized = ResolutionStatus {
+            resolvable: true,
+            outcome: GameStatus::DefenderWins,
+            invalidation_reason: InvalidationReason::None,
+        };
+        assert!(finalized.positive_resolvable());
+        assert!(!finalized.is_resolved());
+
+        let live = ResolutionStatus {
+            resolvable: false,
+            outcome: GameStatus::InProgress,
+            invalidation_reason: InvalidationReason::None,
+        };
+        assert!(!live.positive_resolvable());
+        assert!(!live.is_resolved());
+
+        let bad_parent = ResolutionStatus {
+            resolvable: true,
+            outcome: GameStatus::ChallengerWins,
+            invalidation_reason: InvalidationReason::InvalidParent,
+        };
+        assert!(bad_parent.invalid_parent_resolvable());
+    }
+
+    #[test]
+    fn compact_proof_matches_lib_proof_header_layout() {
+        let recipient = address!("00000000000000000000000000000000000000aa");
+        let encoded = encode_compact_proof(ProofLane::TeeAttestation, recipient, &[0xbb, 0xcc]);
+
+        // `LibProof.decodeCompact` reads the lane id from byte 0 and the recipient from the
+        // next 20 bytes with no padding; an ABI encoding would offset both.
+        assert_eq!(encoded[0], ProofLane::TeeAttestation as u8);
+        assert_eq!(&encoded[1..PROOF_HEADER_LENGTH], recipient.as_slice());
+        assert_eq!(&encoded[PROOF_HEADER_LENGTH..], &[0xbb, 0xcc]);
+    }
+
+    #[test]
+    fn empty_lane_proof_still_carries_a_full_header() {
+        // `submitProofLane` rejects anything shorter than the header before decoding it.
+        let encoded = encode_compact_proof(ProofLane::ValidityProof, Address::ZERO, &[]);
+
+        assert_eq!(encoded.len(), PROOF_HEADER_LENGTH);
     }
 
     #[test]

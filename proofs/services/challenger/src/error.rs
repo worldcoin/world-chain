@@ -2,7 +2,9 @@ use alloy_primitives::{Address, TxHash};
 use alloy_provider::{PendingTransactionError, transport::RpcError};
 use alloy_transport::TransportErrorKind;
 use thiserror::Error;
-use world_chain_proofs::{ConsensusError, InvalidationReasonError, RootStateError};
+use world_chain_proofs::{
+    ConsensusError, GameStatusError, InvalidationReasonError, ProposalStatusError,
+};
 
 /// Errors returned by the challenger and its lifecycle managers.
 #[derive(Debug, Error)]
@@ -26,7 +28,9 @@ pub enum ChallengerError {
     #[error("The challenge transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
     #[error(transparent)]
-    InvalidRootState(#[from] RootStateError),
+    InvalidGameStatus(#[from] GameStatusError),
+    #[error(transparent)]
+    InvalidProposalStatus(#[from] ProposalStatusError),
     #[error(transparent)]
     NotExistingInvalidReason(#[from] InvalidationReasonError),
     #[error(transparent)]

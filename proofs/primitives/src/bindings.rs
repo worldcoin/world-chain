@@ -33,22 +33,19 @@ sol! {
     /// proof-lane extensions.
     #[sol(rpc)]
     interface IMultiProofGame {
-        event WorldChainGameCreated(
-            bytes32 indexed rootId,
-            address indexed parentRef,
-            bytes32 rootClaim,
-            uint256 l2BlockNumber,
-            bytes32 l1OriginHash,
-            uint256 l1OriginNumber,
-            uint256 attempt,
-            address gameCreator
-        );
         event Challenged(address indexed challenger, uint64 proofDeadline);
-        event ProofLaneSupported(uint8 indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
-        event ProofThresholdReached(bytes32 indexed rootId, uint8 proofBitmap);
-        event DuplicateProofLane(uint8 indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
+        event Proved(uint8 indexed lane, bytes32 indexed rootId, address recipient, uint8 proofBitmap);
         event GameClosed(uint8 bondDistributionMode);
         event Resolved(uint8 indexed status);
+
+        // Reverts reachable from `submitProofLane`. Declared so a failed submission can be
+        // classified instead of retried blindly.
+        error ClaimAlreadyResolved();
+        error InvalidParentGame();
+        error GameOver();
+        error InvalidLane(uint8 lane);
+        error InvalidProof(uint8 lane, bytes32 rootId);
+        error DuplicateProofLane(uint8 lane, bytes32 rootId, uint8 proofBitmap);
 
         // Deployment parameters (immutables on the implementation).
         function PROOF_THRESHOLD() external view returns (uint8);
@@ -85,13 +82,13 @@ sol! {
         function createdAt() external view returns (uint64);
         function resolvedAt() external view returns (uint64);
         function status() external view returns (uint8);
-        function state() external view returns (uint8);
         function claimData()
             external
             view
             returns (uint8 status, address challenger, uint64 deadline, uint8 proofBitmap, uint8 invalidationReason);
         function invalidationReason() external view returns (uint8);
         function proofBitmap() external view returns (uint8);
+        function laneRecipient(uint8 laneId) external view returns (address);
         function challenger() external view returns (address);
         function challengeDeadline() external view returns (uint64);
         function proofDeadline() external view returns (uint64);
@@ -103,7 +100,8 @@ sol! {
 
         // Mutating entry points.
         function challenge() external payable returns (uint8 proposalStatus);
-        function submitProofLane(uint8 laneId, bytes calldata proof) external returns (uint8 proposalStatus);
+        /// `proof` is the compact payload built by `encode_compact_proof`.
+        function submitProofLane(bytes calldata proof) external returns (uint8 proposalStatus);
         function resolve() external returns (uint8 status);
         function closeGame() external;
         function claimCredit(address recipient) external;

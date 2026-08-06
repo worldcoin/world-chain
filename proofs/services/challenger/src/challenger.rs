@@ -11,7 +11,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{info, warn};
-use world_chain_proofs::{ConsensusProvider, RootState};
+use world_chain_proofs::ConsensusProvider;
 
 /// World Chain output-root challenger.
 #[derive(Debug)]
@@ -124,15 +124,15 @@ where
         now: u64,
     ) -> Result<GameScanOutcome, GameScanError> {
         let address = game.address;
-        let root_state = self
+        let proposal_status = self
             .execution_provider
-            .root_state(address)
+            .proposal_status(address)
             .await
             .map_err(|error| GameScanError {
                 error: Box::new(error),
                 challenge_deadline: None,
             })?;
-        if root_state != RootState::Proposed {
+        if !proposal_status.is_challengeable() {
             return Ok(GameScanOutcome::Skip);
         }
 

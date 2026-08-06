@@ -13,7 +13,7 @@ use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
-    MULTI_PROOF_GAME_TYPE, ResolutionStatus, RootState,
+    MULTI_PROOF_GAME_TYPE, ProposalStatus, ResolutionStatus,
 };
 
 /// Alloy-backed implementation of the challenger contract clients.
@@ -78,7 +78,7 @@ where
         let result = self.game(address).resolutionStatus().call().await?;
         Ok(ResolutionStatus {
             resolvable: result.resolvable,
-            root_state: result.outcome.try_into()?,
+            outcome: result.outcome.try_into()?,
             invalidation_reason: result.reason.try_into()?,
         })
     }
@@ -146,9 +146,9 @@ where
         })
     }
 
-    async fn root_state(&self, address: Address) -> Result<RootState, ChallengerError> {
-        let raw = self.game(address).state().call().await?;
-        raw.try_into().map_err(Into::into)
+    async fn proposal_status(&self, address: Address) -> Result<ProposalStatus, ChallengerError> {
+        let claim = self.game(address).claimData().call().await?;
+        claim.status.try_into().map_err(Into::into)
     }
 
     async fn challenge_deadline(&self, address: Address) -> Result<u64, ChallengerError> {

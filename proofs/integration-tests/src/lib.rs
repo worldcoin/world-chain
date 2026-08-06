@@ -21,10 +21,10 @@ use world_chain_defender::{
 use world_chain_proof_core::boot::TransitionPublicValues;
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, InvalidationReason, LineageAnchor, LineageError,
-    LineageGame, LineageProvider, LineageTransition, MAX_ATTEMPT_SCAN, PROOF_SYSTEM_VERSION,
-    PROOF_THRESHOLD, ProofDomain, ProofLane, ProposalCommitment, ResolutionStatus, RootCommitment,
-    RootState, WorldChainGameCreated, has_threshold,
+    ClaimData, ConsensusError, ConsensusProvider, GameCreation, GameStatus, InvalidationReason,
+    LineageAnchor, LineageError, LineageGame, LineageProvider, LineageTransition, MAX_ATTEMPT_SCAN,
+    PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane, ProposalCommitment,
+    ProposalStatus, ResolutionStatus, RootCommitment, has_threshold,
 };
 use world_chain_proposer::{
     CloseGameSubmission, Proposal, ProposalSubmission, ProposerClient, ProposerError,
@@ -43,11 +43,35 @@ pub const CHAIN_ID: u64 = 4801;
 pub const ANCHOR: Address = address!("0000000000000000000000000000000000001006");
 pub const FAKE_PROPOSER: Address = address!("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1");
 
-const STATE_NONE: u8 = 0;
-const STATE_PROPOSED: u8 = 1;
-const STATE_CHALLENGED: u8 = 2;
-const STATE_FINALIZED: u8 = 3;
-const STATE_INVALIDATED: u8 = 4;
+/// Fake game lifecycle. The contract splits this across `ProposalStatus` (challenged or not)
+/// and `GameStatus` (the terminal outcome); the fake keeps one field and derives both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameLifecycle {
+    Proposed,
+    Challenged,
+    Finalized,
+    Invalidated,
+}
+
+impl GameLifecycle {
+    const fn outcome(self) -> GameStatus {
+        match self {
+            Self::Proposed | Self::Challenged => GameStatus::InProgress,
+            Self::Finalized => GameStatus::DefenderWins,
+            Self::Invalidated => GameStatus::ChallengerWins,
+        }
+    }
+
+    const fn proposal_status(self, proven: bool) -> ProposalStatus {
+        match self {
+            Self::Proposed if proven => ProposalStatus::UnchallengedAndValidProofProvided,
+            Self::Proposed => ProposalStatus::Unchallenged,
+            Self::Challenged if proven => ProposalStatus::ChallengedAndValidProofProvided,
+            Self::Challenged => ProposalStatus::Challenged,
+            Self::Finalized | Self::Invalidated => ProposalStatus::Resolved,
+        }
+    }
+}
 
 /// Domain used by the fake proof-system factory.
 #[must_use]
@@ -143,8 +167,8 @@ struct FakeExecutionState {
 
 #[derive(Debug, Clone)]
 struct GameRecord {
-    event: WorldChainGameCreated,
-    state: u8,
+    creation: GameCreation,
+    state: GameLifecycle,
     challenge_deadline: u64,
     proof_deadline: u64,
     proof_bitmap: u8,
@@ -178,25 +202,23 @@ impl FakeExecution {
     }
 
     #[must_use]
-    pub fn latest_game(&self) -> Option<WorldChainGameCreated> {
+    pub fn latest_game(&self) -> Option<GameCreation> {
         let state = self.state.lock().expect("fake execution mutex poisoned");
         state
             .game_order
             .last()
             .and_then(|game| state.games_by_address.get(game))
-            .map(|record| record.event)
+            .map(|record| record.creation)
     }
 
     #[must_use]
-    pub fn game_state(&self, game: Address) -> RootState {
-        let raw = self
-            .state
+    pub fn game_state(&self, game: Address) -> Option<GameLifecycle> {
+        self.state
             .lock()
             .expect("fake execution mutex poisoned")
             .games_by_address
             .get(&game)
-            .map_or(STATE_NONE, |record| record.state);
-        RootState::try_from(raw).expect("fake execution stores valid root states")
+            .map(|record| record.state)
     }
 
     #[must_use]
@@ -234,7 +256,7 @@ impl FakeExecution {
         challenge_record(state.games_by_address.get_mut(&game).expect("game exists"));
     }
 
-    fn create_game(state: &mut FakeExecutionState, proposal: &Proposal) -> WorldChainGameCreated {
+    fn create_game(state: &mut FakeExecutionState, proposal: &Proposal) -> GameCreation {
         let game = Address::with_last_byte(state.next_game_nonce);
         state.next_game_nonce = state.next_game_nonce.saturating_add(1);
 
@@ -245,7 +267,7 @@ impl FakeExecution {
             l1_origin_hash,
             l1_origin_number,
         };
-        let event = WorldChainGameCreated {
+        let creation = GameCreation {
             root_id: root.root_id(state.domain_hash),
             game,
             game_creator: FAKE_PROPOSER,
@@ -264,8 +286,8 @@ impl FakeExecution {
         state.games_by_address.insert(
             game,
             GameRecord {
-                event,
-                state: STATE_PROPOSED,
+                creation,
+                state: GameLifecycle::Proposed,
                 challenge_deadline: u64::MAX,
                 proof_deadline: u64::MAX,
                 proof_bitmap: 0,
@@ -273,34 +295,30 @@ impl FakeExecution {
                 submitted_lanes: Vec::new(),
             },
         );
-        event
+        creation
     }
 }
 
 fn challenge_record(record: &mut GameRecord) {
     record.challenge_count = record.challenge_count.saturating_add(1);
-    if record.state == STATE_PROPOSED {
-        record.state = STATE_CHALLENGED;
-    }
-}
-
-fn proof_lane(lane: u8) -> Option<ProofLane> {
-    match lane {
-        0 => Some(ProofLane::ValidityProof),
-        1 => Some(ProofLane::TeeAttestation),
-        2 => Some(ProofLane::SecurityCouncil),
-        _ => None,
+    if record.state == GameLifecycle::Proposed {
+        record.state = GameLifecycle::Challenged;
     }
 }
 
 fn parent_is_unresolved(state: &FakeExecutionState, record: &GameRecord) -> bool {
-    if record.event.parent_ref == ANCHOR {
+    if record.creation.parent_ref == ANCHOR {
         return false;
     }
     state
         .games_by_address
-        .get(&record.event.parent_ref)
-        .is_some_and(|parent| parent.state == STATE_PROPOSED || parent.state == STATE_CHALLENGED)
+        .get(&record.creation.parent_ref)
+        .is_some_and(|parent| {
+            matches!(
+                parent.state,
+                GameLifecycle::Proposed | GameLifecycle::Challenged
+            )
+        })
 }
 
 #[async_trait]
@@ -349,44 +367,46 @@ impl LineageProvider for FakeExecution {
             .get(&game)
             .ok_or_else(|| LineageError::Contract(format!("unknown game {game}")))?;
 
-        let root_state = RootState::try_from(record.state)?;
-        if root_state == RootState::Finalized {
+        let outcome = record.state.outcome();
+        if record.state == GameLifecycle::Finalized {
             return Ok(ResolutionStatus {
                 resolvable: false,
-                root_state,
+                outcome,
                 invalidation_reason: InvalidationReason::None,
             });
         }
         if parent_is_unresolved(&state, record) {
             return Ok(ResolutionStatus {
                 resolvable: false,
-                root_state,
+                outcome,
                 invalidation_reason: InvalidationReason::None,
             });
         }
-        if matches!(record.state, STATE_PROPOSED | STATE_CHALLENGED)
-            && has_threshold(record.proof_bitmap)
+        if matches!(
+            record.state,
+            GameLifecycle::Proposed | GameLifecycle::Challenged
+        ) && has_threshold(record.proof_bitmap)
         {
             return Ok(ResolutionStatus {
                 resolvable: true,
-                root_state: RootState::Finalized,
+                outcome: GameStatus::DefenderWins,
                 invalidation_reason: InvalidationReason::None,
             });
         }
-        if root_state == RootState::Challenged && record.proof_deadline == 0 {
+        if record.state == GameLifecycle::Challenged && record.proof_deadline == 0 {
             return Ok(ResolutionStatus {
                 resolvable: true,
-                root_state: RootState::Invalidated,
+                outcome: GameStatus::ChallengerWins,
                 invalidation_reason: InvalidationReason::ProofTimeout,
             });
         }
-        if root_state == RootState::Proposed && record.challenge_deadline == 0 {
+        if record.state == GameLifecycle::Proposed && record.challenge_deadline == 0 {
             return Ok(ResolutionStatus {
                 resolvable: true,
-                root_state: if record.proof_bitmap == 0 {
-                    RootState::Invalidated
+                outcome: if record.proof_bitmap == 0 {
+                    GameStatus::ChallengerWins
                 } else {
-                    RootState::Finalized
+                    GameStatus::DefenderWins
                 },
                 invalidation_reason: if record.proof_bitmap == 0 {
                     InvalidationReason::ProofTimeout
@@ -398,7 +418,7 @@ impl LineageProvider for FakeExecution {
 
         Ok(ResolutionStatus {
             resolvable: false,
-            root_state,
+            outcome,
             invalidation_reason: InvalidationReason::None,
         })
     }
@@ -423,10 +443,10 @@ impl ProposerClient for FakeExecution {
             .games_by_address
             .get_mut(&game)
             .ok_or_else(|| ProposerError::message(format!("unknown game {game}")))?;
-        record.state = match status.root_state {
-            RootState::Finalized => STATE_FINALIZED,
-            RootState::Invalidated => STATE_INVALIDATED,
-            _ => {
+        record.state = match status.outcome {
+            GameStatus::DefenderWins => GameLifecycle::Finalized,
+            GameStatus::ChallengerWins => GameLifecycle::Invalidated,
+            GameStatus::InProgress => {
                 return Err(ProposerError::message(format!(
                     "game {game} has no terminal outcome"
                 )));
@@ -444,12 +464,12 @@ impl ProposerClient for FakeExecution {
             .games_by_address
             .get(&game)
             .ok_or_else(|| ProposerError::message(format!("unknown game {game}")))?;
-        if record.state != STATE_FINALIZED {
+        if record.state != GameLifecycle::Finalized {
             return Err(ProposerError::message(format!(
                 "game {game} is not finalized"
             )));
         }
-        let l2_block_number = record.event.l2_block_number;
+        let l2_block_number = record.creation.l2_block_number;
         state.anchor = LineageAnchor {
             address: game,
             l2_block_number,
@@ -511,21 +531,22 @@ impl ChallengerClient for FakeExecution {
             .get(&game)
             .map(|record| ChallengerGameMetadata {
                 address: game,
-                root_claim: record.event.root_claim,
-                l2_block_number: record.event.l2_block_number,
+                root_claim: record.creation.root_claim,
+                l2_block_number: record.creation.l2_block_number,
             })
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
-    async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError> {
-        let raw = self
+    async fn proposal_status(&self, game: Address) -> Result<ProposalStatus, ChallengerError> {
+        Ok(self
             .state
             .lock()
             .expect("fake execution mutex poisoned")
             .games_by_address
             .get(&game)
-            .map_or(STATE_NONE, |record| record.state);
-        RootState::try_from(raw).map_err(Into::into)
+            .map_or(ProposalStatus::Resolved, |record| {
+                record.state.proposal_status(record.proof_bitmap != 0)
+            }))
     }
 
     async fn challenge_deadline(&self, game: Address) -> Result<u64, ChallengerError> {
@@ -565,11 +586,11 @@ impl DefenderClient for FakeExecution {
             .map(|record| DefenderGameMetadata {
                 address: game,
                 domain_hash: state.domain_hash,
-                parent_ref: record.event.parent_ref,
-                root_claim: record.event.root_claim,
-                l2_block_number: record.event.l2_block_number,
-                l1_origin_hash: record.event.l1_origin_hash,
-                l1_origin_number: record.event.l1_origin_number,
+                parent_ref: record.creation.parent_ref,
+                root_claim: record.creation.root_claim,
+                l2_block_number: record.creation.l2_block_number,
+                l1_origin_hash: record.creation.l1_origin_hash,
+                l1_origin_number: record.creation.l1_origin_number,
                 challenge_deadline: record.challenge_deadline,
                 proof_deadline: record.proof_deadline,
                 proof_threshold: PROOF_THRESHOLD,
@@ -577,23 +598,28 @@ impl DefenderClient for FakeExecution {
             .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))
     }
 
-    async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {
+    async fn claim_data(&self, game: Address) -> Result<ClaimData, DefenderError> {
         self.state
             .lock()
             .expect("fake execution mutex poisoned")
             .games_by_address
             .get(&game)
-            .map(|record| record.proof_bitmap)
+            .map(|record| ClaimData {
+                status: record.state.proposal_status(record.proof_bitmap != 0),
+                challenger: Address::ZERO,
+                deadline: record.proof_deadline,
+                proof_bitmap: record.proof_bitmap,
+                invalidation_reason: InvalidationReason::None,
+            })
             .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))
     }
 
     async fn submit_proof(
         &self,
         game: Address,
-        lane: u8,
+        lane: ProofLane,
         proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
-        let lane = proof_lane(lane).ok_or_else(|| DefenderError::message("invalid lane"))?;
         if proof.is_empty() {
             return Err(DefenderError::message("empty proof"));
         }
@@ -603,7 +629,10 @@ impl DefenderClient for FakeExecution {
             .games_by_address
             .get_mut(&game)
             .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))?;
-        if record.state != STATE_PROPOSED && record.state != STATE_CHALLENGED {
+        if !matches!(
+            record.state,
+            GameLifecycle::Proposed | GameLifecycle::Challenged
+        ) {
             return Err(DefenderError::message(format!(
                 "game {game} is not open for proofs"
             )));

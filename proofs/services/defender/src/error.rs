@@ -2,7 +2,7 @@ use alloy_primitives::{Address, TxHash};
 use alloy_provider::{MulticallError, PendingTransactionError, transport::RpcError};
 use alloy_transport::TransportErrorKind;
 use thiserror::Error;
-use world_chain_proofs::LineageError;
+use world_chain_proofs::{InvalidationReasonError, LineageError, ProofLane, ProposalStatusError};
 
 /// Errors returned by the defender.
 #[derive(Debug, Error)]
@@ -27,8 +27,15 @@ pub enum DefenderError {
     ProofEncoding(String),
     #[error(transparent)]
     Lineage(#[from] LineageError),
+    #[error(transparent)]
+    InvalidProposalStatus(#[from] ProposalStatusError),
+    #[error(transparent)]
+    InvalidInvalidationReason(#[from] InvalidationReasonError),
     #[error("The submitProofLane transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
+    /// The game rejected the submission because the lane already counts toward its threshold.
+    #[error("lane {lane:?} already proven for game {game}")]
+    LaneAlreadyProven { game: Address, lane: ProofLane },
     #[error("Overflow error.")]
     Overflow,
     #[error("Invalid proof threshold {proof_threshold} for game {game}")]

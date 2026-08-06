@@ -2843,6 +2843,7 @@ async fn start_world_chain_defender(
         provider,
         factory_address,
         DEFAULT_DEFENDER_L1_TX_CONFIRMATIONS,
+        defender_address,
     )
     .await
     .map_err(|error| eyre!("failed to connect defender to proof system: {error}"))?;
