@@ -8,10 +8,11 @@ use jsonrpsee::{
 };
 use lru::LruCache;
 use op_revm::OpTransaction;
+use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory, block::BlockExecutorFactory};
-use reth_optimism_primitives::OpReceipt;
-use reth_primitives_traits::{FullSignedTx, NodePrimitives};
-use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt};
+use reth_primitives_traits::{FullSignedTx, NodePrimitives, SealedHeader};
+use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
 use reth_rpc_eth_api::helpers::SpawnBlocking;
 use reth_tasks::pool::{BlockingTaskGuard, BlockingTaskPool};
@@ -56,6 +57,10 @@ pub struct SimulateUnsignedUserOpRequest {
     /// Block to simulate against. Defaults to `latest` when omitted.
     #[serde(default)]
     pub block: Option<BlockId>,
+    /// Whether to simulate against the latest flashblock state instead of the
+    /// latest full block state. Defaults to `false`.
+    #[serde(default)]
+    pub use_latest_flashblock: bool,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -479,6 +484,9 @@ pub trait SimulateApi {
 /// Cross-request cache for resolved token metadata. LRU-bounded.
 type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
 
+pub type LatestFlashblockReceiver =
+    tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>;
+
 /// Relax EVM rules so simulations succeed regardless of the caller's gas
 /// pricing, balance, or block limits — matching `eth_call` semantics. The
 /// `disable_fee_charge` flag is the critical one on Optimism: without it
@@ -507,6 +515,7 @@ pub fn relax_cfg_for_simulation<Spec>(cfg_env: &mut CfgEnv<Spec>) {
 pub struct Simulate<Client, EvmConfig = WorldChainEvmConfig> {
     client: Client,
     evm_config: EvmConfig,
+    pending_block: Option<LatestFlashblockReceiver>,
     metadata_cache: MetadataCache,
     /// Shared with `eth_call` / `debug_*` so simulate inherits the same
     /// CPU-bound rayon pool and doesn't compete with general tokio work.
@@ -526,12 +535,23 @@ impl<Client, EvmConfig> Simulate<Client, EvmConfig> {
         Self {
             client,
             evm_config,
+            pending_block: None,
             metadata_cache: Arc::new(Mutex::new(LruCache::new(
                 NonZeroUsize::new(METADATA_CACHE_CAPACITY).expect("non-zero capacity"),
             ))),
             task_pool,
             task_guard,
         }
+    }
+
+    /// Configures access to the latest flashblock-backed pending block, when
+    /// flashblocks are enabled.
+    pub fn with_latest_flashblock(
+        mut self,
+        pending_block: Option<LatestFlashblockReceiver>,
+    ) -> Self {
+        self.pending_block = pending_block;
+        self
     }
 
     /// Wire the simulate API to the same blocking pool and concurrency guard
@@ -630,37 +650,20 @@ where
         &self,
         request: SimulateUnsignedUserOpRequest,
     ) -> RpcResult<SimulateUnsignedUserOpResult> {
-        // 1. Resolve the requested sealed header (defaulting to latest).
-        //    Subsequent lookups go by its concrete hash so a new block arriving
-        //    mid-request can't desync the header from the state we read.
-        let requested_block = request.block.unwrap_or(BlockNumberOrTag::Latest.into());
-        let header = self
-            .client
-            .sealed_header_by_id(requested_block)
-            .map_err(internal_err)?
-            .ok_or_else(|| {
-                jsonrpsee::types::ErrorObjectOwned::owned(
-                    jsonrpsee::types::error::INVALID_PARAMS_CODE,
-                    format!("Block not found: {requested_block}"),
-                    None::<String>,
-                )
-            })?;
-        let block_number = header.number();
-        let block_id = BlockId::Hash(header.hash().into());
+        // 1. Resolve the selected header and state provider.
+        let SimulateBlockState {
+            header,
+            block_number,
+            state_provider,
+        } = self.simulation_block_state(&request)?;
 
-        // 2. Build the EVM environment from the header (same as eth_call)
+        // 2. Build the EVM environment from the selected header (same as eth_call).
         let mut evm_env = self
             .evm_config
             .evm_env(header.header())
             .map_err(internal_err)?;
 
         relax_cfg_for_simulation(&mut evm_env.cfg_env);
-
-        // 3. Get state at the target block (same as eth_call)
-        let state_provider = self
-            .client
-            .state_by_block_id(block_id)
-            .map_err(internal_err)?;
 
         // 4. Build a revm State backed by the provider — no bundle tracking
         //    needed since we discard post-execution state (same as eth_call).
@@ -838,6 +841,93 @@ where
             warnings: vec![],
         })
     }
+
+    fn simulation_block_state(
+        &self,
+        request: &SimulateUnsignedUserOpRequest,
+    ) -> RpcResult<SimulateBlockState> {
+        if request.use_latest_flashblock {
+            validate_latest_flashblock_request(request)?;
+            return self.latest_flashblock_state();
+        }
+
+        let requested_block = request.block.unwrap_or(BlockNumberOrTag::Latest.into());
+        let header = self
+            .client
+            .sealed_header_by_id(requested_block)
+            .map_err(internal_err)?
+            .ok_or_else(|| {
+                jsonrpsee::types::ErrorObjectOwned::owned(
+                    jsonrpsee::types::error::INVALID_PARAMS_CODE,
+                    format!("Block not found: {requested_block}"),
+                    None::<String>,
+                )
+            })?;
+        let block_number = header.number();
+        let block_id = BlockId::Hash(header.hash().into());
+        let state_provider = self
+            .client
+            .state_by_block_id(block_id)
+            .map_err(internal_err)?;
+
+        Ok(SimulateBlockState {
+            header,
+            block_number,
+            state_provider,
+        })
+    }
+
+    fn latest_flashblock_state(&self) -> RpcResult<SimulateBlockState> {
+        let pending_block = self.pending_block.as_ref().ok_or_else(|| {
+            jsonrpsee::types::ErrorObjectOwned::owned(
+                jsonrpsee::types::error::INVALID_PARAMS_CODE,
+                "useLatestFlashblock requires flashblocks to be enabled on the node",
+                None::<String>,
+            )
+        })?;
+
+        let pending_block = pending_block.borrow().clone().ok_or_else(|| {
+            jsonrpsee::types::ErrorObjectOwned::owned(
+                jsonrpsee::types::error::INVALID_PARAMS_CODE,
+                "Latest flashblock not found",
+                None::<String>,
+            )
+        })?;
+
+        let header = pending_block.recovered_block().clone_sealed_header();
+        let block_number = header.number();
+        let state_provider = self
+            .client
+            .state_by_block_hash(header.parent_hash)
+            .map_err(internal_err)?;
+        let state_provider = BlockState::new(pending_block)
+            .state_provider(state_provider)
+            .boxed();
+
+        Ok(SimulateBlockState {
+            header,
+            block_number,
+            state_provider,
+        })
+    }
+}
+
+struct SimulateBlockState {
+    header: SealedHeader<Header>,
+    block_number: u64,
+    state_provider: StateProviderBox,
+}
+
+fn validate_latest_flashblock_request(request: &SimulateUnsignedUserOpRequest) -> RpcResult<()> {
+    if request.block.is_some() {
+        return Err(jsonrpsee::types::ErrorObjectOwned::owned(
+            jsonrpsee::types::error::INVALID_PARAMS_CODE,
+            "block cannot be specified when useLatestFlashblock is true",
+            None::<String>,
+        ));
+    }
+
+    Ok(())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1590,6 +1680,50 @@ fn internal_err(msg: impl std::fmt::Display) -> jsonrpsee::types::ErrorObjectOwn
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn use_latest_flashblock_defaults_to_false() {
+        let request: SimulateUnsignedUserOpRequest = serde_json::from_value(serde_json::json!({
+            "sender": Address::ZERO,
+            "callData": "0x",
+            "entryPoint": Address::ZERO,
+        }))
+        .expect("request should deserialize");
+
+        assert!(!request.use_latest_flashblock);
+    }
+
+    #[test]
+    fn use_latest_flashblock_deserializes_from_camel_case() {
+        let request: SimulateUnsignedUserOpRequest = serde_json::from_value(serde_json::json!({
+            "sender": Address::ZERO,
+            "callData": "0x",
+            "entryPoint": Address::ZERO,
+            "useLatestFlashblock": true,
+        }))
+        .expect("request should deserialize");
+
+        assert!(request.use_latest_flashblock);
+    }
+
+    #[test]
+    fn use_latest_flashblock_rejects_explicit_block() {
+        let request: SimulateUnsignedUserOpRequest = serde_json::from_value(serde_json::json!({
+            "sender": Address::ZERO,
+            "callData": "0x",
+            "entryPoint": Address::ZERO,
+            "block": "latest",
+            "useLatestFlashblock": true,
+        }))
+        .expect("request should deserialize");
+
+        let err = validate_latest_flashblock_request(&request).expect_err("request should fail");
+
+        assert_eq!(
+            err.message(),
+            "block cannot be specified when useLatestFlashblock is true"
+        );
+    }
 
     /// Stand-in "malicious payload": anything that pegs a worker for longer
     /// than `SIMULATION_TIMEOUT`. Crafting bytecode that reliably blows

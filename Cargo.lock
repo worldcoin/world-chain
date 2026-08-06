@@ -19451,6 +19451,7 @@ dependencies = [
  "tracing",
  "world-chain-evm",
  "world-chain-primitives",
+ "world-chain-test-utils",
  "world-chain-validator",
 ]
 

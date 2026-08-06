@@ -508,7 +508,7 @@ where
                     flashblocks_components_ctx.flashblocks_state.pending_block()
                 });
         let flashblocks_eth_api_builder =
-            FlashblocksEthApiBuilder::new(op_eth_api_builder, maybe_pending_block);
+            FlashblocksEthApiBuilder::new(op_eth_api_builder, maybe_pending_block.clone());
 
         let engine_validator_builder =
             BasicEngineValidatorBuilder::<OpEngineValidatorBuilder>::default();
@@ -536,6 +536,7 @@ where
                 .as_ref()
                 .map(|w| (w.cache.clone(), w.receiver.clone())),
         )
+        .with_latest_flashblock(maybe_pending_block)
     }
 
     fn ext_context(&self) -> Self::ExtContext {

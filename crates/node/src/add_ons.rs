@@ -46,8 +46,8 @@ use world_chain_evm::{
 };
 use world_chain_rpc::{
     AdminApiExtServer, DebugWitnessOracle, DebugWitnessOracleApiServer, EthApiExtServer,
-    SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer,
-    WorldChainAdminApiExt, WorldChainEthApiExt,
+    LatestFlashblockReceiver, SequencerClient as WorldChainSequencerClient, Simulate,
+    SimulateApiServer, WorldChainAdminApiExt, WorldChainEthApiExt,
     op::{FlashblocksOpApi, OpApiExtServer},
 };
 /// Primitive bounds required by the OP RPC extensions used by World Chain.
@@ -115,6 +115,8 @@ pub struct WorldChainAddOns<
     min_suggested_priority_fee: u64,
     /// Enables the World Chain simulate namespace.
     simulate_enabled: bool,
+    /// Latest flashblock-backed pending block, when flashblocks are enabled.
+    pending_block: Option<LatestFlashblockReceiver>,
     /// Witness oracle plumbing: the shared cache and the receiver drained by the collector thread.
     /// `Some` only when `--witness.collect` is set.
     witness: Option<(ExecutionWitnessHandle, Receiver<BlockExecutionWitness>)>,
@@ -152,9 +154,20 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            pending_block: None,
             witness,
             _tx: PhantomData,
         }
+    }
+
+    /// Configures access to the latest flashblock-backed pending block, when
+    /// flashblocks are enabled.
+    pub fn with_latest_flashblock(
+        mut self,
+        pending_block: Option<LatestFlashblockReceiver>,
+    ) -> Self {
+        self.pending_block = pending_block;
+        self
     }
 }
 
@@ -179,6 +192,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            pending_block,
             witness,
             ..
         } = self;
@@ -194,6 +208,7 @@ where
             simulate_enabled,
             witness,
         )
+        .with_latest_flashblock(pending_block)
     }
 
     /// Maps the [`PayloadValidatorBuilder`] builder type.
@@ -211,6 +226,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            pending_block,
             witness,
             ..
         } = self;
@@ -226,6 +242,7 @@ where
             simulate_enabled,
             witness,
         )
+        .with_latest_flashblock(pending_block)
     }
 
     /// Maps the [`EngineValidatorBuilder`] builder type.
@@ -243,6 +260,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            pending_block,
             witness,
             ..
         } = self;
@@ -258,6 +276,7 @@ where
             simulate_enabled,
             witness,
         )
+        .with_latest_flashblock(pending_block)
     }
 
     /// Sets the RPC middleware stack for processing RPC requests.
@@ -275,6 +294,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            pending_block,
             witness,
             ..
         } = self;
@@ -290,6 +310,7 @@ where
             simulate_enabled,
             witness,
         )
+        .with_latest_flashblock(pending_block)
     }
 
     /// Sets the hook that is run once the rpc server is started.
@@ -361,6 +382,7 @@ where
             enable_tx_conditional,
             historical_rpc,
             simulate_enabled,
+            pending_block,
             witness,
             ..
         } = self;
@@ -495,7 +517,8 @@ where
 
                 if simulate_enabled {
                     let simulate_api =
-                        Simulate::from_eth_api(provider, evm_config, registry.eth_api());
+                        Simulate::from_eth_api(provider, evm_config, registry.eth_api())
+                            .with_latest_flashblock(pending_block);
                     modules.merge_http(simulate_api.into_rpc())?;
                 }
 
