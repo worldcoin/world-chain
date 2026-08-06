@@ -11,7 +11,7 @@ use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
-use world_chain_proofs::{
+use world_chain_proof_protocol::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
     MULTI_PROOF_GAME_TYPE, ProposalStatus, ResolutionStatus,
 };

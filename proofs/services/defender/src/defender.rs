@@ -13,7 +13,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{error, info, warn};
-use world_chain_proofs::{
+use world_chain_proof_protocol::{
     ConsensusProvider, InvalidationReason, ProofLane, proof_count, select_lineage,
 };
 use world_chain_prover_service::ProofRequester;

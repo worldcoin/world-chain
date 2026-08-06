@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-proof-succinct-utils"
+name = "world-chain-proof-sp1-types"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

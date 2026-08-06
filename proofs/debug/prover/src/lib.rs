@@ -15,7 +15,7 @@ use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_core::{
     hash_world_rollup_config, range::WorldRangeHardforkConfig, witness::WorldRangeWitnessData,
 };
-use world_chain_proof_kona_host_utils::online::{
+use world_chain_proof_kona_host::online::{
     OnlineHostConfig, RangeProofInput, RangeWitnessRequest, build_range_input,
     hardfork_config_from_chain_spec, rpc,
 };

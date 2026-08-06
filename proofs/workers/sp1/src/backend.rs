@@ -6,13 +6,13 @@ use alloy_primitives::B256;
 use alloy_sol_types::SolValue;
 use anyhow::Context;
 use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
-use world_chain_proof_kona_host_utils::online::{
+use world_chain_proof_kona_host::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
 };
-use world_chain_proof_succinct_host_utils::{
+use world_chain_proof_sp1_host::{
     WorldSuccinctProver, aggregation_artifact_from_sp1_proof, range_artifact_from_sp1_proof,
 };
-use world_chain_proof_succinct_utils::{
+use world_chain_proof_sp1_types::{
     AggregationSessionRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
 };
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};

@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-proof-succinct-elfs"
+name = "world-chain-proof-sp1-elfs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

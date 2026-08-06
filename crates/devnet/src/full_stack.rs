@@ -55,9 +55,9 @@ use world_chain_defender::{
 use world_chain_proof_core::{
     boot::TransitionPublicValues, hash_world_rollup_config, range::WorldRangeHardforkConfig,
 };
-use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
+use world_chain_proof_kona_host::online::OnlineHostConfig;
 use world_chain_proof_sp1_worker::{Sp1Backend, Sp1BackendConfig};
-use world_chain_proof_succinct_host_utils::{
+use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
@@ -67,7 +67,7 @@ use world_chain_proof_worker::{
     ClaimedProofJobHandler, ProofJob, ProofWorker, ProofWorkerConfig, RetryConfig,
     WorkerHeartbeatConfig,
 };
-use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
+use world_chain_proof_protocol::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{
     AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
 };
@@ -2992,7 +2992,7 @@ fn start_devnet_nitro_worker(prover_service_url: &str) -> Result<NitroWorkerTask
 ///
 /// These must be set before enabling `DEVNET_SP1_WORKER_PROVER`. The standalone
 /// `world-chain-proof-sp1-worker` binary embeds ELFs at **compile time** (via
-/// `world_chain_proof_succinct_elfs`) and does not require these variables.
+/// `world_chain_proof_sp1_elfs`) and does not require these variables.
 async fn start_sp1_worker(
     l1_rpc_url: &str,
     l2_rpc_url: &str,

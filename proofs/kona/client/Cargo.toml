@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-proof-kona-client-utils"
+name = "world-chain-proof-kona-client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

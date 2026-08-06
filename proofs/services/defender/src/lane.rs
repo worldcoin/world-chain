@@ -3,7 +3,7 @@ use alloy_primitives::{Bytes, U256};
 use alloy_sol_types::SolValue;
 use tracing::{error, info, warn};
 use world_chain_proof_core::boot::TransitionPublicValues;
-use world_chain_proofs::ProofLane;
+use world_chain_proof_protocol::ProofLane;
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
     ProofResponse, ProofStatus,

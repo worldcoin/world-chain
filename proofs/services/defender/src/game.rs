@@ -1,5 +1,5 @@
 use crate::{error::DefenderError, traits::DefenderClient, types::GameMetadata};
-use world_chain_proofs::{GameStatus, InvalidationReason, ProposalStatus, proof_count};
+use world_chain_proof_protocol::{GameStatus, InvalidationReason, ProposalStatus, proof_count};
 
 /// On-chain state relevant to proof support for one selected game.
 #[derive(Debug, PartialEq, Eq)]

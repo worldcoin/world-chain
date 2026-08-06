@@ -2,7 +2,7 @@ use alloy_primitives::{Address, TxHash};
 use alloy_provider::{MulticallError, PendingTransactionError, transport::RpcError};
 use alloy_transport::TransportErrorKind;
 use thiserror::Error;
-use world_chain_proofs::{InvalidationReasonError, LineageError, ProofLane, ProposalStatusError};
+use world_chain_proof_protocol::{InvalidationReasonError, LineageError, ProofLane, ProposalStatusError};
 
 /// Errors returned by the defender.
 #[derive(Debug, Error)]

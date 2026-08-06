@@ -13,7 +13,7 @@ use world_chain_devnet::{
     HaSequencerConfig, ObservabilityConfig, WorldDevnetBuilder, WorldDevnetPreset,
     is_docker_unavailable,
 };
-use world_chain_proofs::{
+use world_chain_proof_protocol::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, MULTI_PROOF_GAME_TYPE,
 };
 

@@ -31,18 +31,18 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use alloy_primitives::{Address, B256};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres;
-use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
+use world_chain_proof_kona_host::online::{OnlineHostConfig, resolve_l1_head};
 use world_chain_proof_sp1_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
 };
-use world_chain_proof_succinct_host_utils::{
+use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
     network_prover::NetworkSuccinctProver,
 };
 use world_chain_proof_worker::WorkerHeartbeatConfig;
-use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
+use world_chain_proof_protocol::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
     ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,

@@ -12,7 +12,7 @@ use sp1_sdk::{
     network::proto::{GetProofRequestStatusResponse, types::FulfillmentStatus},
 };
 use world_chain_proof_core::types::AggregationInputs;
-use world_chain_proof_succinct_utils::{
+use world_chain_proof_sp1_types::{
     AggregationProofRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
 };
 
@@ -27,10 +27,10 @@ pub struct NetworkSuccinctProver {
 
 impl NetworkSuccinctProver {
     /// Creates the prover using caller-supplied ELFs. Use this in production binaries with
-    /// ELFs embedded at compile time via `world_chain_proof_succinct_elfs`.
+    /// ELFs embedded at compile time via `world_chain_proof_sp1_elfs`.
     pub async fn new(agg_mode: SP1ProofMode, private_key: &str) -> anyhow::Result<Self> {
-        let range_elf = world_chain_proof_succinct_elfs::range_elf();
-        let agg_elf = world_chain_proof_succinct_elfs::aggregation_elf();
+        let range_elf = world_chain_proof_sp1_elfs::range_elf();
+        let agg_elf = world_chain_proof_sp1_elfs::aggregation_elf();
         let client = ProverClient::builder()
             .network()
             .private_key(private_key)

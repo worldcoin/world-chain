@@ -7,14 +7,14 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use world_chain_challenger::{ChallengerConfig, WorldChainChallenger};
 use world_chain_defender::{DefenderClient, DefenderConfig, WorldChainDefender};
-use world_chain_proof_integration_tests::{
+use world_chain_proof_it::{
     BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeProofBackend, GameLifecycle,
     SharedProverService,
 };
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
-use world_chain_proofs::{GameStatus, LineageProvider, ProofLane, has_threshold};
+use world_chain_proof_protocol::{GameStatus, LineageProvider, ProofLane, has_threshold};
 use world_chain_proposer::{
     ProposerClient, ProposerConfig, ProposerError, ProposerScan, WorldChainProposer,
 };

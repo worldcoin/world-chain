@@ -2,7 +2,7 @@ use alloy_primitives::{Address, TxHash};
 use alloy_provider::{PendingTransactionError, transport::RpcError};
 use alloy_transport::TransportErrorKind;
 use thiserror::Error;
-use world_chain_proofs::{
+use world_chain_proof_protocol::{
     ConsensusError, GameStatusError, InvalidationReasonError, ProposalStatusError,
 };
 

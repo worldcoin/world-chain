@@ -4688,7 +4688,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-proof-kona-client-utils"
+name = "world-chain-proof-kona-client"
 version = "2.4.1"
 dependencies = [
  "alloy-consensus",
@@ -4740,7 +4740,7 @@ dependencies = [
  "rkyv",
  "sp1-zkvm",
  "world-chain-proof-core",
- "world-chain-proof-kona-client-utils",
+ "world-chain-proof-kona-client",
  "world-chain-proof-succinct-range-utils",
 ]
 
@@ -4754,7 +4754,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "world-chain-proof-core",
- "world-chain-proof-kona-client-utils",
+ "world-chain-proof-kona-client",
 ]
 
 [[package]]

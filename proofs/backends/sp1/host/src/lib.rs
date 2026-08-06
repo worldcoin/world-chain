@@ -43,13 +43,13 @@ pub trait WorldSuccinctProver {
 
     async fn submit(
         &self,
-        request: world_chain_proof_succinct_utils::Sp1ProofRequest,
+        request: world_chain_proof_sp1_types::Sp1ProofRequest,
     ) -> anyhow::Result<String>;
 
     async fn poll(
         &self,
         session_id: &str,
-    ) -> anyhow::Result<world_chain_proof_succinct_utils::Sp1SessionStatus>;
+    ) -> anyhow::Result<world_chain_proof_sp1_types::Sp1SessionStatus>;
 
     async fn download(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues>;
 }

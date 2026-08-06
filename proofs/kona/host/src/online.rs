@@ -34,7 +34,7 @@ use world_chain_proof_core::{
     range::{WorldRangeHardfork, WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
-use world_chain_proof_kona_client_utils::{
+use world_chain_proof_kona_client::{
     ETHDAWitnessExecutor, OutputRootWitness, WitnessExecutor, get_inputs_for_pipeline,
 };
 

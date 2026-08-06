@@ -9,11 +9,11 @@ use alloy_primitives::B256;
 use anyhow::{Context, bail};
 use sp1_sdk::SP1ProofWithPublicValues;
 use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
-use world_chain_proof_kona_host_utils::online::{
+use world_chain_proof_kona_host::online::{
     OnlineHostConfig, RangeMetadata, RangeWitnessRequest, build_range_input,
     fetch_l1_header_by_hash,
 };
-use world_chain_proof_succinct_utils::{
+use world_chain_proof_sp1_types::{
     AggregationSessionRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
 };
 

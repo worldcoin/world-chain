@@ -8,7 +8,7 @@ use backon::{ExponentialBuilder, Retryable};
 use clap::Parser;
 use tracing::{error, info};
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_proof_kona_host_utils::online::{
+use world_chain_proof_kona_host::online::{
     build_online_config, hardfork_config_from_chain_spec,
 };
 use world_chain_proof_nitro_enclave::register::{

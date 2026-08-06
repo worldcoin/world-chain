@@ -26,7 +26,7 @@ use alloy_primitives::Bytes;
 use alloy_sol_types::SolValue;
 use anyhow::{Context, Result, anyhow, bail};
 use tracing::info;
-use world_chain_proof_kona_host_utils::online::{
+use world_chain_proof_kona_host::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input,
 };
 use world_chain_proof_nitro_enclave::{

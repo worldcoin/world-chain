@@ -11,7 +11,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{info, warn};
-use world_chain_proofs::ConsensusProvider;
+use world_chain_proof_protocol::ConsensusProvider;
 
 /// World Chain output-root challenger.
 #[derive(Debug)]

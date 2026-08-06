@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-proofs"
+name = "world-chain-proof-protocol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

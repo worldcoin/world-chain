@@ -1,5 +1,5 @@
 use tracing::{info, warn};
-use world_chain_proofs::{
+use world_chain_proof_protocol::{
     ConsensusProvider, GameStatus, InvalidationReason, LineageStop, SelectedLineageGame,
     select_lineage,
 };
