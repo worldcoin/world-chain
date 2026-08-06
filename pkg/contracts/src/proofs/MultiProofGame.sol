@@ -460,16 +460,15 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         }
 
         // Verify the proof against the verifier configured for this lane.
-        if (!_verifierFor(lane).verify(rootId_, proof)) {
+        if (!_verifierFor(lane).verify(rootId_, _transition(), proof)) {
             revert InvalidProof(lane, rootId_);
         }
 
-        uint8 bitmap = claimData.proofBitmap | mask;
-        claimData.proofBitmap = bitmap;
+        claimData.proofBitmap |= mask;
 
         // Update the status of the proposal. Unchallenged, a single lane is a valid proof that
         // finalizes once the challenge window closes; challenged, only the threshold is.
-        if (ProofLib.hasThreshold(bitmap, PROOF_THRESHOLD)) {
+        if (ProofLib.hasThreshold(claimData.proofBitmap, PROOF_THRESHOLD)) {
             claimData.status = claimData.challenger == address(0)
                 ? ProposalStatus.UnchallengedAndValidProofProvided
                 : ProposalStatus.ChallengedAndValidProofProvided;
@@ -477,7 +476,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             claimData.status = ProposalStatus.UnchallengedAndValidProofProvided;
         }
 
-        emit ProofSubmitted(lane, rootId_, bitmap);
+        emit ProofSubmitted(lane, rootId_, claimData.proofBitmap);
 
         return claimData.status;
     }
@@ -783,5 +782,20 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         }
         if (lane == ProofLib.ProofLane.TEE_ATTESTATION) return teeVerifier;
         return securityCouncil;
+    }
+
+    /// @notice The transition public values a proof for this game must attest.
+    function _transition() internal view returns (ProofLib.TransitionPublicValues memory) {
+        (Hash startingRootHash_, uint256 startingBlockNumber_) = startingProposal();
+        return ProofLib.TransitionPublicValues({
+            l1Head: Hash.unwrap(l1Head()),
+            l2PreRoot: Hash.unwrap(startingRootHash_),
+            // forge-lint: disable-next-line(unsafe-typecast)
+            l2PreBlockNumber: uint64(startingBlockNumber_),
+            l2PostRoot: Claim.unwrap(rootClaim()),
+            // forge-lint: disable-next-line(unsafe-typecast)
+            l2PostBlockNumber: uint64(l2SequenceNumber()),
+            rollupConfigHash: rollupConfigHash
+        });
     }
 }

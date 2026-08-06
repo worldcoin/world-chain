@@ -4,7 +4,6 @@ pragma solidity 0.8.28;
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
 import {ProofLib} from "../lib/ProofLib.sol";
-import {ProofVerificationLib} from "../lib/ProofVerificationLib.sol";
 
 /// Must match `world_chain_proof_core::types::AggregationPublicValues`.
 struct AggregationPublicValues {
@@ -16,10 +15,6 @@ struct AggregationPublicValues {
 /// @author World Contributors
 /// @custom:security-contact security@toolsforhumanity.com
 contract SP1ValidityVerifier is IWorldChainProofVerifier {
-    /*//////////////////////////////////////////////////////////////
-                                ERRORS
-    //////////////////////////////////////////////////////////////*/
-
     /// @notice Thrown when the SP1 verifier gateway address is zero.
     error ZeroSP1Verifier();
 
@@ -29,10 +24,6 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /// @notice Thrown when the expected range program verification key is zero.
     error ZeroRangeVKeyCommitment();
 
-    /*//////////////////////////////////////////////////////////////
-                               STORAGE
-    //////////////////////////////////////////////////////////////*/
-
     /// @notice Succinct SP1 verifier gateway or verifier implementation.
     ISP1Verifier public immutable sp1Verifier;
 
@@ -41,10 +32,6 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
 
     /// @notice Range-program verification key committed by the aggregation proof.
     bytes32 public immutable rangeVKeyCommitment;
-
-    /*//////////////////////////////////////////////////////////////
-                             CONSTRUCTOR
-    //////////////////////////////////////////////////////////////*/
 
     constructor(ISP1Verifier sp1Verifier_, bytes32 aggregationVKey_, bytes32 rangeVKeyCommitment_) {
         if (address(sp1Verifier_) == address(0)) revert ZeroSP1Verifier();
@@ -56,61 +43,24 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         rangeVKeyCommitment = rangeVKeyCommitment_;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                         GENERIC VERIFIER HOOK
-    //////////////////////////////////////////////////////////////*/
-
     /// @inheritdoc IWorldChainProofVerifier
-    /// @dev `proof` layout (ABI-encoded):
-    ///
-    ///        (
-    ///            bytes32 domainHash,
-    ///            address parentRef,
-    ///            uint256 l1OriginNumber,
-    ///            bytes   publicValues,
-    ///            bytes   proofBytes
-    ///        )
-    ///
-    ///      `publicValues` must be `abi.encode(AggregationPublicValues)`.
-    ///      `proofBytes` is the SP1 on-chain proof payload; for gateway
-    ///      deployments its first four bytes select the concrete verifier route.
-    ///
-    ///      Decoding and verification live behind an external `this.` call so
-    ///      the try/catch in `verify` traps malformed ABI payloads, invalid
-    ///      public values, and SP1 verifier reverts as `false`.
-    function verify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
-        try this._decodeAndVerify(msg.sender, rootId, proof) returns (bool ok) {
-            return ok;
+    /// @dev `proof` is the SP1 on-chain proof payload; for gateway deployments its first four
+    ///      bytes select the concrete verifier route. The public values are reconstructed from
+    ///      the game-supplied transition and this verifier's range-program commitment, so the
+    ///      proof can only verify if it attests exactly that transition. Invalid or malformed
+    ///      proofs revert inside the gateway and surface as `false`.
+    function verify(bytes32, ProofLib.TransitionPublicValues calldata transition, bytes calldata proof)
+        external
+        view
+        returns (bool)
+    {
+        bytes memory publicValues = abi.encode(
+            AggregationPublicValues({transitionPublicValues: transition, multiBlockVKey: rangeVKeyCommitment})
+        );
+        try sp1Verifier.verifyProof(aggregationVKey, publicValues, proof) {
+            return true;
         } catch {
             return false;
         }
-    }
-
-    /// @notice External helper used only by `verify`; MUST NOT be called
-    ///         directly.
-    /// @dev External so `verify` can catch every revert path, including ABI
-    ///      decode failures and verifier-gateway reverts.
-    function _decodeAndVerify(address gameAddress, bytes32 rootId, bytes calldata proof) external view returns (bool) {
-        require(msg.sender == address(this), "internal");
-
-        (
-            bytes32 domainHash,
-            address parentRef,
-            uint256 l1OriginNumber,
-            bytes memory publicValues,
-            bytes memory proofBytes
-        ) = abi.decode(proof, (bytes32, address, uint256, bytes, bytes));
-
-        AggregationPublicValues memory outputs = abi.decode(publicValues, (AggregationPublicValues));
-        ProofLib.TransitionPublicValues memory transition = outputs.transitionPublicValues;
-
-        if (outputs.multiBlockVKey != rangeVKeyCommitment) return false;
-
-        bool matchesGame =
-            ProofVerificationLib.matchesGame(gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition);
-        if (!matchesGame) return false;
-
-        sp1Verifier.verifyProof(aggregationVKey, publicValues, proofBytes);
-        return true;
     }
 }

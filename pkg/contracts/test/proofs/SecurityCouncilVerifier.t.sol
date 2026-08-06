@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {SecurityCouncilVerifier} from "../../src/proofs/council/SecurityCouncilVerifier.sol";
+import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
 
 import {Safe} from "@safe-global/safe-contracts/contracts/Safe.sol";
 import {SafeProxyFactory} from "@safe-global/safe-contracts/contracts/proxies/SafeProxyFactory.sol";
@@ -31,6 +32,17 @@ contract SecurityCouncilVerifierTest is Test {
     address internal owner3;
 
     bytes32 internal constant ROOT_ID = keccak256("rootId");
+
+    function _transition() internal pure returns (ProofLib.TransitionPublicValues memory) {
+        return ProofLib.TransitionPublicValues({
+            l1Head: bytes32(0),
+            l2PreRoot: bytes32(0),
+            l2PreBlockNumber: 0,
+            l2PostRoot: bytes32(0),
+            l2PostBlockNumber: 0,
+            rollupConfigHash: bytes32(0)
+        });
+    }
     uint256 internal constant THRESHOLD = 2;
 
     function setUp() public {
@@ -83,18 +95,18 @@ contract SecurityCouncilVerifierTest is Test {
     function test_verify_AggregatedSignatures_AtThreshold() public view {
         bytes32 h = _safeMessageHash(ROOT_ID);
         bytes memory sigs = abi.encodePacked(_sign(pk1, h), _sign(pk2, h));
-        assertTrue(verifier.verify(ROOT_ID, sigs));
+        assertTrue(verifier.verify(ROOT_ID, _transition(), sigs));
     }
 
     function test_verify_AggregatedSignatures_AboveThreshold() public view {
         bytes32 h = _safeMessageHash(ROOT_ID);
         bytes memory sigs = abi.encodePacked(_sign(pk1, h), _sign(pk2, h), _sign(pk3, h));
-        assertTrue(verifier.verify(ROOT_ID, sigs));
+        assertTrue(verifier.verify(ROOT_ID, _transition(), sigs));
     }
 
     function test_verify_RevertsInsideSafe_AreCaughtAsFalse_BelowThreshold() public view {
         bytes memory sigs = _sign(pk1, _safeMessageHash(ROOT_ID));
-        assertFalse(verifier.verify(ROOT_ID, sigs));
+        assertFalse(verifier.verify(ROOT_ID, _transition(), sigs));
     }
 
     function test_verify_ReturnsFalse_NonOwnerSignature() public view {
@@ -103,7 +115,7 @@ contract SecurityCouncilVerifierTest is Test {
         // Two signatures, but one is not an owner. Ordering still ascending is not guaranteed,
         // so either the owner check or the ordering check rejects it — both must be `false`.
         bytes memory sigs = abi.encodePacked(_sign(pk1, h), _sign(intruderPk, h));
-        assertFalse(verifier.verify(ROOT_ID, sigs));
+        assertFalse(verifier.verify(ROOT_ID, _transition(), sigs));
     }
 
     /// @dev The core replay guard: signatures collected for one root must not satisfy another.
@@ -111,12 +123,12 @@ contract SecurityCouncilVerifierTest is Test {
         bytes32 other = keccak256("some other root");
         bytes32 h = _safeMessageHash(other);
         bytes memory sigs = abi.encodePacked(_sign(pk1, h), _sign(pk2, h));
-        assertFalse(verifier.verify(ROOT_ID, sigs));
-        assertTrue(verifier.verify(other, sigs));
+        assertFalse(verifier.verify(ROOT_ID, _transition(), sigs));
+        assertTrue(verifier.verify(other, _transition(), sigs));
     }
 
     function test_verify_ReturnsFalse_GarbageProof() public view {
-        assertFalse(verifier.verify(ROOT_ID, hex"deadbeef"));
+        assertFalse(verifier.verify(ROOT_ID, _transition(), hex"deadbeef"));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -139,7 +151,7 @@ contract SecurityCouncilVerifierTest is Test {
             bytes32(0),
             uint8(1)
         );
-        assertTrue(verifier.verify(ROOT_ID, sigs));
+        assertTrue(verifier.verify(ROOT_ID, _transition(), sigs));
     }
 
     function test_verify_ReturnsFalse_ApprovedHashBelowThreshold() public {
@@ -148,7 +160,7 @@ contract SecurityCouncilVerifierTest is Test {
         safe.approveHash(h);
 
         bytes memory sigs = abi.encodePacked(bytes32(uint256(uint160(owner1))), bytes32(0), uint8(1));
-        assertFalse(verifier.verify(ROOT_ID, sigs));
+        assertFalse(verifier.verify(ROOT_ID, _transition(), sigs));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -160,11 +172,11 @@ contract SecurityCouncilVerifierTest is Test {
         _execFromSafe(
             address(signMessageLib), abi.encodeCall(SignMessageLib.signMessage, (message)), Enum.Operation.DelegateCall
         );
-        assertTrue(verifier.verify(ROOT_ID, ""));
+        assertTrue(verifier.verify(ROOT_ID, _transition(), ""));
     }
 
     function test_verify_ReturnsFalse_EmptyProofWithoutApproval() public view {
-        assertFalse(verifier.verify(ROOT_ID, ""));
+        assertFalse(verifier.verify(ROOT_ID, _transition(), ""));
     }
 
     /// @dev signMessage only covers the root it was signed for.
@@ -173,7 +185,7 @@ contract SecurityCouncilVerifierTest is Test {
         _execFromSafe(
             address(signMessageLib), abi.encodeCall(SignMessageLib.signMessage, (message)), Enum.Operation.DelegateCall
         );
-        assertFalse(verifier.verify(keccak256("unapproved root"), ""));
+        assertFalse(verifier.verify(keccak256("unapproved root"), _transition(), ""));
     }
 
     /*//////////////////////////////////////////////////////////////
