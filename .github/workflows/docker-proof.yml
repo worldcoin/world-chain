@@ -93,8 +93,8 @@ jobs:
             FEATURES=
           digest_artifact_prefix: digests-prover-sp1
 
-  build-nitro-prover-image:
-    name: build world-chain-prover-nitro image
+  build-nitro-enclave-image:
+    name: build world-chain-proof-nitro-enclave image
     needs: [resolve-sha]
     environment: dev
     strategy:
@@ -121,10 +121,10 @@ jobs:
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
           build_args: |
-            PROVER_PACKAGE=world-chain-prover-nitro
-            PROVER_BIN=world-chain-prover-nitro
+            PROVER_PACKAGE=world-chain-proof-nitro-enclave
+            PROVER_BIN=world-chain-proof-nitro-enclave
             FEATURES=
-          digest_artifact_prefix: digests-prover-nitro
+          digest_artifact_prefix: digests-nitro-enclave
 
   # Each prover's merge depends ONLY on its own build jobs. docker-build-push-digest
   # pushes untagged (by-digest) manifests, which GHCR garbage-collects within minutes.
@@ -152,8 +152,8 @@ jobs:
             type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
 
   merge-nitro-prover-image:
-    name: merge world-chain-prover-nitro image manifest
-    needs: [resolve-sha, build-nitro-prover-image]
+    name: merge world-chain-proof-nitro-enclave image manifest
+    needs: [resolve-sha, build-nitro-enclave-image]
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repo
@@ -200,7 +200,7 @@ jobs:
         with:
           platform: ${{ matrix.platform.platform }}
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ github.repository }}${{ matrix.service.suffix }}
+          image_name: ${{ env.IMAGE_NAME }}${{ matrix.service.suffix }}
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
@@ -231,7 +231,7 @@ jobs:
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ github.repository }}${{ matrix.service.suffix }}
+          image_name: ${{ env.IMAGE_NAME }}${{ matrix.service.suffix }}
           digest_artifact_prefix: ${{ matrix.service.prefix }}
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
@@ -254,13 +254,13 @@ jobs:
         with:
           platform: linux/amd64
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ github.repository }}-nitro-worker
+          image_name: ${{ env.IMAGE_NAME }}-nitro-worker
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
           build_args: |
-            PROVER_PACKAGE=world-chain-nitro-worker
-            PROVER_BIN=nitro-worker
+            PROVER_PACKAGE=world-chain-proof-nitro-worker
+            PROVER_BIN=world-chain-proof-nitro-worker
           digest_artifact_prefix: digests-nitro-worker
 
   merge-nitro-worker-image:
@@ -300,7 +300,7 @@ jobs:
         with:
           platform: linux/amd64
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ github.repository }}-nitro-worker-enclave
+          image_name: ${{ env.IMAGE_NAME }}-nitro-worker-enclave
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: proofs/nitro/Dockerfile
@@ -319,7 +319,7 @@ jobs:
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ github.repository }}-nitro-worker-enclave
+          image_name: ${{ env.IMAGE_NAME }}-nitro-worker-enclave
           digest_artifact_prefix: digests-nitro-worker-enclave
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
@@ -359,8 +359,8 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:${{ inputs.image_tag || 'nightly' }}
-            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:sha-${{ needs.resolve-sha.outputs.short }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nitro-worker-enclave-eif:${{ inputs.image_tag || 'nightly' }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nitro-worker-enclave-eif:sha-${{ needs.resolve-sha.outputs.short }}
 
   summary:
     name: Image tags summary
@@ -393,14 +393,14 @@ jobs:
             echo ""
             echo "| Image | Tags | Status |"
             echo "|-------|------|--------|"
-            echo "| \`$REPO-proof-sp1\` | \`$TAG\` \`sha-$SHORT\` | $(status $SP1_PROVER_RESULT) |"
-            echo "| \`$REPO-proof-nitro\` | \`$TAG\` \`sha-$SHORT\` | $(status $NITRO_PROVER_RESULT) |"
-            echo "| \`$REPO-nitro-worker\` | \`$TAG\` \`sha-$SHORT\` | $(status $NITRO_WORKER_RESULT) |"
-            echo "| \`$REPO-nitro-worker-enclave\` | \`$TAG\` \`sha-$SHORT\` | $(status $ENCLAVE_RESULT) |"
-            echo "| \`$REPO-nitro-worker-enclave-eif\` | \`$TAG\` \`sha-$SHORT\` | $(status $EIF_RESULT) |"
-            echo "| \`$REPO-sp1-worker\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
-            echo "| \`$REPO-proposer\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
-            echo "| \`$REPO-challenger\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
-            echo "| \`$REPO-defender\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
-            echo "| \`$REPO-prover-service\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$IMAGE_NAME-proof-sp1\` | \`$TAG\` \`sha-$SHORT\` | $(status $SP1_PROVER_RESULT) |"
+            echo "| \`$IMAGE_NAME-proof-nitro\` | \`$TAG\` \`sha-$SHORT\` | $(status $NITRO_PROVER_RESULT) |"
+            echo "| \`$IMAGE_NAME-nitro-worker\` | \`$TAG\` \`sha-$SHORT\` | $(status $NITRO_WORKER_RESULT) |"
+            echo "| \`$IMAGE_NAME-nitro-worker-enclave\` | \`$TAG\` \`sha-$SHORT\` | $(status $ENCLAVE_RESULT) |"
+            echo "| \`$IMAGE_NAME-nitro-worker-enclave-eif\` | \`$TAG\` \`sha-$SHORT\` | $(status $EIF_RESULT) |"
+            echo "| \`$IMAGE_NAME-sp1-worker\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$IMAGE_NAME-proposer\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$IMAGE_NAME-challenger\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$IMAGE_NAME-defender\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$IMAGE_NAME-prover-service\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
           } >> "$GITHUB_STEP_SUMMARY"

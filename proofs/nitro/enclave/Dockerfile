@@ -63,10 +63,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /src/target/release/world-chain-nitro-enclave \
-     /usr/local/bin/world-chain-nitro-enclave
+COPY --from=builder /src/target/release/world-chain-proof-nitro-enclave \
+     /usr/local/bin/world-chain-proof-nitro-enclave
 
 ENV RUST_LOG=info
 ENV NITRO_VSOCK_PORT=5005
 
-ENTRYPOINT ["/usr/local/bin/world-chain-nitro-enclave"]
+ENTRYPOINT ["/usr/local/bin/world-chain-proof-nitro-enclave"]
