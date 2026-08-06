@@ -5,12 +5,14 @@ use std::{sync::Arc, time::Duration};
 use alloy_primitives::{Address, B256, Bytes};
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
+use world_chain_proof_sp1_worker::{
+    ClaimedProofJobHandler, ProofWorker, ProofWorkerConfig, RetryConfig,
+};
 use world_chain_proof_worker::{ProofJob, WorkerHeartbeatConfig};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
     ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
-use world_chain_sp1_worker::{ClaimedProofJobHandler, ProofWorker, ProofWorkerConfig, RetryConfig};
 
 /// Backend returning a canned SP1 proof for any request, without RPC or a prover.
 struct MockBackend;

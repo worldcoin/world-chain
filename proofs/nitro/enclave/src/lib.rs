@@ -180,7 +180,7 @@ pub fn transition_commitment(transition_public_values: &TransitionPublicValues) 
     protocol::transition_commitment(transition_public_values)
 }
 
-/// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro::*`.
+/// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro_enclave::*`.
 pub mod prelude {
     pub use crate::{
         ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest, transition_commitment,

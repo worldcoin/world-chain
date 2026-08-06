@@ -6,7 +6,7 @@ use world_chain_proof_core::{
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 #[cfg(target_os = "linux")]
-use world_chain_proof_nitro::{
+use world_chain_proof_nitro_enclave::{
     ExpectedPcrs, NitroRangeProofRequest,
     attestation::parse_and_check_pcrs,
     host::{EnclaveEndpoint, NitroProver},

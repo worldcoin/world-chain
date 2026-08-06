@@ -28,7 +28,7 @@ We use the OP Succinct upstream pattern (see [succinctlabs/op-succinct/utils/bui
    the prover binary at link time via the `world-chain-proof-succinct-elfs` crate.
 
 Net effect: the ELFs are never on disk for the host crate to find — they're statically baked
-into every binary that links `world-chain-proof-succinct-elfs` (e.g. `world-chain-sp1-worker`).
+into every binary that links `world-chain-proof-succinct-elfs` (e.g. `world-chain-proof-sp1-worker`).
 There is no committed ELF blob. The derived vkeys and ELF SHA-256s are recorded in
 `proofs/succinct/elf/vkeys.json`. The on-chain governance anchor is the SP1 vkey computed from the
 embedded bytes (`just proof-vkeys`), which is exactly what we register on
@@ -52,7 +52,7 @@ Nothing extra is required:
 
 ```bash
 cargo build -p world-chain-prover-sp1   # builds guest ELFs (first time only) and the host CLI
-cargo build -p world-chain-sp1-worker   # likewise
+cargo build -p world-chain-proof-sp1-worker   # likewise
 just proof-vkeys                         # prints the on-chain vkey commitments
 ```
 

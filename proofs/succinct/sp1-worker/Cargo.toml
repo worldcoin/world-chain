@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-sp1-worker"
+name = "world-chain-proof-sp1-worker"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "sp1-worker"
+name = "world-chain-proof-sp1-worker"
 path = "src/main.rs"
 
 [lints]

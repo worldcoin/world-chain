@@ -9,7 +9,7 @@ pub struct CommonArgs {
     #[arg(
         long,
         env = "ENCLAVE_PORT",
-        default_value_t = world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT
+        default_value_t = world_chain_proof_nitro_enclave::protocol::DEFAULT_VSOCK_PORT
     )]
     pub enclave_port: u32,
 }

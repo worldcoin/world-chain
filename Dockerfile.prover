@@ -3,8 +3,8 @@
 # required build args (no defaults). FEATURES defaults to empty (package default features
 # apply); pass an explicit comma-separated list to enable additional cargo features.
 # Examples:
-#   PROVER_PACKAGE=world-chain-prover-sp1  PROVER_BIN=world-chain-prover-sp1  FEATURES=
-#   PROVER_PACKAGE=world-chain-sp1-worker  PROVER_BIN=sp1-worker               FEATURES=
+#   PROVER_PACKAGE=world-chain-prover-sp1        PROVER_BIN=world-chain-prover-sp1        FEATURES=
+#   PROVER_PACKAGE=world-chain-proof-sp1-worker  PROVER_BIN=world-chain-proof-sp1-worker  FEATURES=
 # Mirrors the caching strategy of the main Dockerfile (cargo-chef + sccache/S3).
 FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS base
 

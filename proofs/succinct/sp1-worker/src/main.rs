@@ -9,6 +9,9 @@ use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, build_online_config, hardfork_config_from_chain_spec,
 };
+use world_chain_proof_sp1_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
+};
 use world_chain_proof_succinct_host_utils::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
@@ -17,9 +20,6 @@ use world_chain_proof_succinct_host_utils::{
 };
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;
-use world_chain_sp1_worker::{
-    ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
-};
 
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: usize = 10;
 const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
