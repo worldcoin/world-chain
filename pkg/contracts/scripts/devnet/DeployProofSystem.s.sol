@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {Script} from "forge-std/Script.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
-import {GameTypes} from "../../src/dispute/GameTypes.sol";
+import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 import {LibProof} from "../../src/dispute/lib/LibProof.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";

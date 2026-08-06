@@ -19,10 +19,6 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     }
 
     /// @inheritdoc IWorldChainProofVerifier
-    /// @dev `proof` is the enclave's 65-byte ECDSA signature over
-    ///      `keccak256(abi.encode(transition))`, matching `transition_commitment` in
-    ///      `proofs/nitro/src/protocol.rs`. `tryRecover` rejects malformed lengths, high-s
-    ///      values, and invalid recovery ids without reverting.
     function verify(bytes32, LibProof.TransitionPublicValues calldata transition, bytes calldata proof)
         external
         view

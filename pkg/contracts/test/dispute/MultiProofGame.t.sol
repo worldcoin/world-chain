@@ -49,7 +49,7 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(address(registered), address(game));
         assertTrue(asr.isGameRegistered(IDisputeGame(address(game))));
         assertEq(weth.balanceOf(address(game)), PROPOSER_BOND);
-        assertEq(game.proofBitmap(), 0);
+        assertEq(game.proofBitmap().raw(), 0);
     }
 
     function test_Create_RejectsMalformedExtraData() public {
@@ -195,7 +195,7 @@ contract MultiProofGameTest is OPStackFixtures {
             bytes32 rootClaim = keccak256(abi.encode("lane", lane));
             MultiProofGame game = _propose(type(uint256).max, rootClaim, target, 0);
 
-            game.submitProofLane(lane, abi.encodePacked(game.rootId()));
+            game.submitProofLane(_compact(lane, laneRewardRecipient(lane), abi.encodePacked(game.rootId())));
             vm.warp(game.challengeDeadline().raw());
             game.resolve();
 
@@ -206,14 +206,14 @@ contract MultiProofGameTest is OPStackFixtures {
 
     function test_UnchallengedFlow_ThresholdProvidesFastFinality() public {
         MultiProofGame game = _proposeAtAnchor();
-        game.submitProofLane(0, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId())));
 
         (bool resolvable,,) = game.resolutionStatus();
         assertFalse(resolvable);
         vm.expectRevert(GameNotOver.selector);
         game.resolve();
 
-        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         GameStatus outcome;
         LibProof.InvalidationReason reason;
         (resolvable, outcome, reason) = game.resolutionStatus();
@@ -306,7 +306,7 @@ contract MultiProofGameTest is OPStackFixtures {
         game.challenge{value: CHALLENGER_BOND - 1}();
 
         _challenge(game);
-        assertEq(game.proofBitmap(), 0);
+        assertEq(game.proofBitmap().raw(), 0);
         assertEq(game.refundModeCredit(challengerAccount), CHALLENGER_BOND);
         assertEq(weth.balanceOf(address(game)), PROPOSER_BOND + CHALLENGER_BOND);
 
@@ -332,14 +332,14 @@ contract MultiProofGameTest is OPStackFixtures {
     function test_ProofThreshold_DefenderWinsAndDuplicateDoesNotCount() public {
         MultiProofGame game = _proposeAtAnchor();
 
-        game.submitProofLane(0, abi.encodePacked(game.rootId()));
-        game.submitProofLane(0, abi.encodePacked(game.rootId()));
-        assertEq(game.proofBitmap().proofCount(), 1);
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId())));
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId())));
+        assertEq(game.proofBitmap().count(), 1);
 
         vm.prank(challengerAccount);
         game.challenge{value: CHALLENGER_BOND}();
 
-        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
         assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND);
@@ -348,13 +348,13 @@ contract MultiProofGameTest is OPStackFixtures {
 
     function test_Challenge_AfterInitialProofStillRequiresThreshold() public {
         MultiProofGame game = _proposeAtAnchor();
-        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         _challenge(game);
 
         (bool resolvable,,) = game.resolutionStatus();
         assertFalse(resolvable);
 
-        game.submitProofLane(0, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId())));
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
     }
@@ -364,12 +364,12 @@ contract MultiProofGameTest is OPStackFixtures {
         _challenge(game);
 
         vm.expectRevert();
-        game.submitProofLane(0, abi.encodePacked(keccak256("wrong-root")));
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(keccak256("wrong-root"))));
 
         vm.warp(game.proofDeadline().raw());
         bytes memory proof = abi.encodePacked(game.rootId());
         vm.expectRevert();
-        game.submitProofLane(0, proof);
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), proof));
     }
 
     function test_ProofLane_RejectsInitialProofAtChallengeDeadline() public {
@@ -378,7 +378,7 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.warp(game.challengeDeadline().raw());
 
         vm.expectRevert(GameOver.selector);
-        game.submitProofLane(0, proof);
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), proof));
     }
 
     function test_ProofLane_RejectsSubmissionOnceThresholdReached() public {
@@ -389,7 +389,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         bytes memory proof = abi.encodePacked(game.rootId());
         vm.expectRevert(GameOver.selector);
-        game.submitProofLane(PROOF_THRESHOLD, proof);
+        game.submitProofLane(_compact(PROOF_THRESHOLD, laneRewardRecipient(PROOF_THRESHOLD), proof));
     }
 
     function test_ProofLane_RejectsSubmissionWhenParentInvalid() public {
@@ -402,7 +402,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         bytes memory proof = abi.encodePacked(child.rootId());
         vm.expectRevert(InvalidParentGame.selector);
-        child.submitProofLane(0, proof);
+        child.submitProofLane(_compact(0, laneRewardRecipient(0), proof));
     }
 
     function test_Challenge_RejectsGameOver() public {
@@ -428,7 +428,7 @@ contract MultiProofGameTest is OPStackFixtures {
         (IMultiProofGame.ProposalStatus status,,,,) = game.claimData();
         assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.Unchallenged));
 
-        game.submitProofLane(0, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId())));
         (status,,,,) = game.claimData();
         assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.UnchallengedAndValidProofProvided));
 
@@ -438,7 +438,7 @@ contract MultiProofGameTest is OPStackFixtures {
         (status,,,,) = game.claimData();
         assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.Challenged));
 
-        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         (status,,,,) = game.claimData();
         assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.ChallengedAndValidProofProvided));
 
@@ -605,7 +605,13 @@ contract MultiProofGameTest is OPStackFixtures {
         // Proven but below threshold: self-challenging returns less than the pair staked.
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         MultiProofGame proven = _propose(type(uint256).max, keccak256("proven-self-challenge"), target, 0);
-        proven.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(proven.rootId()));
+        proven.submitProofLane(
+            _compact(
+                uint8(LibProof.ProofLane.TEE_ATTESTATION),
+                laneRewardRecipient(uint8(LibProof.ProofLane.TEE_ATTESTATION)),
+                abi.encodePacked(proven.rootId())
+            )
+        );
         vm.prank(sybil);
         proven.challenge{value: CHALLENGER_BOND}();
 
@@ -623,7 +629,13 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(initialDeadline, game.createdAt().raw() + CHALLENGE_PERIOD);
 
         vm.warp(initialDeadline - 1);
-        game.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
+        game.submitProofLane(
+            _compact(
+                uint8(LibProof.ProofLane.TEE_ATTESTATION),
+                laneRewardRecipient(uint8(LibProof.ProofLane.TEE_ATTESTATION)),
+                abi.encodePacked(game.rootId())
+            )
+        );
 
         assertEq(game.challengeDeadline().raw(), initialDeadline);
         vm.warp(initialDeadline);

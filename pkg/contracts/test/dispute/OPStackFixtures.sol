@@ -5,7 +5,7 @@ import {Test} from "@forge-std/Test.sol";
 
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
-import {GameTypes} from "../../src/dispute/GameTypes.sol";
+import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 import {LibProof} from "../../src/dispute/lib/LibProof.sol";
 import {IWorldChainProofVerifier} from "../../src/dispute/interfaces/IWorldChainProofVerifier.sol";
 import {MockRootIdVerifier} from "../mocks/MockRootIdVerifier.sol";
@@ -204,20 +204,32 @@ abstract contract OPStackFixtures is Test {
         game.challenge{value: CHALLENGER_BOND}();
     }
 
+    /// @dev Packs a compact `submitProofLane` payload: lane id, reward recipient, then the proof.
+    function _compact(uint8 laneId, address recipient, bytes memory proof) internal pure returns (bytes memory) {
+        return abi.encodePacked(laneId, recipient, proof);
+    }
+
     /// @dev Submits `laneCount` valid proof lanes; the mock verifiers accept a 32-byte proof
-    ///      equal to the game's rootId.
+    ///      equal to the game's rootId. Each lane names a distinct recipient so reward splits
+    ///      are attributable: `laneRewardRecipient(lane)`.
     function _submitLanes(MultiProofGame game, uint8 laneCount) internal {
         bytes memory proof = abi.encodePacked(game.rootId());
         for (uint8 lane = 0; lane < LibProof.PROOF_LANE_COUNT; lane++) {
-            if (LibProof.proofCount(game.proofBitmap()) >= laneCount) return;
-            game.submitProofLane(lane, proof);
+            if (game.proofBitmap().count() >= laneCount) return;
+            game.submitProofLane(_compact(lane, laneRewardRecipient(lane), proof));
         }
+    }
+
+    /// @dev Deterministic per-lane reward recipient used by the submit helpers.
+    function laneRewardRecipient(uint8 laneId) internal pure returns (address) {
+        return address(uint160(uint256(keccak256(abi.encodePacked("lane-recipient", laneId)))));
     }
 
     /// @dev Warps past the challenge window and resolves (unchallenged path).
     function _resolveUnchallenged(MultiProofGame game) internal {
-        if (game.proofBitmap() == 0) {
-            game.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
+        if (game.proofBitmap().raw() == 0) {
+            uint8 lane = uint8(LibProof.ProofLane.TEE_ATTESTATION);
+            game.submitProofLane(_compact(lane, laneRewardRecipient(lane), abi.encodePacked(game.rootId())));
         }
         if (block.timestamp < game.challengeDeadline().raw()) {
             vm.warp(game.challengeDeadline().raw());
