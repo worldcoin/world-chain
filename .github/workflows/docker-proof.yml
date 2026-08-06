@@ -173,7 +173,7 @@ jobs:
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
 
-  # nitro-enclave uses its own Dockerfile (proofs/nitro/Dockerfile) and
+  # nitro-enclave uses its own Dockerfile (proofs/nitro/enclave/Dockerfile) and
   # is x86_64 only (Nitro Enclaves are x86_64).
   build-nitro-enclave-image:
     name: build nitro-enclave image
@@ -193,7 +193,7 @@ jobs:
           image_name: ${{ env.IMAGE_NAME }}-nitro-enclave
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          dockerfile: proofs/nitro/Dockerfile
+          dockerfile: proofs/nitro/enclave/Dockerfile
           digest_artifact_prefix: digests-nitro-worker-enclave
 
   merge-nitro-enclave-image:
