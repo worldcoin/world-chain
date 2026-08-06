@@ -210,7 +210,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}-nitro-enclave
-          digest_artifact_prefix: digests-nitro-worker-enclave
+          digest_artifact_prefix: digests-nitro-enclave
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
