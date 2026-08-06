@@ -148,6 +148,8 @@ install *args='':
 #   Phase 3b  proof-approve-pcrs          – Approve PCR set on verifier
 #   Phase 3c  proof-verify-pcrs           – Assert the RUNNING enclave's PCR set is approved
 #                                            (drift check; safe to run any time)
+#   Upgrade   proof-upgrade-game          – Swap the game type 1006 implementation in place
+#                                            (run on its own; NOT part of proof-setup)
 #   Phase 4   proof-register-key          – Register the enclave's generated key on-chain
 #                                            (run separately; NOT part of proof-setup)
 #   Combined  proof-setup                 – Run deploy phases 0a–3c in sequence (does NOT
@@ -465,6 +467,44 @@ proof-activate-system env="alphanet":
     echo "Activating WIP-1006 (require fresh anchor: $REQUIRE_FRESH_ANCHOR)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
     cd pkg/contracts && forge script scripts/devnet/ActivateProofSystem.s.sol:ActivateProofSystem \
         --rpc-url "$L1_RPC_URL" --private-key "$GUARDIAN_KEY" $BROADCAST_FLAG --slow
+
+# Upgrade – Swap the registered game implementation for game type 1006, in place.
+#
+# Every constructor parameter defaults to the value read off the currently registered
+# implementation, so the default run changes bytecode and nothing else; the script reverts
+# if `domainHash` moves. Existing games keep the implementation they were cloned from, so
+# only games created after this call use the new code — plan the service rollout around
+# that drain window.
+#
+# Set NEW_GAME_IMPLEMENTATION to register an already-deployed implementation (this is also
+# the rollback path: point it at the previous address).
+proof-upgrade-game env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    : "${DISPUTE_GAME_FACTORY:?DISPUTE_GAME_FACTORY is required}"
+    : "${DGF_OWNER_KEY:?DGF_OWNER_KEY is required (DisputeGameFactory owner)}"
+    # The registered implementation predates the getters for these two, so they cannot be read
+    # back from chain. Both feed domainHash, which the script checks against the outgoing
+    # implementation — a wrong value fails there rather than forking the proof domain.
+    : "${ROLLUP_CONFIG_HASH:?ROLLUP_CONFIG_HASH is required (see deployments/{{env}}-proof-system.json)}"
+    export PROOF_SYSTEM_BLOCK_INTERVAL="${PROOF_SYSTEM_BLOCK_INTERVAL:-450}"
+    export PRIVATE_KEY="${PRIVATE_KEY:-$DGF_OWNER_KEY}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    # A dry run must never overwrite the record of a live deployment: the simulated
+    # implementation is never deployed, so writing its address to the real path replaces a
+    # true record with a fictional one.
+    if [ -n "$BROADCAST_FLAG" ]; then
+        export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.json"
+    else
+        export PROOF_SYSTEM_DEPLOYMENT_OUT=""
+    fi
+    echo "Upgrading game type 1006 implementation (record → ${PROOF_SYSTEM_DEPLOYMENT_OUT:-none})$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
+    cd pkg/contracts && forge script scripts/devnet/UpgradeGameImplementation.s.sol:UpgradeGameImplementation \
+        --rpc-url "$L1_RPC_URL" --private-key "$DGF_OWNER_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
 proof-certmanager-prewarm env="alphanet":
