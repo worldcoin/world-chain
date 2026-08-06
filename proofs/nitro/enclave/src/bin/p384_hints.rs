@@ -160,7 +160,7 @@ fn pad_to_48(bytes: &[u8]) -> Result<Vec<u8>> {
 /// The attestation TBS is the CBOR-encoded `["Signature1", protected, b"", payload]`
 /// structure.  The hash is SHA-384 of the TBS bytes; the signature is r || s.
 ///
-/// Delegates the CBOR decoding to [`world_chain_proof_nitro::cose::decode_attestation_tbs`]
+/// Delegates the CBOR decoding to [`world_chain_proof_nitro_enclave::cose::decode_attestation_tbs`]
 /// so the binary and the on-chain `registerKey` calldata builder share one implementation.
 fn parse_attestation_signature(raw: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     use sha2::{Digest, Sha384};

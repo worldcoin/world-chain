@@ -13,7 +13,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use world_chain_proof_nitro::p384_hints::collect_hints;
+//! use world_chain_proof_nitro_enclave::p384_hints::collect_hints;
 //!
 //! let hash      = hex::decode("...")?;   // SHA-384 digest, up to 48 bytes
 //! let signature = hex::decode("...")?;   // 96 bytes: r || s (big-endian, each 48 bytes)

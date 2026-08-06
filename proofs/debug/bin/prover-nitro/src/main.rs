@@ -132,7 +132,7 @@ async fn main() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 async fn get_attestation() -> Result<()> {
-    use world_chain_proof_nitro::{
+    use world_chain_proof_nitro_enclave::{
         ExpectedPcrs,
         host::{EnclaveEndpoint, NitroProver},
         protocol::DEFAULT_VSOCK_PORT,
@@ -168,7 +168,7 @@ async fn get_attestation() -> Result<()> {
 #[cfg(target_os = "linux")]
 async fn nitro_prove(args: NitroArgs) -> Result<()> {
     use anyhow::anyhow;
-    use world_chain_proof_nitro::{
+    use world_chain_proof_nitro_enclave::{
         ExpectedPcrs, NitroRangeProofRequest,
         attestation::parse_and_check_pcrs,
         host::{EnclaveEndpoint, NitroProver},
@@ -263,7 +263,7 @@ fn hex_to_pcr(hex: &str) -> Result<[u8; 48]> {
 
 #[cfg(target_os = "linux")]
 async fn register(args: RegisterArgs) -> Result<()> {
-    use world_chain_proof_nitro::{
+    use world_chain_proof_nitro_enclave::{
         ExpectedPcrs,
         register::{RegisterParams, RegistrationOutcome, register_enclave_key},
     };

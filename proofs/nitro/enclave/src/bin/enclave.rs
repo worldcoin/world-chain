@@ -6,7 +6,7 @@
 //! integrity is established by an NSM-attested `COSE_Sign1` document rather than a ZK proof.
 //!
 //! Communication with the host happens over vsock using the framing defined in
-//! [`world_chain_proof_nitro::protocol`].
+//! [`world_chain_proof_nitro_enclave::protocol`].
 //!
 //! Build with the `enclave` feature:
 //!
@@ -22,7 +22,7 @@ use anyhow::Result;
 #[cfg(target_os = "linux")]
 use tracing_subscriber::EnvFilter;
 #[cfg(target_os = "linux")]
-use world_chain_proof_nitro::enclave;
+use world_chain_proof_nitro_enclave::enclave;
 
 #[cfg(target_os = "linux")]
 #[tokio::main]

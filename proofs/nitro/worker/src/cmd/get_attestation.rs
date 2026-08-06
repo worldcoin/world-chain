@@ -1,7 +1,7 @@
 #![cfg(target_os = "linux")]
 
 use crate::cmd::common::CommonArgs;
-use world_chain_proof_nitro::{
+use world_chain_proof_nitro_enclave::{
     ExpectedPcrs,
     host::{EnclaveEndpoint, NitroProver},
 };
