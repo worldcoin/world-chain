@@ -20,7 +20,7 @@ pub enum ChallengerError {
     },
     /// Contract call or transaction failure.
     #[error(transparent)]
-    Contract(#[from] alloy_contract::Error),
+    Contract(Box<alloy_contract::Error>),
     #[error(transparent)]
     OutputRoot(#[from] ConsensusError),
     #[error("The challenge transaction didn't execute succesfully: {0}")]
@@ -50,6 +50,12 @@ pub enum ChallengerError {
         /// Block number included in the game.
         given_block: u64,
     },
+}
+
+impl From<alloy_contract::Error> for ChallengerError {
+    fn from(error: alloy_contract::Error) -> Self {
+        Self::Contract(Box::new(error))
+    }
 }
 
 impl ChallengerError {

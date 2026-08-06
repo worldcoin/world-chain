@@ -245,11 +245,11 @@ pub struct SimulationInspector {
     /// matching `*_end` pops it. See [`PendingFrame`].
     pending_frames: Vec<PendingFrame>,
     /// Raw payload of the deepest frame that exited via REVERT. Set on the
-    /// first non-ok `call_end` whose `InstructionResult` is `Revert` — since
-    /// `call_end` fires bottom-up, that's the innermost reverter and so the
-    /// root cause when wrappers like EntryPoint's `FailedOp(...)` re-revert
-    /// up the stack. Halt frames (OOG, invalid opcode, etc.) are skipped:
-    /// they have no payload to decode.
+    /// first `call_end` or `create_end` whose `InstructionResult` is `Revert`
+    /// — since end hooks fire bottom-up, that's the innermost reverter and so
+    /// the root cause when wrappers like EntryPoint's `FailedOp(...)`
+    /// re-revert up the stack. Halt frames (OOG, invalid opcode, etc.) are
+    /// skipped: they have no payload to decode.
     deepest_revert_payload: Option<Bytes>,
 }
 
@@ -418,8 +418,15 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
         let Some(mut frame) = self.pending_frames.pop() else {
             return;
         };
-        if !outcome.instruction_result().is_ok() {
-            // CREATE itself failed — drop the frame.
+        let result = outcome.instruction_result();
+        if !result.is_ok() {
+            // CREATE itself failed — drop the frame. Capture an explicit
+            // constructor REVERT before an outer call can replace its useful
+            // payload with a wrapper error.
+            if matches!(result, InstructionResult::Revert) && self.deepest_revert_payload.is_none()
+            {
+                self.deepest_revert_payload = Some(outcome.output().clone());
+            }
             return;
         }
         // Successful create: record `(deployer, deployed)` into the create
