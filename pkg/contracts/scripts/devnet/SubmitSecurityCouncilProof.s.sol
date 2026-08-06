@@ -5,7 +5,7 @@ import {Script} from "forge-std/Script.sol";
 
 import {SecurityCouncilVerifier} from "../../src/proofs/council/SecurityCouncilVerifier.sol";
 import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
-import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
+import {LibProof} from "../../src/proofs/lib/LibProof.sol";
 
 interface ICouncilSafe {
     function getMessageHash(bytes calldata message) external view returns (bytes32);
@@ -38,7 +38,7 @@ contract SubmitSecurityCouncilProof is Script {
 
         uint256 transactionKey = vm.envOr("PRIVATE_KEY", signerKey);
         vm.startBroadcast(transactionKey);
-        game.submitProofLane(uint8(ProofLib.ProofLane.SECURITY_COUNCIL), proof);
+        game.submitProofLane(uint8(LibProof.ProofLane.SECURITY_COUNCIL), proof);
         vm.stopBroadcast();
     }
 }

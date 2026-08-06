@@ -323,7 +323,7 @@ mod tests {
         };
 
         // Reference values from `cast abi-encode` / `cast keccak`, pinning these encodings to
-        // `ProofLib.domainHash` and `ProofLib.rootId`.
+        // `LibProof.domainHash` and `LibProof.rootId`.
         assert_eq!(
             domain.hash(),
             b256!("2eadd7e0cde9ca6f758216655e263e8d197480ebc4d3478403000447fe62f4be")

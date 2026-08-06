@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {OPStackFixtures} from "./proofs/OPStackFixtures.sol";
 import {MultiProofGame} from "../src/proofs/MultiProofGame.sol";
 import {IMultiProofGame} from "../src/proofs/interfaces/IMultiProofGame.sol";
-import {ProofLib} from "../src/proofs/lib/ProofLib.sol";
+import {LibProof} from "../src/proofs/lib/LibProof.sol";
 
 import {
     BondDistributionMode,
@@ -190,7 +190,7 @@ contract MultiProofGameTest is OPStackFixtures {
     }
 
     function test_UnchallengedFlow_AnyProofLaneCanFinalize() public {
-        for (uint8 lane; lane < ProofLib.PROOF_LANE_COUNT; lane++) {
+        for (uint8 lane; lane < LibProof.PROOF_LANE_COUNT; lane++) {
             (, uint256 anchorBlock) = asr.getAnchorRoot();
             uint256 target = anchorBlock + BLOCK_INTERVAL;
             bytes32 rootClaim = keccak256(abi.encode("lane", lane));
@@ -216,11 +216,11 @@ contract MultiProofGameTest is OPStackFixtures {
 
         game.submitProofLane(1, abi.encodePacked(game.rootId()));
         GameStatus outcome;
-        ProofLib.InvalidationReason reason;
+        LibProof.InvalidationReason reason;
         (resolvable, outcome, reason) = game.resolutionStatus();
         assertTrue(resolvable);
         assertEq(uint8(outcome), uint8(GameStatus.DEFENDER_WINS));
-        assertEq(uint8(reason), uint8(ProofLib.InvalidationReason.NONE));
+        assertEq(uint8(reason), uint8(LibProof.InvalidationReason.NONE));
 
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
@@ -232,14 +232,14 @@ contract MultiProofGameTest is OPStackFixtures {
         MultiProofGame first = _proposeAtAnchor();
         vm.warp(first.challengeDeadline().raw());
 
-        (bool resolvable, GameStatus outcome, ProofLib.InvalidationReason reason) = first.resolutionStatus();
+        (bool resolvable, GameStatus outcome, LibProof.InvalidationReason reason) = first.resolutionStatus();
         assertTrue(resolvable);
         assertEq(uint8(outcome), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(reason), uint8(ProofLib.InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(reason), uint8(LibProof.InvalidationReason.PROOF_TIMEOUT));
 
         first.resolve();
         assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(first.invalidationReason()), uint8(ProofLib.InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(first.invalidationReason()), uint8(LibProof.InvalidationReason.PROOF_TIMEOUT));
         assertEq(first.credit(protocolFeeRecipient), PROPOSER_BOND);
 
         _passAirgap(first);
@@ -333,7 +333,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         game.submitProofLane(0, abi.encodePacked(game.rootId()));
         game.submitProofLane(0, abi.encodePacked(game.rootId()));
-        assertEq(ProofLib.proofCount(game.proofBitmap()), 1);
+        assertEq(LibProof.proofCount(game.proofBitmap()), 1);
 
         game.submitProofLane(1, abi.encodePacked(game.rootId()));
         game.resolve();
@@ -451,7 +451,7 @@ contract MultiProofGameTest is OPStackFixtures {
         first.resolve();
 
         assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(first.invalidationReason()), uint8(ProofLib.InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(first.invalidationReason()), uint8(LibProof.InvalidationReason.PROOF_TIMEOUT));
         assertEq(first.credit(challengerAccount), PROPOSER_BOND + CHALLENGER_BOND);
 
         MultiProofGame retry = _propose(type(uint256).max, Claim.unwrap(first.rootClaim()), first.l2SequenceNumber(), 1);
@@ -494,7 +494,7 @@ contract MultiProofGameTest is OPStackFixtures {
         child.resolve();
 
         assertEq(uint8(child.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(child.invalidationReason()), uint8(ProofLib.InvalidationReason.INVALID_PARENT));
+        assertEq(uint8(child.invalidationReason()), uint8(LibProof.InvalidationReason.INVALID_PARENT));
         assertEq(child.credit(proposer), PROPOSER_BOND);
         assertEq(child.credit(challengerAccount), CHALLENGER_BOND);
     }
@@ -508,7 +508,7 @@ contract MultiProofGameTest is OPStackFixtures {
         child.resolve();
 
         assertEq(uint8(child.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(child.invalidationReason()), uint8(ProofLib.InvalidationReason.INVALID_PARENT));
+        assertEq(uint8(child.invalidationReason()), uint8(LibProof.InvalidationReason.INVALID_PARENT));
     }
 
     function test_Cutover_AllowsRetryOfUnrespectedGame() public {

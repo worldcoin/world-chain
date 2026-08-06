@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {ProofLib} from "./lib/ProofLib.sol";
+import {LibProof} from "./lib/LibProof.sol";
 import {GameTypes} from "./GameTypes.sol";
 import {IMultiProofGame} from "./interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
@@ -64,7 +64,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     uint8 public immutable PROOF_THRESHOLD;
 
     /// @notice Total number of proof lanes defined by the protocol.
-    uint8 public constant PROOF_LANE_COUNT = ProofLib.PROOF_LANE_COUNT;
+    uint8 public constant PROOF_LANE_COUNT = LibProof.PROOF_LANE_COUNT;
 
     /// @notice Commitment binding this deployment to its chain
     bytes32 public immutable domainHash;
@@ -90,7 +90,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Recipient of proposer bonds forfeited by proofless unchallenged timeouts.
     address public immutable protocolFeeRecipient;
 
-    /// @notice Verifiers backing the proof lanes, indexed by `ProofLib.ProofLane`.
+    /// @notice Verifiers backing the proof lanes, indexed by `LibProof.ProofLane`.
     IWorldChainProofVerifier public immutable validityProofVerifier;
     IWorldChainProofVerifier public immutable teeVerifier;
     IWorldChainProofVerifier public immutable securityCouncil;
@@ -145,7 +145,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (
             config.blockInterval == 0 || config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod
                 || config.proposerBond == 0 || config.challengerBond == 0 || config.proofThreshold == 0
-                || config.proofThreshold > ProofLib.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
+                || config.proofThreshold > LibProof.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
                 || address(config.anchorStateRegistry) == address(0) || address(config.weth) == address(0)
                 || address(config.validityProofVerifier) == address(0) || address(config.teeVerifier) == address(0)
                 || address(config.securityCouncil) == address(0)
@@ -166,7 +166,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         }
 
         domainHash =
-            ProofLib.domainHash(chainId, ProofLib.PROOF_SYSTEM_VERSION, config.rollupConfigHash, config.blockInterval);
+            LibProof.domainHash(chainId, LibProof.PROOF_SYSTEM_VERSION, config.rollupConfigHash, config.blockInterval);
         rollupConfigHash = config.rollupConfigHash;
         blockInterval = config.blockInterval;
         challengePeriod = Duration.wrap(config.challengePeriod);
@@ -333,7 +333,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                     || (previous.wasRespectedGameTypeWhenCreated()
                         && (previous.status() != GameStatus.CHALLENGER_WINS
                             || IMultiProofGame(address(previous)).invalidationReason()
-                                != ProofLib.InvalidationReason.PROOF_TIMEOUT))
+                                != LibProof.InvalidationReason.PROOF_TIMEOUT))
             ) {
                 revert GameNotRetryable(keccak256(
                         abi.encode(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim_, previousExtraData)
@@ -351,7 +351,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             challenger: address(0),
             deadline: Timestamp.wrap(uint64(block.timestamp + challengePeriod.raw())),
             proofBitmap: 0,
-            invalidationReason: ProofLib.InvalidationReason.NONE
+            invalidationReason: LibProof.InvalidationReason.NONE
         });
 
         // Set the game as initialized.
@@ -428,7 +428,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @notice Proves the game through one of the proof lanes.
-    /// @param laneId The `ProofLib.ProofLane` being submitted.
+    /// @param laneId The `LibProof.ProofLane` being submitted.
     /// @param proof The lane-specific proof bytes binding `rootId`.
     function submitProofLane(uint8 laneId, bytes calldata proof) external returns (ProposalStatus) {
         // INVARIANT: Cannot prove if the game is already resolved.
@@ -446,8 +446,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (gameOver()) revert GameOver();
 
         if (laneId >= PROOF_LANE_COUNT) revert InvalidLane(laneId);
-        ProofLib.ProofLane lane = ProofLib.ProofLane(laneId);
-        uint8 mask = ProofLib.laneMask(lane);
+        LibProof.ProofLane lane = LibProof.ProofLane(laneId);
+        uint8 mask = LibProof.laneMask(lane);
         bytes32 rootId_ = rootId();
 
         // No-op on resubmission so racing provers do not revert each other.
@@ -465,7 +465,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         // Update the status of the proposal. Unchallenged, a single lane is a valid proof that
         // finalizes once the challenge window closes; challenged, only the threshold is.
-        if (ProofLib.hasThreshold(claimData.proofBitmap, PROOF_THRESHOLD)) {
+        if (LibProof.hasThreshold(claimData.proofBitmap, PROOF_THRESHOLD)) {
             claimData.status = claimData.challenger == address(0)
                 ? ProposalStatus.UnchallengedAndValidProofProvided
                 : ProposalStatus.ChallengedAndValidProofProvided;
@@ -510,7 +510,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
             // An invalid parent invalidates this game regardless of its own proof state.
             status = GameStatus.CHALLENGER_WINS;
-            claimData.invalidationReason = ProofLib.InvalidationReason.INVALID_PARENT;
+            claimData.invalidationReason = LibProof.InvalidationReason.INVALID_PARENT;
             normalModeCredit[gameCreator()] += proposerBond;
             if (claimData.challenger != address(0)) {
                 normalModeCredit[claimData.challenger] += challengerBond;
@@ -534,7 +534,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                 // An applicable proof window expired below its requirement. A proofless
                 // proposal cannot win merely because nobody challenged it.
                 status = GameStatus.CHALLENGER_WINS;
-                claimData.invalidationReason = ProofLib.InvalidationReason.PROOF_TIMEOUT;
+                claimData.invalidationReason = LibProof.InvalidationReason.PROOF_TIMEOUT;
                 address recipient = claimData.challenger == address(0) ? protocolFeeRecipient : claimData.challenger;
                 normalModeCredit[recipient] += totalBonds;
             } else {
@@ -556,7 +556,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     function resolutionStatus()
         external
         view
-        returns (bool resolvable, GameStatus outcome, ProofLib.InvalidationReason reason)
+        returns (bool resolvable, GameStatus outcome, LibProof.InvalidationReason reason)
     {
         if (status != GameStatus.IN_PROGRESS) {
             return (false, status, claimData.invalidationReason);
@@ -564,17 +564,17 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
-            return (true, GameStatus.CHALLENGER_WINS, ProofLib.InvalidationReason.INVALID_PARENT);
+            return (true, GameStatus.CHALLENGER_WINS, LibProof.InvalidationReason.INVALID_PARENT);
         }
         if (parentStatus == GameStatus.IN_PROGRESS || !gameOver()) {
-            return (false, GameStatus.IN_PROGRESS, ProofLib.InvalidationReason.NONE);
+            return (false, GameStatus.IN_PROGRESS, LibProof.InvalidationReason.NONE);
         }
 
         bool proven = claimData.status == ProposalStatus.UnchallengedAndValidProofProvided
             || claimData.status == ProposalStatus.ChallengedAndValidProofProvided;
         return proven
-            ? (true, GameStatus.DEFENDER_WINS, ProofLib.InvalidationReason.NONE)
-            : (true, GameStatus.CHALLENGER_WINS, ProofLib.InvalidationReason.PROOF_TIMEOUT);
+            ? (true, GameStatus.DEFENDER_WINS, LibProof.InvalidationReason.NONE)
+            : (true, GameStatus.CHALLENGER_WINS, LibProof.InvalidationReason.PROOF_TIMEOUT);
     }
 
     /// @inheritdoc IMultiProofGame
@@ -663,7 +663,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @return gameOver_ True if the active deadline has passed or the threshold is reached.
     function gameOver() public view returns (bool gameOver_) {
         gameOver_ = claimData.deadline.raw() <= uint64(block.timestamp)
-            || ProofLib.hasThreshold(claimData.proofBitmap, PROOF_THRESHOLD);
+            || LibProof.hasThreshold(claimData.proofBitmap, PROOF_THRESHOLD);
     }
 
     /// @inheritdoc IMultiProofGame
@@ -679,7 +679,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @dev Derived, not stored: the preimage is fixed at creation, so recomputing keeps a
     ///      single source of truth.
     function rootId() public view returns (bytes32) {
-        return ProofLib.rootId(
+        return LibProof.rootId(
             domainHash,
             parentRef(),
             Claim.unwrap(rootClaim()),
@@ -727,7 +727,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @inheritdoc IMultiProofGame
-    function invalidationReason() external view returns (ProofLib.InvalidationReason) {
+    function invalidationReason() external view returns (LibProof.InvalidationReason) {
         return claimData.invalidationReason;
     }
 
@@ -742,18 +742,18 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @notice Returns the verifier configured for `lane`.
-    function _verifierFor(ProofLib.ProofLane lane) internal view returns (IWorldChainProofVerifier) {
-        if (lane == ProofLib.ProofLane.VALIDITY_PROOF) {
+    function _verifierFor(LibProof.ProofLane lane) internal view returns (IWorldChainProofVerifier) {
+        if (lane == LibProof.ProofLane.VALIDITY_PROOF) {
             return validityProofVerifier;
         }
-        if (lane == ProofLib.ProofLane.TEE_ATTESTATION) return teeVerifier;
+        if (lane == LibProof.ProofLane.TEE_ATTESTATION) return teeVerifier;
         return securityCouncil;
     }
 
     /// @notice The transition public values a proof for this game must attest.
-    function _transition() internal view returns (ProofLib.TransitionPublicValues memory) {
+    function _transition() internal view returns (LibProof.TransitionPublicValues memory) {
         (Hash startingRootHash_, uint256 startingBlockNumber_) = startingProposal();
-        return ProofLib.TransitionPublicValues({
+        return LibProof.TransitionPublicValues({
             l1Head: Hash.unwrap(l1Head()),
             l2PreRoot: Hash.unwrap(startingRootHash_),
             // forge-lint: disable-next-line(unsafe-typecast)

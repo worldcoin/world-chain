@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {Test, Vm} from "forge-std/Test.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
 import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
-import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
+import {LibProof} from "../../src/proofs/lib/LibProof.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
 /// @title NitroEndToEndTest
@@ -70,9 +70,9 @@ contract NitroEndToEndTest is Test {
     function _transition(bytes32 postRoot, uint64 blk, bytes32 cfg)
         internal
         pure
-        returns (ProofLib.TransitionPublicValues memory)
+        returns (LibProof.TransitionPublicValues memory)
     {
-        return ProofLib.TransitionPublicValues({
+        return LibProof.TransitionPublicValues({
             l1Head: L1H,
             l2PreRoot: PRE,
             l2PreBlockNumber: PRE_BLK,
@@ -82,7 +82,7 @@ contract NitroEndToEndTest is Test {
         });
     }
 
-    function _signCommitment(Vm.Wallet memory w, ProofLib.TransitionPublicValues memory transition)
+    function _signCommitment(Vm.Wallet memory w, LibProof.TransitionPublicValues memory transition)
         internal
         returns (bytes memory)
     {
@@ -91,7 +91,7 @@ contract NitroEndToEndTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
-    function _verify(ProofLib.TransitionPublicValues memory transition, bytes memory sig) internal view returns (bool) {
+    function _verify(LibProof.TransitionPublicValues memory transition, bytes memory sig) internal view returns (bool) {
         return proofVerifier.verify(ROOT_ID, transition, sig);
     }
 
@@ -114,13 +114,13 @@ contract NitroEndToEndTest is Test {
 
         // 3. The (live) enclave signs a signing-commitment for the transition
         //    the game expects; the defender submits the signature as the proof.
-        ProofLib.TransitionPublicValues memory transition = _transition(POST, BLK, CFG);
+        LibProof.TransitionPublicValues memory transition = _transition(POST, BLK, CFG);
         assertTrue(_verify(transition, _signCommitment(enclaveWallet, transition)));
     }
 
     function test_E2E_RevokeSignerInvalidatesFutureProofs() public {
         registry.registerKey(TBS, SIG, "");
-        ProofLib.TransitionPublicValues memory transition = _transition(POST, BLK, CFG);
+        LibProof.TransitionPublicValues memory transition = _transition(POST, BLK, CFG);
         bytes memory sig = _signCommitment(enclaveWallet, transition);
 
         // Pre-revoke: proof is valid.
@@ -153,7 +153,7 @@ contract NitroEndToEndTest is Test {
         registry.registerKey(TBS, SIG, "");
         registry.registerKey(tbs2, SIG, "");
 
-        ProofLib.TransitionPublicValues memory transition = _transition(POST, BLK, CFG);
+        LibProof.TransitionPublicValues memory transition = _transition(POST, BLK, CFG);
         assertTrue(_verify(transition, _signCommitment(enclaveWallet, transition)));
         assertTrue(_verify(transition, _signCommitment(secondWallet, transition)));
     }
@@ -172,7 +172,7 @@ contract NitroEndToEndTest is Test {
         vm.prank(owner);
         registry.revokeSigner(enclaveWallet.addr);
 
-        ProofLib.TransitionPublicValues memory transition = _transition(POST, BLK, CFG);
+        LibProof.TransitionPublicValues memory transition = _transition(POST, BLK, CFG);
         assertFalse(_verify(transition, _signCommitment(enclaveWallet, transition)));
         assertTrue(_verify(transition, _signCommitment(secondWallet, transition)));
     }
@@ -180,7 +180,7 @@ contract NitroEndToEndTest is Test {
     function test_E2E_UnregisteredSignerFails() public {
         // Skip registration; the proof verifier MUST refuse even a
         // cryptographically-valid signature from an unknown key.
-        ProofLib.TransitionPublicValues memory transition = _transition(POST, BLK, CFG);
+        LibProof.TransitionPublicValues memory transition = _transition(POST, BLK, CFG);
         assertFalse(_verify(transition, _signCommitment(enclaveWallet, transition)));
     }
 
@@ -188,7 +188,7 @@ contract NitroEndToEndTest is Test {
         registry.registerKey(TBS, SIG, "");
 
         // Honest signature over a different transition than the game expects.
-        ProofLib.TransitionPublicValues memory proven = _transition(POST, BLK + 1, CFG);
+        LibProof.TransitionPublicValues memory proven = _transition(POST, BLK + 1, CFG);
         bytes memory sig = _signCommitment(enclaveWallet, proven);
         assertFalse(_verify(_transition(POST, BLK, CFG), sig));
     }
