@@ -74,14 +74,16 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     /// @notice Number of distinct proof lanes required to finalize a challenged root.
     uint8 public immutable PROOF_THRESHOLD;
-    /// @notice Commitment binding this deployment to its chain
+    /// @notice Commitment binding this deployment to its chain and proof configuration.
     bytes32 public immutable domainHash;
 
     /// @notice Hash of the rollup configuration the proof lanes verify against.
     bytes32 public immutable rollupConfigHash;
 
-    /// @notice Seconds a proposal has to land its first proof lane, and the length of the
-    ///         challenge window that opens once it does.
+    /// @notice Number of L2 blocks each proposal must advance from its parent.
+    uint256 public immutable blockInterval;
+
+    /// @notice Seconds after creation during which a proposal may be challenged.
     Duration public immutable challengePeriod;
 
     /// @notice Seconds after creation a challenged proposal has to reach the proof threshold.
@@ -149,8 +151,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     constructor(GameConfig memory config) {
         if (
-            config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod || config.proposerBond == 0
-                || config.challengerBond == 0 || config.proofThreshold == 0
+            config.blockInterval == 0 || config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod
+                || config.proposerBond == 0 || config.challengerBond == 0 || config.proofThreshold == 0
                 || config.proofThreshold > LibProof.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
                 || address(config.anchorStateRegistry) == address(0) || address(config.weth) == address(0)
                 || address(config.validityProofVerifier) == address(0) || address(config.teeVerifier) == address(0)
@@ -171,8 +173,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             revert InconsistentSystemConfiguration();
         }
 
-        domainHash = LibProof.domainHash(chainId, LibProof.PROOF_SYSTEM_VERSION, config.rollupConfigHash);
+        domainHash =
+            LibProof.domainHash(chainId, LibProof.PROOF_SYSTEM_VERSION, config.rollupConfigHash, config.blockInterval);
         rollupConfigHash = config.rollupConfigHash;
+        blockInterval = config.blockInterval;
         challengePeriod = Duration.wrap(config.challengePeriod);
         proofPeriod = Duration.wrap(config.proofPeriod);
         proposerBond = config.proposerBond;
@@ -310,11 +314,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             revert InvalidParentGame();
         }
 
-        // INVARIANT: Each proposal must advance its parent. Cadence beyond that is proposer
-        // policy: the range is fully committed by `rootId`, and proof cost scales with it.
+        // INVARIANT: Each proposal must advance its parent by the configured cadence.
         (, uint256 startingBlockNumber_) = startingProposal();
-        if (l2SequenceNumber_ <= startingBlockNumber_) {
-            revert InvalidL2BlockNumber(startingBlockNumber_, l2SequenceNumber_);
+        uint256 expectedL2BlockNumber = startingBlockNumber_ + blockInterval;
+        if (l2SequenceNumber_ != expectedL2BlockNumber) {
+            revert InvalidL2BlockNumber(expectedL2BlockNumber, l2SequenceNumber_);
         }
 
         // Per spec, the sequence number must fit within a uint64.
@@ -408,15 +412,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // INVARIANT: Can only challenge a game that has not been challenged yet.
         if (claimData.challenger != address(0)) revert ClaimAlreadyChallenged();
 
-        // INVARIANT: Only a proven claim can be disputed.
-        if (claimData.proofBitmap == 0) revert NoProofToChallenge();
-
         // If the required bond is not met, revert.
         if (msg.value != challengerBond) revert IncorrectBondAmount();
 
-        // Update the challenger address. Lanes accepted before the challenge keep counting
-        // toward the threshold, but the status returns to `Challenged`: the initial proof no
-        // longer finalizes on its own.
+        // Update the challenger address. Any lanes accepted before the challenge keep counting
+        // toward the threshold, but the status returns to `Challenged`.
         claimData.challenger = msg.sender;
         claimData.status = ProposalStatus.Challenged;
 
@@ -467,11 +467,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         IWorldChainProofVerifier verifier = lane.verifierFor(validityProofVerifier, teeVerifier, securityCouncil);
         if (!verifier.verify(rootId_, _transition(), proof)) {
             revert InvalidProof(lane, rootId_);
-        }
-
-        // The first lane opens the challenge window; challengers get a full period from it.
-        if (claimData.proofBitmap == 0) {
-            claimData.deadline = Timestamp.wrap(uint64(block.timestamp) + challengePeriod.raw());
         }
 
         claimData.proofBitmap |= mask;
@@ -753,7 +748,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     /// @inheritdoc IMultiProofGame
     function challengeDeadline() public view returns (Timestamp) {
-        return claimData.deadline;
+        return Timestamp.wrap(createdAt.raw() + challengePeriod.raw());
     }
 
     /// @inheritdoc IMultiProofGame
