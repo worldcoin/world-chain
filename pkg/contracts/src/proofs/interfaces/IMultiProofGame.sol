@@ -75,6 +75,7 @@ interface IMultiProofGame is IDisputeGame {
     error InvalidProof(LibProof.ProofLane lane, bytes32 rootId);
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
     error InconsistentSystemConfiguration();
+    error NoProofToChallenge();
 
     ////////////////////////////////////////////////////////////////
     //                         Events                             //
@@ -124,7 +125,7 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Hash of the rollup configuration the proof lanes verify against.
     function rollupConfigHash() external view returns (bytes32);
 
-    /// @notice Seconds a proposal may be challenged after creation.
+    /// @notice Seconds to land the first proof lane, and the challenge window it then opens.
     function challengePeriod() external view returns (Duration);
 
     /// @notice Seconds after creation a challenged proposal has to reach the proof threshold.
@@ -136,7 +137,10 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Bond required to challenge a proposal.
     function challengerBond() external view returns (uint256);
 
-    /// @notice Recipient of proposer bonds forfeited by proofless unchallenged timeouts.
+    /// @notice Share of a forfeited proposer bond paid to a winning challenger, in basis points.
+    function CHALLENGER_REWARD_BPS() external view returns (uint256);
+
+    /// @notice Recipient of the share of forfeited proposer bonds not paid to a challenger.
     function protocolFeeRecipient() external view returns (address);
 
     /// @notice Verifier backing the validity-proof lane.
@@ -232,7 +236,7 @@ interface IMultiProofGame is IDisputeGame {
     //                    Challenge and proofs                    //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Disputes the proposal during the open challenge window for exactly `challengerBond`.
+    /// @notice Disputes a proven proposal during the open challenge window for exactly `challengerBond`.
     function challenge() external payable returns (ProposalStatus);
 
     /// @notice Submits `proof` for `laneId`. Before a challenge, any accepted lane satisfies the

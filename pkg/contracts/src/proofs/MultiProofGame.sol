@@ -63,19 +63,25 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @custom:semver 1.0.0
     string public constant version = "1.0.0";
 
-    /// @notice Number of distinct proof lanes required to finalize a challenged root.
-    uint8 public immutable PROOF_THRESHOLD;
+    /// @notice Share of a forfeited proposer bond paid to a winning challenger, in basis points.
+    uint256 public constant CHALLENGER_REWARD_BPS = 5_000;
+
+    /// @notice Basis-point denominator for `CHALLENGER_REWARD_BPS`.
+    uint256 internal constant BPS = 10_000;
 
     /// @notice Total number of proof lanes defined by the protocol.
     uint8 public constant PROOF_LANE_COUNT = LibProof.PROOF_LANE_COUNT;
 
+    /// @notice Number of distinct proof lanes required to finalize a challenged root.
+    uint8 public immutable PROOF_THRESHOLD;
     /// @notice Commitment binding this deployment to its chain
     bytes32 public immutable domainHash;
 
     /// @notice Hash of the rollup configuration the proof lanes verify against.
     bytes32 public immutable rollupConfigHash;
 
-    /// @notice Seconds a proposal may be challenged after creation.
+    /// @notice Seconds a proposal has to land its first proof lane, and the length of the
+    ///         challenge window that opens once it does.
     Duration public immutable challengePeriod;
 
     /// @notice Seconds after creation a challenged proposal has to reach the proof threshold.
@@ -87,7 +93,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Bond required to challenge a proposal.
     uint256 public immutable challengerBond;
 
-    /// @notice Recipient of proposer bonds forfeited by proofless unchallenged timeouts.
+    /// @notice Recipient of the share of forfeited proposer bonds not paid to a challenger.
     address public immutable protocolFeeRecipient;
 
     /// @notice Verifiers backing the proof lanes, indexed by `LibProof.ProofLane`.
@@ -402,6 +408,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // INVARIANT: Can only challenge a game that has not been challenged yet.
         if (claimData.challenger != address(0)) revert ClaimAlreadyChallenged();
 
+        // INVARIANT: Only a proven claim can be disputed.
+        if (claimData.proofBitmap == 0) revert NoProofToChallenge();
+
         // If the required bond is not met, revert.
         if (msg.value != challengerBond) revert IncorrectBondAmount();
 
@@ -458,6 +467,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         IWorldChainProofVerifier verifier = lane.verifierFor(validityProofVerifier, teeVerifier, securityCouncil);
         if (!verifier.verify(rootId_, _transition(), proof)) {
             revert InvalidProof(lane, rootId_);
+        }
+
+        // The first lane opens the challenge window; challengers get a full period from it.
+        if (claimData.proofBitmap == 0) {
+            claimData.deadline = Timestamp.wrap(uint64(block.timestamp) + challengePeriod.raw());
         }
 
         claimData.proofBitmap |= mask;
@@ -532,10 +546,17 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             {
                 // An applicable proof window expired below its requirement. A proofless
                 // proposal cannot win merely because nobody challenged it.
+                //
+                // Note: The challenger is paid back less than the pair staked, so a self-challenge cannot break even.
                 status = GameStatus.CHALLENGER_WINS;
                 claimData.invalidationReason = LibProof.InvalidationReason.PROOF_TIMEOUT;
-                address recipient = claimData.challenger == address(0) ? protocolFeeRecipient : claimData.challenger;
-                normalModeCredit[recipient] += totalBonds;
+                uint256 challengerCredit = claimData.challenger == address(0)
+                    ? 0
+                    : challengerBond + (proposerBond * CHALLENGER_REWARD_BPS) / BPS;
+                if (challengerCredit != 0) {
+                    normalModeCredit[claimData.challenger] += challengerCredit;
+                }
+                normalModeCredit[protocolFeeRecipient] += totalBonds - challengerCredit;
             } else {
                 // This edge case shouldn't be reached, sanity check just in case.
                 revert InvalidProposalStatus();
@@ -732,7 +753,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     /// @inheritdoc IMultiProofGame
     function challengeDeadline() public view returns (Timestamp) {
-        return Timestamp.wrap(createdAt.raw() + challengePeriod.raw());
+        return claimData.deadline;
     }
 
     /// @inheritdoc IMultiProofGame
