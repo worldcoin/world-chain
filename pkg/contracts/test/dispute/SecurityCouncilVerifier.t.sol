@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {SecurityCouncilVerifier} from "../../src/dispute/council/SecurityCouncilVerifier.sol";
-import {LibProof} from "../../src/dispute/lib/LibProof.sol";
+import {LibProof, TransitionPublicValues} from "../../src/dispute/lib/LibProof.sol";
 
 import {Safe} from "@safe-global/safe-contracts/contracts/Safe.sol";
 import {SafeProxyFactory} from "@safe-global/safe-contracts/contracts/proxies/SafeProxyFactory.sol";
@@ -33,8 +33,8 @@ contract SecurityCouncilVerifierTest is Test {
 
     bytes32 internal constant ROOT_ID = keccak256("rootId");
 
-    function _transition() internal pure returns (LibProof.TransitionPublicValues memory) {
-        return LibProof.TransitionPublicValues({
+    function _transition() internal pure returns (TransitionPublicValues memory) {
+        return TransitionPublicValues({
             l1Head: bytes32(0),
             l2PreRoot: bytes32(0),
             l2PreBlockNumber: 0,

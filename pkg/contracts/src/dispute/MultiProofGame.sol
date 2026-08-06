@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {LibProof, Bitmap} from "./lib/LibProof.sol";
+import {
+    LibProof,
+    CompactProof,
+    ProofLane,
+    InvalidationReason,
+    TransitionPublicValues,
+    Bitmap
+} from "./lib/LibProof.sol";
 import {GameTypes} from "./lib/GameTypes.sol";
 import {IMultiProofGame} from "./interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
@@ -47,7 +54,7 @@ import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 /// @author World Contributors
 /// @notice A Multi Proof `IDisputeGame` supporting three different proof 'lanes'.
 /// @dev Each Lane corresponds to a single bit position in `ClaimData.proofBitmap`, at
-///      `1 << uint8(LibProof.ProofLane)`:
+///      `1 << uint8(ProofLane)`:
 ///
 ///          bit  7   6   5   4   3   2   1   0
 ///               └───────┬───────┘   │   │   └── 0x01  VALIDITY_PROOF    (lane 1)
@@ -71,8 +78,6 @@ import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 ///
 /// @custom:security-contact security@toolsforhumanity.com
 contract MultiProofGame is Clone, ISemver, IMultiProofGame {
-    using LibProof for LibProof.ProofLane;
-    using LibProof for Bitmap;
     using LibProof for bytes;
 
     ////////////////////////////////////////////////////////////////
@@ -119,7 +124,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Recipient of the share of forfeited proposer bonds not paid to a challenger.
     address public immutable protocolFeeRecipient;
 
-    /// @notice Verifiers backing the proof lanes, indexed by `LibProof.ProofLane`.
+    /// @notice Verifiers backing the proof lanes, indexed by `ProofLane`.
     IWorldChainProofVerifier public immutable validityProofVerifier;
     IWorldChainProofVerifier public immutable teeVerifier;
     IWorldChainProofVerifier public immutable securityCouncil;
@@ -136,7 +141,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice The starting timestamp of the game.
     Timestamp public createdAt;
 
-    /// @notice The timestamp of the game's global resolution.
+    /// @notice The timestamp of the game's  resolution.
     Timestamp public resolvedAt;
 
     /// @notice The current status of the game.
@@ -365,7 +370,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                     || (previous.wasRespectedGameTypeWhenCreated()
                         && (previous.status() != GameStatus.CHALLENGER_WINS
                             || IMultiProofGame(address(previous)).invalidationReason()
-                                != LibProof.InvalidationReason.PROOF_TIMEOUT))
+                                != InvalidationReason.PROOF_TIMEOUT))
             ) {
                 revert GameNotRetryable(keccak256(
                         abi.encode(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim_, previousExtraData)
@@ -383,7 +388,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             challenger: address(0),
             deadline: Timestamp.wrap(uint64(block.timestamp + challengePeriod.raw())),
             proofBitmap: Bitmap.wrap(0),
-            invalidationReason: LibProof.InvalidationReason.NONE
+            invalidationReason: InvalidationReason.NONE
         });
 
         // Set the game as initialized.
@@ -468,12 +473,12 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         // A payload too short to carry a header names no lane, so it cannot prove one.
         if (proof.length < LibProof.PROOF_HEADER_LENGTH) {
-            revert InvalidProof(LibProof.ProofLane.VALIDITY_PROOF, rootId_);
+            revert InvalidProof(ProofLane.VALIDITY_PROOF, rootId_);
         }
 
-        LibProof.CompactProof memory compact = proof.decodeCompact();
-        if (compact.laneId >= PROOF_LANE_COUNT) revert InvalidLane(compact.laneId);
-        LibProof.ProofLane lane = LibProof.ProofLane(compact.laneId);
+        CompactProof memory compact = proof.decodeCompact();
+        if (compact.laneId >= LibProof.PROOF_LANE_COUNT) revert InvalidLane(compact.laneId);
+        ProofLane lane = ProofLane(compact.laneId);
 
         if (claimData.proofBitmap.has(lane)) {
             revert DuplicateProofLane(lane, rootId_, claimData.proofBitmap);
@@ -529,7 +534,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
             // An invalid parent invalidates this game regardless of its own proof state.
             status = GameStatus.CHALLENGER_WINS;
-            claimData.invalidationReason = LibProof.InvalidationReason.INVALID_PARENT;
+            claimData.invalidationReason = InvalidationReason.INVALID_PARENT;
             normalModeCredit[gameCreator()] += proposerBond;
             if (claimData.challenger != address(0)) {
                 normalModeCredit[claimData.challenger] += challengerBond;
@@ -555,7 +560,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                 //
                 // Note: The challenger is paid back less than the pair staked, so a self-challenge cannot break even.
                 status = GameStatus.CHALLENGER_WINS;
-                claimData.invalidationReason = LibProof.InvalidationReason.PROOF_TIMEOUT;
+                claimData.invalidationReason = InvalidationReason.PROOF_TIMEOUT;
                 uint256 challengerCredit = claimData.challenger == address(0)
                     ? 0
                     : challengerBond + (proposerBond * CHALLENGER_REWARD_BPS) / BPS;
@@ -586,8 +591,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         uint256 distributed;
         if (share != 0) {
-            for (uint8 laneId = 0; laneId < PROOF_LANE_COUNT; laneId++) {
-                if (!claimData.proofBitmap.has(LibProof.ProofLane(laneId))) continue;
+            for (uint8 laneId = 0; laneId < LibProof.PROOF_LANE_COUNT; laneId++) {
+                if (!claimData.proofBitmap.has(ProofLane(laneId))) continue;
                 address recipient = laneRecipient[laneId];
                 normalModeCredit[recipient] += share;
                 distributed += share;
@@ -599,28 +604,24 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     /// @inheritdoc IMultiProofGame
     /// @dev View twin of `resolve()`: reports what a resolve call would do right now.
-    function resolutionStatus()
-        external
-        view
-        returns (bool resolvable, GameStatus outcome, LibProof.InvalidationReason reason)
-    {
+    function resolutionStatus() external view returns (bool resolvable, GameStatus outcome, InvalidationReason reason) {
         if (status != GameStatus.IN_PROGRESS) {
             return (false, status, claimData.invalidationReason);
         }
 
         (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
-            return (true, GameStatus.CHALLENGER_WINS, LibProof.InvalidationReason.INVALID_PARENT);
+            return (true, GameStatus.CHALLENGER_WINS, InvalidationReason.INVALID_PARENT);
         }
         if (parentStatus == GameStatus.IN_PROGRESS || !gameOver()) {
-            return (false, GameStatus.IN_PROGRESS, LibProof.InvalidationReason.NONE);
+            return (false, GameStatus.IN_PROGRESS, InvalidationReason.NONE);
         }
 
         bool proven = claimData.status == ProposalStatus.UnchallengedAndValidProofProvided
             || claimData.status == ProposalStatus.ChallengedAndValidProofProvided;
         return proven
-            ? (true, GameStatus.DEFENDER_WINS, LibProof.InvalidationReason.NONE)
-            : (true, GameStatus.CHALLENGER_WINS, LibProof.InvalidationReason.PROOF_TIMEOUT);
+            ? (true, GameStatus.DEFENDER_WINS, InvalidationReason.NONE)
+            : (true, GameStatus.CHALLENGER_WINS, InvalidationReason.PROOF_TIMEOUT);
     }
 
     /// @inheritdoc IMultiProofGame
@@ -771,7 +772,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @inheritdoc IMultiProofGame
-    function invalidationReason() external view returns (LibProof.InvalidationReason) {
+    function invalidationReason() external view returns (InvalidationReason) {
         return claimData.invalidationReason;
     }
 
@@ -786,9 +787,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @notice The transition public values a proof for this game must attest.
-    function _transition() internal view returns (LibProof.TransitionPublicValues memory) {
+    function _transition() internal view returns (TransitionPublicValues memory) {
         (Hash startingRootHash_, uint256 startingBlockNumber_) = startingProposal();
-        return LibProof.TransitionPublicValues({
+        return TransitionPublicValues({
             l1Head: Hash.unwrap(l1Head()),
             l2PreRoot: Hash.unwrap(startingRootHash_),
             // forge-lint: disable-next-line(unsafe-typecast)

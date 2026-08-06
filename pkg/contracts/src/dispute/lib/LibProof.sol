@@ -3,8 +3,40 @@ pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 
-/// The set of proof lanes accepted for a proposal, one bit per `LibProof.ProofLane`.
+/// The set of proof lanes accepted for a proposal, one bit per `ProofLane`.
 type Bitmap is uint8;
+
+enum ProofLane {
+    VALIDITY_PROOF,
+    TEE_ATTESTATION,
+    SECURITY_COUNCIL
+}
+
+enum InvalidationReason {
+    NONE,
+    PROOF_TIMEOUT,
+    INVALID_PARENT
+}
+
+/// A decoded `submitProofLane` payload.
+/// @param laneId The `ProofLane` the payload proves.
+/// @param recipient Earns this lane's share of a forfeited challenger bond.
+/// @param proof The lane-specific proof bytes passed to the lane's verifier.
+struct CompactProof {
+    uint8 laneId;
+    address recipient;
+    bytes proof;
+}
+
+/// @dev ABI-encoded public values shared by all transition proof lanes.
+struct TransitionPublicValues {
+    bytes32 l1Head;
+    bytes32 l2PreRoot;
+    uint64 l2PreBlockNumber;
+    bytes32 l2PostRoot;
+    uint64 l2PostBlockNumber;
+    bytes32 rollupConfigHash;
+}
 
 /// @title LibProof
 /// @author World Contributors
@@ -18,38 +50,6 @@ library LibProof {
 
     /// @dev Lane id at byte 0, reward recipient at bytes 1..20, proof payload after.
     uint256 internal constant PROOF_HEADER_LENGTH = 21;
-
-    enum InvalidationReason {
-        NONE,
-        PROOF_TIMEOUT,
-        INVALID_PARENT
-    }
-
-    enum ProofLane {
-        VALIDITY_PROOF,
-        TEE_ATTESTATION,
-        SECURITY_COUNCIL
-    }
-
-    /// A decoded `submitProofLane` payload.
-    /// @param laneId The `ProofLane` the payload proves.
-    /// @param recipient Earns this lane's share of a forfeited challenger bond.
-    /// @param proof The lane-specific proof bytes passed to the lane's verifier.
-    struct CompactProof {
-        uint8 laneId;
-        address recipient;
-        bytes proof;
-    }
-
-    /// @dev ABI-encoded public values shared by all transition proof lanes.
-    struct TransitionPublicValues {
-        bytes32 l1Head;
-        bytes32 l2PreRoot;
-        uint64 l2PreBlockNumber;
-        bytes32 l2PostRoot;
-        uint64 l2PostBlockNumber;
-        bytes32 rollupConfigHash;
-    }
 
     /// @dev Commitment binding a deployment to its chain, proof-system version, rollup
     ///      configuration, and proposal cadence.
@@ -140,4 +140,4 @@ library LibProof {
 }
 
 using LibProof for Bitmap global;
-using LibProof for LibProof.ProofLane;
+using LibProof for ProofLane global;

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {Test, Vm} from "forge-std/Test.sol";
 import {NitroEnclaveKeyRegistry} from "../../../src/dispute/nitro/NitroEnclaveKeyRegistry.sol";
 import {NitroProofVerifier} from "../../../src/dispute/nitro/NitroProofVerifier.sol";
-import {LibProof} from "../../../src/dispute/lib/LibProof.sol";
+import {LibProof, TransitionPublicValues} from "../../../src/dispute/lib/LibProof.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
 contract NitroProofVerifierTest is Test {
@@ -66,8 +66,8 @@ contract NitroProofVerifierTest is Test {
         return _sign(enclaveWallet, digest);
     }
 
-    function _transition() internal pure returns (LibProof.TransitionPublicValues memory) {
-        return LibProof.TransitionPublicValues({
+    function _transition() internal pure returns (TransitionPublicValues memory) {
+        return TransitionPublicValues({
             l1Head: L1_ORIGIN_HASH,
             l2PreRoot: L2_PRE_ROOT,
             l2PreBlockNumber: L2_PRE_BLOCK,
@@ -94,7 +94,7 @@ contract NitroProofVerifierTest is Test {
     }
 
     function test_Verify_AcceptsZeroL2BlockNumber() public {
-        LibProof.TransitionPublicValues memory transition = _transition();
+        TransitionPublicValues memory transition = _transition();
         transition.l2PostBlockNumber = 0;
         bytes memory sig = _sign(keccak256(abi.encode(transition)));
 
@@ -113,7 +113,7 @@ contract NitroProofVerifierTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_Verify_FalseWhenSignatureAttestsDifferentTransition() public {
-        LibProof.TransitionPublicValues memory proven = _transition();
+        TransitionPublicValues memory proven = _transition();
         proven.l2PreRoot = keccak256("wrong-pre-root");
         bytes memory sig = _sign(keccak256(abi.encode(proven)));
 
@@ -121,7 +121,7 @@ contract NitroProofVerifierTest is Test {
     }
 
     function test_Verify_FalseForWrongRollupConfigHash() public {
-        LibProof.TransitionPublicValues memory proven = _transition();
+        TransitionPublicValues memory proven = _transition();
         proven.rollupConfigHash = keccak256("wrong-cfg");
         bytes memory sig = _sign(keccak256(abi.encode(proven)));
 

@@ -6,7 +6,7 @@ import {Test} from "@forge-std/Test.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
-import {LibProof} from "../../src/dispute/lib/LibProof.sol";
+import {LibProof, ProofLane} from "../../src/dispute/lib/LibProof.sol";
 import {IWorldChainProofVerifier} from "../../src/dispute/interfaces/IWorldChainProofVerifier.sol";
 import {MockRootIdVerifier} from "../mocks/MockRootIdVerifier.sol";
 import {MockSystemConfig} from "../mocks/MockSystemConfig.sol";
@@ -228,7 +228,7 @@ abstract contract OPStackFixtures is Test {
     /// @dev Warps past the challenge window and resolves (unchallenged path).
     function _resolveUnchallenged(MultiProofGame game) internal {
         if (game.proofBitmap().raw() == 0) {
-            uint8 lane = uint8(LibProof.ProofLane.TEE_ATTESTATION);
+            uint8 lane = uint8(ProofLane.TEE_ATTESTATION);
             game.submitProofLane(_compact(lane, laneRewardRecipient(lane), abi.encodePacked(game.rootId())));
         }
         if (block.timestamp < game.challengeDeadline().raw()) {

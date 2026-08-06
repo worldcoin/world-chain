@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {OPStackFixtures} from "./OPStackFixtures.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
-import {LibProof} from "../../src/dispute/lib/LibProof.sol";
+import {LibProof, InvalidationReason, ProofLane} from "../../src/dispute/lib/LibProof.sol";
 
 import {
     BondDistributionMode,
@@ -215,11 +215,11 @@ contract MultiProofGameTest is OPStackFixtures {
 
         game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         GameStatus outcome;
-        LibProof.InvalidationReason reason;
+        InvalidationReason reason;
         (resolvable, outcome, reason) = game.resolutionStatus();
         assertTrue(resolvable);
         assertEq(uint8(outcome), uint8(GameStatus.DEFENDER_WINS));
-        assertEq(uint8(reason), uint8(LibProof.InvalidationReason.NONE));
+        assertEq(uint8(reason), uint8(InvalidationReason.NONE));
 
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
@@ -231,14 +231,14 @@ contract MultiProofGameTest is OPStackFixtures {
         MultiProofGame first = _proposeAtAnchor();
         vm.warp(first.challengeDeadline().raw());
 
-        (bool resolvable, GameStatus outcome, LibProof.InvalidationReason reason) = first.resolutionStatus();
+        (bool resolvable, GameStatus outcome, InvalidationReason reason) = first.resolutionStatus();
         assertTrue(resolvable);
         assertEq(uint8(outcome), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(reason), uint8(LibProof.InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(reason), uint8(InvalidationReason.PROOF_TIMEOUT));
 
         first.resolve();
         assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(first.invalidationReason()), uint8(LibProof.InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(first.invalidationReason()), uint8(InvalidationReason.PROOF_TIMEOUT));
         assertEq(first.credit(protocolFeeRecipient), PROPOSER_BOND);
 
         _passAirgap(first);
@@ -337,10 +337,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         // Hoisted: `expectRevert` binds to the next external call, so no getter may follow it.
         bytes memory expected = abi.encodeWithSelector(
-            IMultiProofGame.DuplicateProofLane.selector,
-            LibProof.ProofLane.VALIDITY_PROOF,
-            game.rootId(),
-            game.proofBitmap()
+            IMultiProofGame.DuplicateProofLane.selector, ProofLane.VALIDITY_PROOF, game.rootId(), game.proofBitmap()
         );
         vm.expectRevert(expected);
         game.submitProofLane(laneZero);
@@ -473,7 +470,7 @@ contract MultiProofGameTest is OPStackFixtures {
         first.resolve();
 
         assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(first.invalidationReason()), uint8(LibProof.InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(first.invalidationReason()), uint8(InvalidationReason.PROOF_TIMEOUT));
 
         uint256 reward = (PROPOSER_BOND * gameImpl.CHALLENGER_REWARD_BPS()) / 10_000;
         assertEq(first.credit(challengerAccount), CHALLENGER_BOND + reward);
@@ -522,7 +519,7 @@ contract MultiProofGameTest is OPStackFixtures {
         child.resolve();
 
         assertEq(uint8(child.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(child.invalidationReason()), uint8(LibProof.InvalidationReason.INVALID_PARENT));
+        assertEq(uint8(child.invalidationReason()), uint8(InvalidationReason.INVALID_PARENT));
         assertEq(child.credit(proposer), PROPOSER_BOND);
         assertEq(child.credit(challengerAccount), CHALLENGER_BOND);
     }
@@ -536,7 +533,7 @@ contract MultiProofGameTest is OPStackFixtures {
         child.resolve();
 
         assertEq(uint8(child.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(child.invalidationReason()), uint8(LibProof.InvalidationReason.INVALID_PARENT));
+        assertEq(uint8(child.invalidationReason()), uint8(InvalidationReason.INVALID_PARENT));
     }
 
     function test_Cutover_AllowsRetryOfUnrespectedGame() public {
@@ -625,8 +622,8 @@ contract MultiProofGameTest is OPStackFixtures {
         MultiProofGame proven = _propose(type(uint256).max, keccak256("proven-self-challenge"), target, 0);
         proven.submitProofLane(
             _compact(
-                uint8(LibProof.ProofLane.TEE_ATTESTATION),
-                laneRewardRecipient(uint8(LibProof.ProofLane.TEE_ATTESTATION)),
+                uint8(ProofLane.TEE_ATTESTATION),
+                laneRewardRecipient(uint8(ProofLane.TEE_ATTESTATION)),
                 abi.encodePacked(proven.rootId())
             )
         );
@@ -716,10 +713,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMultiProofGame.DuplicateProofLane.selector,
-                LibProof.ProofLane.VALIDITY_PROOF,
-                game.rootId(),
-                game.proofBitmap()
+                IMultiProofGame.DuplicateProofLane.selector, ProofLane.VALIDITY_PROOF, game.rootId(), game.proofBitmap()
             )
         );
         game.submitProofLane(_compact(0, thief, proof));
@@ -735,9 +729,7 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(truncated.length, LibProof.PROOF_HEADER_LENGTH - 1);
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                IMultiProofGame.InvalidProof.selector, LibProof.ProofLane.VALIDITY_PROOF, game.rootId()
-            )
+            abi.encodeWithSelector(IMultiProofGame.InvalidProof.selector, ProofLane.VALIDITY_PROOF, game.rootId())
         );
         game.submitProofLane(truncated);
     }
@@ -749,9 +741,7 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(headerOnly.length, LibProof.PROOF_HEADER_LENGTH);
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                IMultiProofGame.InvalidProof.selector, LibProof.ProofLane.VALIDITY_PROOF, game.rootId()
-            )
+            abi.encodeWithSelector(IMultiProofGame.InvalidProof.selector, ProofLane.VALIDITY_PROOF, game.rootId())
         );
         game.submitProofLane(headerOnly);
     }
@@ -764,8 +754,8 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.warp(initialDeadline - 1);
         game.submitProofLane(
             _compact(
-                uint8(LibProof.ProofLane.TEE_ATTESTATION),
-                laneRewardRecipient(uint8(LibProof.ProofLane.TEE_ATTESTATION)),
+                uint8(ProofLane.TEE_ATTESTATION),
+                laneRewardRecipient(uint8(ProofLane.TEE_ATTESTATION)),
                 abi.encodePacked(game.rootId())
             )
         );

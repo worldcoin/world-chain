@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
-import {LibProof} from "../lib/LibProof.sol";
+import {LibProof, TransitionPublicValues} from "../lib/LibProof.sol";
 import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
@@ -19,7 +19,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     }
 
     /// @inheritdoc IWorldChainProofVerifier
-    function verify(bytes32, LibProof.TransitionPublicValues calldata transition, bytes calldata proof)
+    function verify(bytes32, TransitionPublicValues calldata transition, bytes calldata proof)
         external
         view
         returns (bool)

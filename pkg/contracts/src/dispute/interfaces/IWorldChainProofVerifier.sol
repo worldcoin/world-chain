@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {LibProof} from "../lib/LibProof.sol";
+import {TransitionPublicValues} from "../lib/LibProof.sol";
 
 /// @title IWorldChainProofVerifier
 /// @author World Contributors
@@ -11,7 +11,7 @@ interface IWorldChainProofVerifier {
     ///         `rootId`. The calling game supplies both, so implementations enforce the
     ///         expected transition by construction: the ZK and TEE lanes bind `proof` to
     ///         `transition`, the council lane attests `rootId` directly.
-    function verify(bytes32 rootId, LibProof.TransitionPublicValues calldata transition, bytes calldata proof)
+    function verify(bytes32 rootId, TransitionPublicValues calldata transition, bytes calldata proof)
         external
         view
         returns (bool);
