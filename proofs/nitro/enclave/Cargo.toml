@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-proof-nitro"
+name = "world-chain-proof-nitro-enclave"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,7 +15,7 @@ path = "src/lib.rs"
 # feature is enabled because it depends on the full kona derivation stack and
 # the NSM device interface that is only available inside the enclave runtime.
 [[bin]]
-name = "world-chain-nitro-enclave"
+name = "world-chain-proof-nitro-enclave"
 path = "src/bin/enclave.rs"
 required-features = ["enclave"]
 
@@ -27,6 +27,10 @@ required-features = ["enclave"]
 [[bin]]
 name = "p384-hints"
 path = "src/bin/p384_hints.rs"
+
+[[bin]]
+name = "gen-test-vector"
+path = "src/bin/gen_test_vector.rs"
 
 [features]
 default = []
@@ -111,7 +115,3 @@ tracing-subscriber = { workspace = true, optional = true }
 rand = "0.8"
 rcgen = { version = "0.14.8", default-features = false, features = ["ring", "crypto"] }
 serde_json = { workspace = true }
-
-[[bin]]
-name = "gen-test-vector"
-path = "src/bin/gen_test_vector.rs"

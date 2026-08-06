@@ -46,8 +46,8 @@ COPY . .
 RUN cargo build \
         --release \
         --locked \
-        --bin world-chain-nitro-enclave \
-        -p world-chain-proof-nitro \
+        --bin world-chain-proof-nitro-enclave \
+        -p world-chain-proof-nitro-enclave \
         --features enclave
 
 # ---- runtime image (kept minimal so PCR0 stays stable) ---------------------

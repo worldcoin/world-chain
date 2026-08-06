@@ -11,8 +11,8 @@
 //! Build with the `enclave` feature:
 //!
 //! ```sh
-//! cargo build --release --bin world-chain-nitro-enclave \
-//!     -p world-chain-proof-nitro --features enclave
+//! cargo build --release --bin world-chain-proof-nitro-enclave \
+//!     -p world-chain-proof-nitro-enclave --features enclave
 //! ```
 
 #![cfg(feature = "enclave")]

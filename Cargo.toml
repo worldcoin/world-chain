@@ -10,7 +10,6 @@ repository = "https://github.com/worldcoin/world-chain/"
 resolver = "3"
 members = [
     "bin/world-chain",
-    "proofs/prover",
     "crates/chainspec",
     "crates/node",
     "crates/rpc",
@@ -24,28 +23,29 @@ members = [
     "crates/evm",
     "crates/pbh",
     "crates/commands",
-    "proofs/core",
-    "proofs/nitro",
-    "proofs/nitro/worker",
-    "proofs/prover-sp1",
-    "proofs/prover-nitro",
-    "proofs/kona-client",
-    "proofs/kona-host",
-    "proofs/succinct/utils/host",
-    "proofs/succinct/utils/proof",
-    "proofs/succinct/elfs",
     "crates/devnet",
     "crates/test-utils",
+    "proofs/core",
     "proofs/primitives",
     "proofs/metrics",
-    "proofs/proposer",
-    "proofs/challenger",
-    "proofs/prover-service",
-    "proofs/prover-cli",
-    "proofs/worker",
-    "proofs/sp1-worker",
-    "proofs/defender",
     "proofs/integration-tests",
+    "proofs/nitro/enclave",
+    "proofs/nitro/worker",
+    "proofs/utils/kona-client",
+    "proofs/utils/kona-host",
+    "proofs/succinct/sp1-worker",
+    "proofs/succinct/elfs",
+    "proofs/succinct/utils/host",
+    "proofs/succinct/utils/proof",
+    "proofs/services/proposer",
+    "proofs/services/challenger",
+    "proofs/services/prover-service",
+    "proofs/services/worker",
+    "proofs/services/defender",
+    "proofs/debug/bin/prover-sp1",
+    "proofs/debug/bin/prover-nitro",
+    "proofs/debug/bin/prover-cli",
+    "proofs/debug/prover",
     "e2e-tests",
     "xtask",
 ]
@@ -94,23 +94,23 @@ world-chain-pool = { path = "crates/pool", default-features = false }
 world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
-world-chain-prover = { path = "proofs/prover", default-features = false }
-world-chain-prover-sp1 = { path = "proofs/prover-sp1", default-features = false }
-world-chain-prover-nitro = { path = "proofs/prover-nitro", default-features = false }
+world-chain-prover = { path = "proofs/debug/prover", default-features = false }
+world-chain-prover-sp1 = { path = "proofs/debug/bin/prover-sp1", default-features = false }
+world-chain-prover-nitro = { path = "proofs/debug/bin/prover-nitro", default-features = false }
 world-chain-proof-core = { path = "proofs/core", default-features = false }
-world-chain-proof-nitro = { path = "proofs/nitro", default-features = false }
-world-chain-proof-kona-client-utils = { path = "proofs/kona-client", default-features = false }
-world-chain-proof-kona-host-utils = { path = "proofs/kona-host", default-features = false }
-world-chain-nitro-worker = { path = "proofs/nitro/worker", default-features = false }
+world-chain-proof-nitro-enclave = { path = "proofs/nitro/enclave", default-features = false }
+world-chain-proof-nitro-worker = { path = "proofs/nitro/worker", default-features = false }
+world-chain-proof-kona-client-utils = { path = "proofs/utils/kona-client", default-features = false }
+world-chain-proof-kona-host-utils = { path = "proofs/utils/kona-host", default-features = false }
 world-chain-proof-succinct-elfs = { path = "proofs/succinct/elfs" }
 world-chain-proof-succinct-host-utils = { path = "proofs/succinct/utils/host", default-features = false }
 world-chain-proof-succinct-utils = { path = "proofs/succinct/utils/proof", default-features = false }
-world-chain-proposer = { path = "proofs/proposer", default-features = false }
-world-chain-challenger = { path = "proofs/challenger", default-features = false }
-world-chain-prover-service = { path = "proofs/prover-service", default-features = false }
-world-chain-proof-worker = { path = "proofs/worker", default-features = false }
-world-chain-sp1-worker = { path = "proofs/sp1-worker", default-features = false }
-world-chain-defender = { path = "proofs/defender", default-features = false }
+world-chain-proposer = { path = "proofs/services/proposer", default-features = false }
+world-chain-challenger = { path = "proofs/services/challenger", default-features = false }
+world-chain-prover-service = { path = "proofs/services/prover-service", default-features = false }
+world-chain-proof-worker = { path = "proofs/services/worker", default-features = false }
+world-chain-sp1-worker = { path = "proofs/succinct/sp1-worker", default-features = false }
+world-chain-defender = { path = "proofs/services/defender", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.4.1", default-features = false }

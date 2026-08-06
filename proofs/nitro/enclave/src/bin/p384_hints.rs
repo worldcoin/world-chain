@@ -49,7 +49,7 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use world_chain_proof_nitro::p384_hints::collect_hints;
+use world_chain_proof_nitro_enclave::p384_hints::collect_hints;
 
 // ─── X.509 / COSE_Sign1 parsing helpers ─────────────────────────────────────
 
@@ -165,7 +165,8 @@ fn pad_to_48(bytes: &[u8]) -> Result<Vec<u8>> {
 fn parse_attestation_signature(raw: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     use sha2::{Digest, Sha384};
 
-    let (tbs_bytes, sig_bytes) = world_chain_proof_nitro::cose::decode_attestation_tbs(raw)?;
+    let (tbs_bytes, sig_bytes) =
+        world_chain_proof_nitro_enclave::cose::decode_attestation_tbs(raw)?;
     let hash = Sha384::digest(&tbs_bytes).to_vec();
     Ok((hash, sig_bytes))
 }
