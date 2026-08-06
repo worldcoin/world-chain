@@ -7,11 +7,11 @@
 //! payload is rkyv-encoded [`WorldRangeWitnessData`] because that is what the SP1 range
 //! program already consumes.
 
-use std::collections::TryReserveError;
 use alloy_primitives::B256;
 use alloy_sol_types::SolValue;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::TryReserveError;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use world_chain_proof_core::boot::TransitionPublicValues;
 
