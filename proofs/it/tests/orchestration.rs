@@ -11,10 +11,10 @@ use world_chain_proof_it::{
     BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeProofBackend, GameLifecycle,
     SharedProverService,
 };
+use world_chain_proof_protocol::{GameStatus, LineageProvider, ProofLane, has_threshold};
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
-use world_chain_proof_protocol::{GameStatus, LineageProvider, ProofLane, has_threshold};
 use world_chain_proposer::{
     ProposerClient, ProposerConfig, ProposerError, ProposerScan, WorldChainProposer,
 };

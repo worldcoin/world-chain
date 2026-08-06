@@ -9,14 +9,14 @@ use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host::online::{
     OnlineHostConfig, build_online_config, hardfork_config_from_chain_spec,
 };
-use world_chain_proof_sp1_worker::{
-    ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
-};
 use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
     network_prover::NetworkSuccinctProver,
+};
+use world_chain_proof_sp1_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
 };
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;

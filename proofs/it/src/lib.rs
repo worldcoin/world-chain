@@ -19,13 +19,13 @@ use world_chain_defender::{
     DefenderClient, DefenderError, DefenderSubmission, GameMetadata as DefenderGameMetadata,
 };
 use world_chain_proof_core::boot::TransitionPublicValues;
-use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proof_protocol::{
     ClaimData, ConsensusError, ConsensusProvider, GameCreation, GameStatus, InvalidationReason,
     LineageAnchor, LineageError, LineageGame, LineageProvider, LineageTransition, MAX_ATTEMPT_SCAN,
     PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane, ProposalCommitment,
     ProposalStatus, ResolutionStatus, RootCommitment, has_threshold,
 };
+use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proposer::{
     CloseGameSubmission, Proposal, ProposalSubmission, ProposerClient, ProposerError,
     ResolveSubmission,

@@ -56,18 +56,18 @@ use world_chain_proof_core::{
     boot::TransitionPublicValues, hash_world_rollup_config, range::WorldRangeHardforkConfig,
 };
 use world_chain_proof_kona_host::online::OnlineHostConfig;
-use world_chain_proof_sp1_worker::{Sp1Backend, Sp1BackendConfig};
+use world_chain_proof_protocol::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
     network_prover::NetworkSuccinctProver,
 };
+use world_chain_proof_sp1_worker::{Sp1Backend, Sp1BackendConfig};
 use world_chain_proof_worker::{
     ClaimedProofJobHandler, ProofJob, ProofWorker, ProofWorkerConfig, RetryConfig,
     WorkerHeartbeatConfig,
 };
-use world_chain_proof_protocol::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{
     AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
 };
