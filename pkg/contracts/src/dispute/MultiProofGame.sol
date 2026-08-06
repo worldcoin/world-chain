@@ -505,10 +505,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     /// @notice Returns the parent's resolution inputs.
     /// @dev The anchor sentinel counts as a finalized parent: the anchor is only ever set from
-    ///      a claim-valid game, so its root is already trusted. Parent blacklist evaluation is
-    ///      retained from the legacy game (stock ZKDisputeGame leaves it to the guardian): a
-    ///      blacklisted parent invalidates descendants at resolution without further guardian
-    ///      action, even while that parent is unresolved.
+    ///      a claim-valid game, so its root is already trusted.
     function _parentResolution() internal view returns (GameStatus parentStatus, bool parentBlacklisted) {
         address parentRef_ = parentRef();
         if (parentRef_ == address(anchorStateRegistry)) {
@@ -523,9 +520,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     ///         `DEFENDER_WINS` when a proven game expires unchallenged, or when enough proof
     ///         lanes support a challenged claim. `CHALLENGER_WINS` when an applicable proof
     ///         window expires below its requirement, or when the parent game is invalid.
-    /// @dev Resolution gates on the parent's *status*, never on its claim validity, so the
-    ///      anchor registry's finality airgap does not slow the proposal cadence. Bonds are
-    ///      credited here and paid out through `claimCredit` after `closeGame`.
     function resolve() external returns (GameStatus) {
         // INVARIANT: Resolution cannot occur if the game has already been resolved.
         if (status != GameStatus.IN_PROGRESS) revert ClaimAlreadyResolved();
@@ -728,8 +722,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @inheritdoc IMultiProofGame
-    /// @dev Derived, not stored: the preimage is fixed at creation, so recomputing keeps a
-    ///      single source of truth.
     function rootId() public view returns (bytes32) {
         return LibProof.rootId(
             domainHash,
