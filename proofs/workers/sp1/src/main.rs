@@ -205,7 +205,7 @@ async fn main() -> Result<()> {
     }
 
     // ELFs are embedded at compile time via `sp1_sdk::include_elf!()`
-    // (see `proofs/succinct/elfs/build.rs`). Challenged roots are
+    // (see `proofs/backends/sp1/elfs/build.rs`). Challenged roots are
     // defended on-chain; Groth16 keeps verification ~100k gas.
     let prover_kind = cli.prover;
     match prover_kind {

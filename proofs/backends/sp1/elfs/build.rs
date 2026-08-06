@@ -52,11 +52,11 @@ fn main() {
         .unwrap_or(true);
 
     // The SP1 guest programs live in their own nested cargo workspace at
-    // `proofs/succinct/programs/`, but they have path dependencies that
+    // `proofs/backends/sp1/programs/`, but they have path dependencies that
     // reach outside that nested workspace (e.g. `world-chain-proof-core`
     // at `proofs/core`). By default `sp1_build` mounts the program's
     // cargo-metadata workspace root into the Docker container at
-    // `/root/program`, which would only expose `proofs/succinct/programs/`
+    // `/root/program`, which would only expose the programs workspace
     // and break those out-of-workspace path deps (causing the container
     // to fail looking for `/core/Cargo.toml`).
     //
@@ -66,17 +66,17 @@ fn main() {
     // identically to a local build.
     //
     // `CARGO_MANIFEST_DIR` for this build script is
-    // `<repo>/proofs/succinct/elfs`, so the repo root is three levels up
-    // (ancestors().nth(3) where nth(0) = self, nth(1) = proofs/succinct,
-    // nth(2) = proofs, nth(3) = repo root).
+    // `<repo>/proofs/backends/sp1/elfs`, so the repo root is four levels up
+    // (ancestors().nth(4) where nth(0) = self, nth(1) = backends/sp1,
+    // nth(2) = backends, nth(3) = proofs, nth(4) = repo root).
     let manifest_dir = std::path::PathBuf::from(
         std::env::var("CARGO_MANIFEST_DIR")
             .expect("CARGO_MANIFEST_DIR must be set by cargo for build scripts"),
     );
     let workspace_root = manifest_dir
         .ancestors()
-        .nth(3)
-        .expect("build.rs is expected to live at <repo>/proofs/succinct/elfs")
+        .nth(4)
+        .expect("build.rs is expected to live at <repo>/proofs/backends/sp1/elfs")
         .to_path_buf();
     // Canonicalize so that the path passed to Docker matches the actual
     // absolute path on the host (resolves any symlinks in the checkout path).
@@ -101,7 +101,7 @@ fn main() {
     };
 
     // Paths are relative to this build script's CARGO_MANIFEST_DIR
-    // (proofs/succinct/elfs).
+    // (proofs/backends/sp1/elfs).
     build("../programs/range-ethereum");
     build("../programs/aggregation");
 }

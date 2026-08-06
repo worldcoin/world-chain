@@ -4,14 +4,14 @@ on:
   push:
     branches: [main]
     paths:
-      - "proofs/nitro/enclave/**"
-      - "proofs/nitro/fuzz/**"
+      - "proofs/backends/nitro/enclave/**"
+      - "proofs/backends/nitro/fuzz/**"
       - ".github/workflows/fuzz.yml"
   merge_group:
   pull_request:
     paths:
-      - "proofs/nitro/enclave/**"
-      - "proofs/nitro/fuzz/**"
+      - "proofs/backends/nitro/enclave/**"
+      - "proofs/backends/nitro/fuzz/**"
       - ".github/workflows/fuzz.yml"
   workflow_dispatch:
     inputs:
@@ -29,7 +29,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  FUZZ_DIR: proofs/nitro/fuzz
+  FUZZ_DIR: proofs/backends/nitro/fuzz
   # libFuzzer's AddressSanitizer cannot link against a statically linked musl libc, and the
   # self-hosted ARC runners are musl-based. Pin a glibc triple instead of taking the host.
   FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
@@ -57,7 +57,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-fuzz-${{ hashFiles('proofs/nitro/fuzz/Cargo.lock') }}
+          key: cargo-fuzz-${{ hashFiles('proofs/backends/nitro/fuzz/Cargo.lock') }}
           restore-keys: cargo-fuzz-
       - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
@@ -93,7 +93,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-fuzz-${{ hashFiles('proofs/nitro/fuzz/Cargo.lock') }}
+          key: cargo-fuzz-${{ hashFiles('proofs/backends/nitro/fuzz/Cargo.lock') }}
           restore-keys: cargo-fuzz-
       - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:

@@ -23,7 +23,7 @@
 //! ```
 //!
 //! The SP1 guest ELFs are baked into the worker at compile time via
-//! `sp1_sdk::include_elf!()` (see `proofs/succinct/elfs/build.rs`); no path-based
+//! `sp1_sdk::include_elf!()` (see `proofs/backends/sp1/elfs/build.rs`); no path-based
 //! overrides are required.
 
 use std::{path::PathBuf, sync::Arc, time::Duration};

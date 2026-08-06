@@ -4,7 +4,7 @@
 #
 # Build:
 #   docker build -t world-chain-proof-nitro-enclave \
-#     -f proofs/nitro/Dockerfile .
+#     -f proofs/backends/nitro/enclave/Dockerfile .
 #
 # Convert to an EIF:
 #   nitro-cli build-enclave \
@@ -14,7 +14,7 @@
 # Or use scripts/build-eif.sh, which does both and emits the PCR measurements.
 #
 # The resulting EIF's PCR0/PCR1/PCR2 measurements must be copied into the verifier's
-# `ExpectedPcrs` (see `proofs/nitro/src/lib.rs`).
+# `ExpectedPcrs` (see `proofs/workers/nitro/src/lib.rs`).
 #
 # REPRODUCIBILITY: the PCR measurements are a hash of the EIF contents, so this
 # build must be bit-for-bit reproducible for anyone to re-derive the registered
