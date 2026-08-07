@@ -5,12 +5,13 @@ use crate::{
 };
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
+use alloy_sol_types::SolInterface;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, LineageAnchor, LineageError,
-    LineageGame, LineageProvider, LineageTransition, PROOF_LANE_COUNT, RegisteredLineageConfig,
-    ResolutionStatus, read_game_for_transition, read_lineage_anchor,
-    read_lineage_resolution_status, read_registered_lineage_config,
+    ClaimData, IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
+    LineageError, LineageGame, LineageProvider, LineageTransition, PROOF_LANE_COUNT, ProofLane,
+    RegisteredLineageConfig, ResolutionStatus, encode_compact_proof, read_game_for_transition,
+    read_lineage_anchor, read_lineage_resolution_status, read_registered_lineage_config,
 };
 
 /// Alloy-backed implementation of [`DefenderClient`].
@@ -23,6 +24,8 @@ pub struct AlloyDefenderClient<P> {
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     registered: RegisteredLineageConfig,
     confirmations: u64,
+    /// Credited this lane's share of a forfeited challenger bond when the game resolves.
+    reward_recipient: Address,
     provider: P,
 }
 
@@ -35,6 +38,7 @@ where
         provider: P,
         factory_address: Address,
         confirmations: u64,
+        reward_recipient: Address,
     ) -> Result<Self, DefenderError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
@@ -51,6 +55,7 @@ where
             anchor,
             registered,
             confirmations,
+            reward_recipient,
             provider,
         })
     }
@@ -140,21 +145,36 @@ where
         })
     }
 
-    async fn proof_bitmap(&self, address: Address) -> Result<u8, DefenderError> {
-        self.game(address)
-            .proofBitmap()
-            .call()
-            .await
-            .map_err(Into::into)
+    async fn claim_data(&self, address: Address) -> Result<ClaimData, DefenderError> {
+        let claim = self.game(address).claimData().call().await?;
+        Ok(ClaimData {
+            status: claim.status.try_into()?,
+            challenger: claim.challenger,
+            deadline: claim.deadline,
+            proof_bitmap: claim.proofBitmap,
+            invalidation_reason: claim.invalidationReason.try_into()?,
+        })
     }
 
     async fn submit_proof(
         &self,
         game: Address,
-        lane: u8,
+        lane: ProofLane,
         proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
-        let pending = self.game(game).submitProofLane(lane, proof).send().await?;
+        let compact = encode_compact_proof(lane, self.reward_recipient, &proof);
+        let pending = self
+            .game(game)
+            .submitProofLane(compact)
+            .send()
+            .await
+            .map_err(|error| {
+                if is_duplicate_lane(&error) {
+                    DefenderError::LaneAlreadyProven { game, lane }
+                } else {
+                    error.into()
+                }
+            })?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
@@ -170,4 +190,19 @@ where
 
 fn u256_to_u64(value: U256) -> Result<u64, DefenderError> {
     value.try_into().map_err(|_| DefenderError::Overflow)
+}
+
+/// Whether the game rejected the submission because the lane already counts toward its threshold.
+///
+/// `submitProofLane` reverts on a duplicate lane rather than no-opping, so a racing prover or a
+/// retry of a submission that actually landed surfaces here instead of succeeding.
+fn is_duplicate_lane(error: &alloy_contract::Error) -> bool {
+    error.as_revert_data().is_some_and(|data| {
+        matches!(
+            IMultiProofGame::IMultiProofGameErrors::abi_decode(&data),
+            Ok(IMultiProofGame::IMultiProofGameErrors::DuplicateProofLane(
+                _
+            ))
+        )
+    })
 }

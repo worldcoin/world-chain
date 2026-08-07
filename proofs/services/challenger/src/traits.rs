@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
-use world_chain_proofs::{ResolutionStatus, RootState};
+use world_chain_proofs::{ProposalStatus, ResolutionStatus};
 
 /// Contract surface needed by the output-root challenger.
 #[async_trait]
@@ -19,8 +19,8 @@ pub trait ChallengerClient: Send + Sync {
     async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError>;
     /// Reads the immutable game data needed to validate its root claim.
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError>;
-    /// Reads the root state of the provided game.
-    async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError>;
+    /// Reads the proposal state machine of the provided game.
+    async fn proposal_status(&self, game: Address) -> Result<ProposalStatus, ChallengerError>;
     /// Reads the challenge deadline of the provided game.
     async fn challenge_deadline(&self, game: Address) -> Result<u64, ChallengerError>;
     /// Submits a challenge against an invalid game, bonded with that game's own

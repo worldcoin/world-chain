@@ -173,7 +173,7 @@ where
             .execution_client
             .submit_proof(
                 game,
-                lane as u8,
+                lane,
                 match encode_proof(metadata, &response.proof) {
                     Ok(proof) => proof,
                     Err(error) => {
@@ -193,6 +193,17 @@ where
                     ?lane,
                     tx_hash = %submission.tx_hash,
                     "proof lane submitted"
+                );
+                LaneState::Proven
+            }
+            Err(DefenderError::LaneAlreadyProven { .. }) => {
+                info!(
+                    lifecycle_event = "proof_lane_submitted",
+                    outcome = "already_proven",
+                    game_address = %game,
+                    proof_id = %id,
+                    ?lane,
+                    "lane already counts toward the game threshold"
                 );
                 LaneState::Proven
             }
