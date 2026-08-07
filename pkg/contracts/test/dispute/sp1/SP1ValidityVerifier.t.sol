@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
 import {AggregationPublicValues, SP1ValidityVerifier} from "../../../src/dispute/sp1/SP1ValidityVerifier.sol";
-import {LibProof} from "../../../src/dispute/lib/LibProof.sol";
+import {LibProof, TransitionPublicValues} from "../../../src/dispute/lib/LibProof.sol";
 
 contract StubSP1Verifier is ISP1Verifier {
     bool public reject;
@@ -57,8 +57,8 @@ contract SP1ValidityVerifierTest is Test {
                                 HELPERS
     //////////////////////////////////////////////////////////////*/
 
-    function _transition() internal pure returns (LibProof.TransitionPublicValues memory) {
-        return LibProof.TransitionPublicValues({
+    function _transition() internal pure returns (TransitionPublicValues memory) {
+        return TransitionPublicValues({
             l1Head: L1_ORIGIN_HASH,
             l2PreRoot: L2_PRE_ROOT,
             l2PreBlockNumber: L2_PRE_BLOCK_NUMBER,
@@ -68,7 +68,7 @@ contract SP1ValidityVerifierTest is Test {
         });
     }
 
-    function _publicValues(LibProof.TransitionPublicValues memory transition, bytes32 multiBlockVKey)
+    function _publicValues(TransitionPublicValues memory transition, bytes32 multiBlockVKey)
         internal
         pure
         returns (bytes memory)
@@ -76,7 +76,7 @@ contract SP1ValidityVerifierTest is Test {
         return abi.encode(AggregationPublicValues({transitionPublicValues: transition, multiBlockVKey: multiBlockVKey}));
     }
 
-    function _expectSp1Call(LibProof.TransitionPublicValues memory transition) internal {
+    function _expectSp1Call(TransitionPublicValues memory transition) internal {
         sp1.setExpectation(AGGREGATION_VKEY, _publicValues(transition, RANGE_VKEY_COMMITMENT), SP1_PROOF_BYTES);
     }
 
@@ -104,14 +104,14 @@ contract SP1ValidityVerifierTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_Verify_HappyPath() public {
-        LibProof.TransitionPublicValues memory transition = _transition();
+        TransitionPublicValues memory transition = _transition();
         _expectSp1Call(transition);
 
         assertTrue(verifier.verify(ROOT_ID, transition, SP1_PROOF_BYTES));
     }
 
     function test_Verify_FalseWhenSP1ProofInvalid() public {
-        LibProof.TransitionPublicValues memory transition = _transition();
+        TransitionPublicValues memory transition = _transition();
         _expectSp1Call(transition);
         sp1.setReject(true);
 
@@ -119,24 +119,24 @@ contract SP1ValidityVerifierTest is Test {
     }
 
     function test_Verify_FalseForUnexpectedProofBytes() public {
-        LibProof.TransitionPublicValues memory transition = _transition();
+        TransitionPublicValues memory transition = _transition();
         _expectSp1Call(transition);
 
         assertFalse(verifier.verify(ROOT_ID, transition, hex"deadbeef"));
     }
 
     function test_Verify_FalseWhenProofAttestsDifferentTransition() public {
-        LibProof.TransitionPublicValues memory proven = _transition();
+        TransitionPublicValues memory proven = _transition();
         _expectSp1Call(proven);
 
-        LibProof.TransitionPublicValues memory expected = _transition();
+        TransitionPublicValues memory expected = _transition();
         expected.l2PostRoot = keccak256("other-post-root");
 
         assertFalse(verifier.verify(ROOT_ID, expected, SP1_PROOF_BYTES));
     }
 
     function test_Verify_BindsRangeVKeyCommitment() public {
-        LibProof.TransitionPublicValues memory transition = _transition();
+        TransitionPublicValues memory transition = _transition();
         sp1.setExpectation(AGGREGATION_VKEY, _publicValues(transition, keccak256("wrong-range-vkey")), SP1_PROOF_BYTES);
 
         assertFalse(verifier.verify(ROOT_ID, transition, SP1_PROOF_BYTES));

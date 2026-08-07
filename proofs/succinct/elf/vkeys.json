@@ -5,8 +5,8 @@
       "sha256": "07d6e5c49c7d63a678ec7a55ecc9cf6125aff57ca4842557991f02624da26c39"
     },
     "world-chain-range-ethereum": {
-      "sha256": "4ee7c85fe95ea76bc337f36da2daba878b6ac1d097f75e1c21e8196f606a8751"
+      "sha256": "c693837daa8f2d4ed89396a27728664f35ad64a16a72193b7ee53a607109f1ea"
     }
   },
-  "range_vkey_commitment": "0x4317fed4247464262ca22a4e3e13db373d6c816666a36d1d137f071a489238ed"
+  "range_vkey_commitment": "0x524372a22534392453672cd80422307c7a12fe802d6ed6143e0b0a90539c69fc"
 }

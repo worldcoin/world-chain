@@ -23,9 +23,11 @@ deploy-contracts:
 build-opstack:
     @just ./pkg/contracts/build-opstack
 
+alias bc := build-contracts
 build-contracts *args='':
     @just ./pkg/contracts/build-contracts $@
 
+alias tc := test-contracts
 test-contracts *args='':
     @just ./pkg/contracts/test-contracts $@
 

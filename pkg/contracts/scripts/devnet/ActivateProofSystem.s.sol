@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import {Script} from "forge-std/Script.sol";
 
-import {GameTypes} from "../../src/dispute/GameTypes.sol";
+import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
 
 import {GameStatus} from "@optimism-bedrock/src/dispute/lib/Types.sol";

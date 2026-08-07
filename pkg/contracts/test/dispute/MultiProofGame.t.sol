@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {OPStackFixtures} from "./OPStackFixtures.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
-import {LibProof} from "../../src/dispute/lib/LibProof.sol";
+import {LibProof, InvalidationReason, ProofLane} from "../../src/dispute/lib/LibProof.sol";
 
 import {
     BondDistributionMode,
@@ -49,7 +49,7 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(address(registered), address(game));
         assertTrue(asr.isGameRegistered(IDisputeGame(address(game))));
         assertEq(weth.balanceOf(address(game)), PROPOSER_BOND);
-        assertEq(game.proofBitmap(), 0);
+        assertEq(game.proofBitmap().raw(), 0);
     }
 
     function test_Create_RejectsMalformedExtraData() public {
@@ -195,7 +195,7 @@ contract MultiProofGameTest is OPStackFixtures {
             bytes32 rootClaim = keccak256(abi.encode("lane", lane));
             MultiProofGame game = _propose(type(uint256).max, rootClaim, target, 0);
 
-            game.submitProofLane(lane, abi.encodePacked(game.rootId()));
+            game.submitProofLane(_compact(lane, laneRewardRecipient(lane), abi.encodePacked(game.rootId())));
             vm.warp(game.challengeDeadline().raw());
             game.resolve();
 
@@ -206,20 +206,20 @@ contract MultiProofGameTest is OPStackFixtures {
 
     function test_UnchallengedFlow_ThresholdProvidesFastFinality() public {
         MultiProofGame game = _proposeAtAnchor();
-        game.submitProofLane(0, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId())));
 
         (bool resolvable,,) = game.resolutionStatus();
         assertFalse(resolvable);
         vm.expectRevert(GameNotOver.selector);
         game.resolve();
 
-        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         GameStatus outcome;
-        LibProof.InvalidationReason reason;
+        InvalidationReason reason;
         (resolvable, outcome, reason) = game.resolutionStatus();
         assertTrue(resolvable);
         assertEq(uint8(outcome), uint8(GameStatus.DEFENDER_WINS));
-        assertEq(uint8(reason), uint8(LibProof.InvalidationReason.NONE));
+        assertEq(uint8(reason), uint8(InvalidationReason.NONE));
 
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
@@ -231,14 +231,14 @@ contract MultiProofGameTest is OPStackFixtures {
         MultiProofGame first = _proposeAtAnchor();
         vm.warp(first.challengeDeadline().raw());
 
-        (bool resolvable, GameStatus outcome, LibProof.InvalidationReason reason) = first.resolutionStatus();
+        (bool resolvable, GameStatus outcome, InvalidationReason reason) = first.resolutionStatus();
         assertTrue(resolvable);
         assertEq(uint8(outcome), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(reason), uint8(LibProof.InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(reason), uint8(InvalidationReason.PROOF_TIMEOUT));
 
         first.resolve();
         assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(first.invalidationReason()), uint8(LibProof.InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(first.invalidationReason()), uint8(InvalidationReason.PROOF_TIMEOUT));
         assertEq(first.credit(protocolFeeRecipient), PROPOSER_BOND);
 
         _passAirgap(first);
@@ -306,7 +306,7 @@ contract MultiProofGameTest is OPStackFixtures {
         game.challenge{value: CHALLENGER_BOND - 1}();
 
         _challenge(game);
-        assertEq(game.proofBitmap(), 0);
+        assertEq(game.proofBitmap().raw(), 0);
         assertEq(game.refundModeCredit(challengerAccount), CHALLENGER_BOND);
         assertEq(weth.balanceOf(address(game)), PROPOSER_BOND + CHALLENGER_BOND);
 
@@ -332,29 +332,44 @@ contract MultiProofGameTest is OPStackFixtures {
     function test_ProofThreshold_DefenderWinsAndDuplicateDoesNotCount() public {
         MultiProofGame game = _proposeAtAnchor();
 
-        game.submitProofLane(0, abi.encodePacked(game.rootId()));
-        game.submitProofLane(0, abi.encodePacked(game.rootId()));
-        assertEq(game.proofBitmap().proofCount(), 1);
+        bytes memory laneZero = _compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId()));
+        game.submitProofLane(laneZero);
+
+        // Hoisted: `expectRevert` binds to the next external call, so no getter may follow it.
+        bytes memory expected = abi.encodeWithSelector(
+            IMultiProofGame.DuplicateProofLane.selector, ProofLane.VALIDITY_PROOF, game.rootId(), game.proofBitmap()
+        );
+        vm.expectRevert(expected);
+        game.submitProofLane(laneZero);
+        assertEq(game.proofBitmap().count(), 1);
 
         vm.prank(challengerAccount);
         game.challenge{value: CHALLENGER_BOND}();
 
-        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
-        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND);
-        assertEq(game.credit(proposer), game.totalBonds());
+
+        // Two lanes plus the proposer split the forfeited challenger bond three ways.
+        uint256 share = CHALLENGER_BOND / 3;
+        assertEq(game.credit(laneRewardRecipient(0)), share);
+        assertEq(game.credit(laneRewardRecipient(1)), share);
+        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND - 2 * share);
+        assertEq(
+            game.credit(proposer) + game.credit(laneRewardRecipient(0)) + game.credit(laneRewardRecipient(1)),
+            game.totalBonds()
+        );
     }
 
     function test_Challenge_AfterInitialProofStillRequiresThreshold() public {
         MultiProofGame game = _proposeAtAnchor();
-        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         _challenge(game);
 
         (bool resolvable,,) = game.resolutionStatus();
         assertFalse(resolvable);
 
-        game.submitProofLane(0, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId())));
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
     }
@@ -364,12 +379,12 @@ contract MultiProofGameTest is OPStackFixtures {
         _challenge(game);
 
         vm.expectRevert();
-        game.submitProofLane(0, abi.encodePacked(keccak256("wrong-root")));
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(keccak256("wrong-root"))));
 
         vm.warp(game.proofDeadline().raw());
         bytes memory proof = abi.encodePacked(game.rootId());
         vm.expectRevert();
-        game.submitProofLane(0, proof);
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), proof));
     }
 
     function test_ProofLane_RejectsInitialProofAtChallengeDeadline() public {
@@ -378,7 +393,7 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.warp(game.challengeDeadline().raw());
 
         vm.expectRevert(GameOver.selector);
-        game.submitProofLane(0, proof);
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), proof));
     }
 
     function test_ProofLane_RejectsSubmissionOnceThresholdReached() public {
@@ -389,7 +404,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         bytes memory proof = abi.encodePacked(game.rootId());
         vm.expectRevert(GameOver.selector);
-        game.submitProofLane(PROOF_THRESHOLD, proof);
+        game.submitProofLane(_compact(PROOF_THRESHOLD, laneRewardRecipient(PROOF_THRESHOLD), proof));
     }
 
     function test_ProofLane_RejectsSubmissionWhenParentInvalid() public {
@@ -402,7 +417,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         bytes memory proof = abi.encodePacked(child.rootId());
         vm.expectRevert(InvalidParentGame.selector);
-        child.submitProofLane(0, proof);
+        child.submitProofLane(_compact(0, laneRewardRecipient(0), proof));
     }
 
     function test_Challenge_RejectsGameOver() public {
@@ -428,7 +443,7 @@ contract MultiProofGameTest is OPStackFixtures {
         (IMultiProofGame.ProposalStatus status,,,,) = game.claimData();
         assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.Unchallenged));
 
-        game.submitProofLane(0, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), abi.encodePacked(game.rootId())));
         (status,,,,) = game.claimData();
         assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.UnchallengedAndValidProofProvided));
 
@@ -438,7 +453,7 @@ contract MultiProofGameTest is OPStackFixtures {
         (status,,,,) = game.claimData();
         assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.Challenged));
 
-        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         (status,,,,) = game.claimData();
         assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.ChallengedAndValidProofProvided));
 
@@ -455,7 +470,7 @@ contract MultiProofGameTest is OPStackFixtures {
         first.resolve();
 
         assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(first.invalidationReason()), uint8(LibProof.InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(first.invalidationReason()), uint8(InvalidationReason.PROOF_TIMEOUT));
 
         uint256 reward = (PROPOSER_BOND * gameImpl.CHALLENGER_REWARD_BPS()) / 10_000;
         assertEq(first.credit(challengerAccount), CHALLENGER_BOND + reward);
@@ -504,7 +519,7 @@ contract MultiProofGameTest is OPStackFixtures {
         child.resolve();
 
         assertEq(uint8(child.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(child.invalidationReason()), uint8(LibProof.InvalidationReason.INVALID_PARENT));
+        assertEq(uint8(child.invalidationReason()), uint8(InvalidationReason.INVALID_PARENT));
         assertEq(child.credit(proposer), PROPOSER_BOND);
         assertEq(child.credit(challengerAccount), CHALLENGER_BOND);
     }
@@ -518,7 +533,7 @@ contract MultiProofGameTest is OPStackFixtures {
         child.resolve();
 
         assertEq(uint8(child.status()), uint8(GameStatus.CHALLENGER_WINS));
-        assertEq(uint8(child.invalidationReason()), uint8(LibProof.InvalidationReason.INVALID_PARENT));
+        assertEq(uint8(child.invalidationReason()), uint8(InvalidationReason.INVALID_PARENT));
     }
 
     function test_Cutover_AllowsRetryOfUnrespectedGame() public {
@@ -605,7 +620,13 @@ contract MultiProofGameTest is OPStackFixtures {
         // Proven but below threshold: self-challenging returns less than the pair staked.
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         MultiProofGame proven = _propose(type(uint256).max, keccak256("proven-self-challenge"), target, 0);
-        proven.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(proven.rootId()));
+        proven.submitProofLane(
+            _compact(
+                uint8(ProofLane.TEE_ATTESTATION),
+                laneRewardRecipient(uint8(ProofLane.TEE_ATTESTATION)),
+                abi.encodePacked(proven.rootId())
+            )
+        );
         vm.prank(sybil);
         proven.challenge{value: CHALLENGER_BOND}();
 
@@ -617,13 +638,127 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(staked - recovered, PROPOSER_BOND - (PROPOSER_BOND * gameImpl.CHALLENGER_REWARD_BPS()) / 10_000);
     }
 
+    /// @dev Unchallenged there is no forfeited stake, so the proposer still takes the whole pot.
+    function test_LaneReward_UnchallengedPaysNoProvers() public {
+        MultiProofGame game = _proposeAtAnchor();
+        _submitLanes(game, 2);
+        _resolveUnchallenged(game);
+
+        assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
+        assertEq(game.credit(proposer), PROPOSER_BOND);
+        assertEq(game.credit(proposer), game.totalBonds());
+        assertEq(game.credit(laneRewardRecipient(0)), 0);
+        assertEq(game.credit(laneRewardRecipient(1)), 0);
+    }
+
+    /// @dev A proposer who proves every lane themselves collects the whole forfeited bond.
+    function test_LaneReward_ProposerProvingEveryLaneTakesAll() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory proof = abi.encodePacked(game.rootId());
+
+        game.submitProofLane(_compact(0, proposer, proof));
+        _challenge(game);
+        game.submitProofLane(_compact(1, proposer, proof));
+        game.resolve();
+
+        assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
+        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND);
+        assertEq(game.credit(proposer), game.totalBonds());
+    }
+
+    /// @dev Each lane recipient withdraws independently through the two-phase DelayedWETH claim.
+    function test_LaneReward_RecipientsClaimIndependently() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory proof = abi.encodePacked(game.rootId());
+
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), proof));
+        _challenge(game);
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), proof));
+        game.resolve();
+        _passAirgap(game);
+
+        uint256 share = CHALLENGER_BOND / 3;
+        _claim(game, laneRewardRecipient(0));
+        _claim(game, laneRewardRecipient(1));
+        _claim(game, proposer);
+
+        assertEq(laneRewardRecipient(0).balance, share);
+        assertEq(laneRewardRecipient(1).balance, share);
+        assertEq(weth.balanceOf(address(game)), 0, "game must be fully drained");
+    }
+
+    /// @dev A zero recipient forfeits its share without stranding any other payout.
+    function test_LaneReward_ZeroRecipientForfeitsItsShare() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory proof = abi.encodePacked(game.rootId());
+
+        game.submitProofLane(_compact(0, address(0), proof));
+        _challenge(game);
+        game.submitProofLane(_compact(1, laneRewardRecipient(1), proof));
+        game.resolve();
+
+        uint256 share = CHALLENGER_BOND / 3;
+        assertEq(game.credit(address(0)), share);
+        assertEq(game.credit(laneRewardRecipient(1)), share);
+        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND - 2 * share);
+    }
+
+    /// @dev `laneRecipient` records the first submitter; a duplicate no-op cannot reassign it.
+    function test_LaneReward_DuplicateCannotStealRecipient() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory proof = abi.encodePacked(game.rootId());
+        address thief = makeAddr("lane-thief");
+
+        game.submitProofLane(_compact(0, laneRewardRecipient(0), proof));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMultiProofGame.DuplicateProofLane.selector, ProofLane.VALIDITY_PROOF, game.rootId(), game.proofBitmap()
+            )
+        );
+        game.submitProofLane(_compact(0, thief, proof));
+
+        assertEq(game.laneRecipient(0), laneRewardRecipient(0));
+        assertEq(game.proofBitmap().count(), 1);
+    }
+
+    /// @dev A payload too short to carry a header is rejected before any lane is derived.
+    function test_SubmitProofLane_RevertIf_HeaderTruncated() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory truncated = abi.encodePacked(uint8(0), bytes19(0));
+        assertEq(truncated.length, LibProof.PROOF_HEADER_LENGTH - 1);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IMultiProofGame.InvalidProof.selector, ProofLane.VALIDITY_PROOF, game.rootId())
+        );
+        game.submitProofLane(truncated);
+    }
+
+    /// @dev A header with no proof after it reaches the verifier and fails closed.
+    function test_SubmitProofLane_RevertIf_PayloadEmpty() public {
+        MultiProofGame game = _proposeAtAnchor();
+        bytes memory headerOnly = _compact(0, laneRewardRecipient(0), "");
+        assertEq(headerOnly.length, LibProof.PROOF_HEADER_LENGTH);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IMultiProofGame.InvalidProof.selector, ProofLane.VALIDITY_PROOF, game.rootId())
+        );
+        game.submitProofLane(headerOnly);
+    }
+
     function test_FirstProofLane_DoesNotExtendChallengeWindow() public {
         MultiProofGame game = _proposeAtAnchor();
         uint64 initialDeadline = game.challengeDeadline().raw();
         assertEq(initialDeadline, game.createdAt().raw() + CHALLENGE_PERIOD);
 
         vm.warp(initialDeadline - 1);
-        game.submitProofLane(uint8(LibProof.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
+        game.submitProofLane(
+            _compact(
+                uint8(ProofLane.TEE_ATTESTATION),
+                laneRewardRecipient(uint8(ProofLane.TEE_ATTESTATION)),
+                abi.encodePacked(game.rootId())
+            )
+        );
 
         assertEq(game.challengeDeadline().raw(), initialDeadline);
         vm.warp(initialDeadline);

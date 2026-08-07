@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {LibProof} from "../lib/LibProof.sol";
+import {LibProof, InvalidationReason, Bitmap, ProofLane} from "../lib/LibProof.sol";
 import {IWorldChainProofVerifier} from "./IWorldChainProofVerifier.sol";
 
 import {BondDistributionMode, Duration, GameStatus, Hash, Timestamp} from "@optimism-bedrock/src/dispute/lib/Types.sol";
@@ -41,8 +41,8 @@ interface IMultiProofGame is IDisputeGame {
         ProposalStatus status; // 1 byte                            |
         address challenger; // 20 bytes                             |
         Timestamp deadline; // 8 bytes                              |-- one slot (31 bytes)
-        uint8 proofBitmap; // 1 byte                                |
-        LibProof.InvalidationReason invalidationReason; // 1 byte   |
+        Bitmap proofBitmap; // 1 byte                      |
+        InvalidationReason invalidationReason; // 1 byte   |
     }
 
     /// @notice Per-deployment configuration, fixed as immutables on the implementation.
@@ -73,37 +73,23 @@ interface IMultiProofGame is IDisputeGame {
     error InvalidL2BlockNumber(uint256 expectedL2BlockNumber, uint256 actualL2BlockNumber);
     error GameNotRetryable(bytes32 uuidPreimageHash);
     error InvalidLane(uint8 lane);
-    error InvalidProof(LibProof.ProofLane lane, bytes32 rootId);
+    error InvalidProof(ProofLane lane, bytes32 rootId);
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
     error InconsistentSystemConfiguration();
+
+    /// @notice Thrown when a lane that already counts toward the threshold is resubmitted.
+    error DuplicateProofLane(ProofLane lane, bytes32 rootId, Bitmap proofBitmap);
 
     ////////////////////////////////////////////////////////////////
     //                         Events                             //
     ////////////////////////////////////////////////////////////////
-
-    /// @notice Emitted at creation with the full proposal context. Replaces the former
-    ///         factory `GameCreated` event for offchain indexers; the stock factory's
-    ///         `DisputeGameCreated` event only carries (proxy, gameType, rootClaim).
-    event WorldChainGameCreated(
-        bytes32 indexed rootId,
-        address indexed parentRef,
-        bytes32 rootClaim,
-        uint256 l2BlockNumber,
-        bytes32 l1OriginHash,
-        uint256 l1OriginNumber,
-        uint256 attempt,
-        address gameCreator
-    );
 
     /// @notice Emitted when a staked challenger disputes the proposal.
     event Challenged(address indexed challenger, uint64 proofDeadline);
 
     /// @notice Emitted when a proof lane is accepted; `proofBitmap` carries the updated lane
     ///         set, from which indexers can derive threshold status.
-    event ProofSubmitted(LibProof.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
-
-    /// @notice Emitted when a lane that already counts toward the threshold is resubmitted.
-    event DuplicateProofLane(LibProof.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
+    event Proved(ProofLane indexed lane, bytes32 indexed rootId, address recipient, Bitmap proofBitmap);
 
     /// @notice Emitted when the bond distribution mode is locked in.
     event GameClosed(BondDistributionMode bondDistributionMode);
@@ -205,15 +191,18 @@ interface IMultiProofGame is IDisputeGame {
             ProposalStatus status,
             address challenger,
             Timestamp deadline,
-            uint8 proofBitmap,
-            LibProof.InvalidationReason invalidationReason
+            Bitmap proofBitmap,
+            InvalidationReason invalidationReason
         );
 
     /// @notice Why the game was invalidated, if it was.
-    function invalidationReason() external view returns (LibProof.InvalidationReason);
+    function invalidationReason() external view returns (InvalidationReason);
 
     /// @notice Bitmap of the proof lanes that count toward the threshold.
-    function proofBitmap() external view returns (uint8);
+    function proofBitmap() external view returns (Bitmap);
+
+    /// @notice Reward recipient recorded for `laneId`, or the zero address if unproven.
+    function laneRecipient(uint8 laneId) external view returns (address);
 
     /// @notice Challenger that disputed this proposal, or the zero address.
     function challenger() external view returns (address);
@@ -230,10 +219,7 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Returns whether this game can resolve now and the outcome a resolve call would
     ///         produce; `outcome` is `IN_PROGRESS` while the game cannot resolve.
-    function resolutionStatus()
-        external
-        view
-        returns (bool resolvable, GameStatus outcome, LibProof.InvalidationReason reason);
+    function resolutionStatus() external view returns (bool resolvable, GameStatus outcome, InvalidationReason reason);
 
     ////////////////////////////////////////////////////////////////
     //                    Challenge and proofs                    //
@@ -242,10 +228,10 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Disputes a proven proposal during the open challenge window for exactly `challengerBond`.
     function challenge() external payable returns (ProposalStatus);
 
-    /// @notice Submits `proof` for `laneId`. Before a challenge, any accepted lane satisfies the
-    ///         initial proof requirement; after a challenge, distinct lanes count toward the
-    ///         configured threshold. No-ops when the lane already counts.
-    function submitProofLane(uint8 laneId, bytes calldata proof) external returns (ProposalStatus);
+    /// @notice Submits a compact proof payload. Before a challenge, any accepted lane satisfies
+    ///         the initial proof requirement; after a challenge, distinct lanes count toward the
+    ///         configured threshold. Reverts when the lane already counts.
+    function submitProofLane(bytes calldata proof) external returns (ProposalStatus);
 
     ////////////////////////////////////////////////////////////////
     //                      Bond settlement                       //

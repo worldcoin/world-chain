@@ -19,9 +19,7 @@ contract NitroEnclaveKeyRegistry is Ownable {
     error SignerAlreadyRegistered();
 
     /// @notice Thrown when `registerKey` is called for a key that was
-    ///         previously revoked. Revocation is permanent — a compromised
-    ///         enclave key must not be silently restored by re-submitting
-    ///         its attestation document.
+    ///         previously revoked.
     error SignerRevokedPermanently();
 
     /// @notice Thrown when the verifier returns a malformed public key.
@@ -42,9 +40,6 @@ contract NitroEnclaveKeyRegistry is Ownable {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Lifecycle state of a registered signer.
-    /// @dev The default zero value (`Unknown`) denotes a signer that has never
-    ///      been registered. Transitions are strictly
-    ///      `Unknown → Active → Revoked`; there is no path back.
     enum SignerStatus {
         Unknown,
         Active,
