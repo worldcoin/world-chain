@@ -18,8 +18,6 @@ on:
 
 env:
   FOUNDRY_PROFILE: ci
-  WORLDCHAIN_PROVIDER: "${{ secrets.WORLDCHAIN_PROVIDER }}"
-  ETHEREUM_PROVIDER: "${{ secrets.ETHEREUM_PROVIDER }}"
 
 jobs:
   check:
@@ -34,7 +32,16 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-          submodules: recursive
+          fetch-depth: 1
+          submodules: true
+
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just@1.57.0
+          fallback: none
+
+      - name: Set up Solidity dependencies
+        run: just setup-contracts
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1
@@ -54,3 +61,6 @@ jobs:
 
       - name: Run Forge tests
         run: forge test
+        env:
+          WORLDCHAIN_PROVIDER: "${{ secrets.WORLDCHAIN_PROVIDER }}"
+          ETHEREUM_PROVIDER: "${{ secrets.ETHEREUM_PROVIDER }}"
