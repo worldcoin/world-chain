@@ -6,10 +6,15 @@ deploy-contracts:
 fmt:
     forge fmt
 
+setup-contracts:
+    git -C ../.. submodule update --init --depth 1 --jobs 8
+    git -C lib/optimism submodule update --init --depth 1 --jobs 8 -- ':(glob)packages/contracts-bedrock/lib/*'
+    git -C lib/world-id-contracts submodule update --init --depth 1 --jobs 8 -- ':(glob)lib/*'
+
 # Build the pinned Optimism implementation contracts (solc 0.8.15) in the isolated
 # opstack/ sub-project. Tests and deploy scripts read these artifacts via
 # vm.getCode/vm.deployCode; run this before `forge test`.
-build-opstack:
+build-opstack: setup-contracts
     cd opstack && forge build
 
 build-contracts *args='': build-opstack

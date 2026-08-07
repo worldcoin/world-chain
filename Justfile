@@ -19,6 +19,9 @@ devnet-up: build
 deploy-contracts:
     @just ./pkg/contracts/deploy-contracts
 
+setup-contracts:
+    @just ./pkg/contracts/setup-contracts
+
 # Build the pinned Optimism implementation contracts in the isolated opstack/ sub-project.
 build-opstack:
     @just ./pkg/contracts/build-opstack
