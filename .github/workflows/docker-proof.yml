@@ -222,6 +222,10 @@ jobs:
     name: build nitro-worker-enclave EIF carrier image
     needs: [resolve-sha, build-nitro-enclave-image]
     runs-on: arc-public-8xlarge-amd64-runner
+    outputs:
+      pcr0: ${{ steps.pcrs.outputs.pcr0 }}
+      pcr1: ${{ steps.pcrs.outputs.pcr1 }}
+      pcr2: ${{ steps.pcrs.outputs.pcr2 }}
     steps:
       - name: Check Out Repo
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -233,6 +237,16 @@ jobs:
           toolchain: stable
       - name: Build EIF
         run: scripts/build-eif.sh target/eif
+      - name: Extract PCRs
+        id: pcrs
+        run: |
+          jq -r '"pcr0=\(.PCR0)", "pcr1=\(.PCR1)", "pcr2=\(.PCR2)"' \
+            target/eif/pcrs.json >> "$GITHUB_OUTPUT"
+      - name: Upload PCR measurements
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nitro-enclave-pcrs
+          path: target/eif/pcrs.json
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -271,6 +285,9 @@ jobs:
           NITRO_ENCLAVE_RESULT:      ${{ needs.merge-nitro-enclave-image.result }}
           EIF_RESULT:          ${{ needs.build-nitro-enclave-eif-image.result }}
           SERVICES_RESULT:     ${{ needs.merge-service-images.result }}
+          PCR0:                ${{ needs.build-nitro-enclave-eif-image.outputs.pcr0 }}
+          PCR1:                ${{ needs.build-nitro-enclave-eif-image.outputs.pcr1 }}
+          PCR2:                ${{ needs.build-nitro-enclave-eif-image.outputs.pcr2 }}
         run: |
           REPO="ghcr.io/${{ github.repository }}"
           status() { [ "$1" = "success" ] && echo "✅" || echo "❌ ($1)"; }
@@ -287,4 +304,15 @@ jobs:
             echo "| \`$IMAGE_NAME-challenger\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
             echo "| \`$IMAGE_NAME-defender\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
             echo "| \`$IMAGE_NAME-prover-service\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+
+            if [ -n "${PCR0:-}" ]; then
+              echo ""
+              echo "## 🔒 Enclave PCR measurements"
+              echo ""
+              echo "| PCR | Value |"
+              echo "|-----|-------|"
+              echo "| PCR0 | \`$PCR0\` |"
+              echo "| PCR1 | \`$PCR1\` |"
+              echo "| PCR2 | \`$PCR2\` |"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
