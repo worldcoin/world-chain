@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, TxHash, U256};
-use world_chain_proofs::{InvalidationReason, ProposalCommitment, SelectedLineage};
+use world_chain_proof_protocol::{InvalidationReason, ProposalCommitment, SelectedLineage};
 
 /// A pending `DelayedWETH` withdrawal opened by the first `claimCredit` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -2,7 +2,7 @@ use alloy_primitives::TxHash;
 use alloy_provider::{MulticallError, PendingTransactionError, transport::RpcError};
 use alloy_transport::TransportErrorKind;
 use thiserror::Error;
-use world_chain_proofs::LineageError;
+use world_chain_proof_protocol::LineageError;
 
 /// Errors returned by the proposer.
 #[derive(Debug, Error)]

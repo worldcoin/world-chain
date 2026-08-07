@@ -45,13 +45,13 @@ release for human review. Review the measurements section, then publish.
 ## Reproducibility requirements
 
 - **SP1 ELFs** are built with `sp1_build::build_program_with_args` at a pinned SP1 toolchain
-  tag from `proofs/succinct/utils/host/build.rs`, then embedded into the host binary at compile
+  tag from `proofs/backends/sp1/host/build.rs`, then embedded into the host binary at compile
   time via `sp1_sdk::include_elf!()`. There are no committed ELF binaries or hash manifests —
   reproducibility is enforced by the pinned `cargo-prove` toolchain (`docker: true` by default,
   or a pinned `sp1up --version v6.1.0` install inside `Dockerfile.proof`). See
   [elf-management.md](./elf-management.md).
 - **The enclave EIF** must be bit-for-bit reproducible so anyone can re-derive the registered
-  PCRs from source: `proofs/nitro/Dockerfile` pins base images by digest and apt packages to a
+  PCRs from source: `proofs/backends/nitro/Dockerfile` pins base images by digest and apt packages to a
   fixed snapshot.debian.org timestamp, and `scripts/build-eif.sh` pins the nitro-cli version that
   assembles the EIF. Bumping any of these pins changes the PCRs — expect to re-register them.
 

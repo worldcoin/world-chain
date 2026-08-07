@@ -28,6 +28,10 @@ pub const METRICS_L2_FINALIZED_BLOCK_NUMBER: &str = "l2.finalized_block_number";
 pub const METRICS_RPC_CLIENT_REQUESTS: &str = "rpc.client.requests";
 /// Confirmed challenge transactions.
 pub const METRICS_CHALLENGES_SUBMITTED: &str = "challenges.submitted";
+/// ETH bonded by proposer and challenger transactions.
+pub const METRICS_BONDS_POSTED_ETH: &str = "bonds.posted_eth";
+/// ETH transferred back to proposer and challenger wallets after bond settlement.
+pub const METRICS_BONDS_WITHDRAWN_ETH: &str = "bonds.withdrawn_eth";
 /// Confirmed on-chain proof-lane submissions.
 pub const METRICS_PROOF_LANES_SUBMITTED: &str = "proof_lanes.submitted";
 /// Newly created durable proof requests.
@@ -64,6 +68,16 @@ pub fn describe_metrics() {
         METRICS_CHALLENGES_SUBMITTED,
         metrics::Unit::Count,
         "Number of challenge transactions successfully confirmed on L1."
+    );
+    metrics::describe_histogram!(
+        METRICS_BONDS_POSTED_ETH,
+        metrics::Unit::Count,
+        "ETH bonded by successfully confirmed proposer and challenger transactions."
+    );
+    metrics::describe_histogram!(
+        METRICS_BONDS_WITHDRAWN_ETH,
+        metrics::Unit::Count,
+        "ETH transferred after successfully confirmed proposer and challenger bond withdrawals."
     );
     metrics::describe_counter!(
         METRICS_PROOF_LANES_SUBMITTED,
@@ -125,6 +139,23 @@ pub fn record_l2_finalized_block(block_number: u64) {
 /// Records a successfully confirmed challenge transaction.
 pub fn increment_challenges_submitted() {
     metrics::counter!(METRICS_CHALLENGES_SUBMITTED).increment(1);
+}
+
+/// Records ETH posted by a successfully confirmed bond transaction.
+pub fn record_bond_posted(role: &'static str, amount: alloy_primitives::U256) {
+    record_bond_amount(METRICS_BONDS_POSTED_ETH, role, amount);
+}
+
+/// Records ETH transferred by a successfully confirmed bond withdrawal.
+pub fn record_bond_withdrawn(role: &'static str, amount: alloy_primitives::U256) {
+    record_bond_amount(METRICS_BONDS_WITHDRAWN_ETH, role, amount);
+}
+
+fn record_bond_amount(metric: &'static str, role: &'static str, amount: alloy_primitives::U256) {
+    match format_ether(amount).parse::<f64>() {
+        Ok(amount_eth) => metrics::histogram!(metric, "role" => role).record(amount_eth),
+        Err(error) => warn!(%error, %role, ?amount, "failed to convert bond amount to ETH"),
+    }
 }
 
 /// Records a successfully confirmed proof-lane transaction.

@@ -1,5 +1,5 @@
 use crate::{error::DefenderError, traits::DefenderClient, types::GameMetadata};
-use world_chain_proofs::{InvalidationReason, RootState, proof_count};
+use world_chain_proof_protocol::{GameStatus, InvalidationReason, ProposalStatus, proof_count};
 
 /// On-chain state relevant to proof support for one selected game.
 #[derive(Debug, PartialEq, Eq)]
@@ -39,26 +39,38 @@ where
             .execution_client
             .lineage_resolution_status(game.address)
             .await?;
-        Ok(match status.root_state {
-            RootState::Proposed => {
-                let proof_bitmap = self.execution_client.proof_bitmap(game.address).await?;
+        // A resolvable game reports the outcome a resolve call would produce, so a proof that
+        // already landed shows up here before anyone resolves it.
+        match status.outcome {
+            GameStatus::DefenderWins => return Ok(GameObservation::Finalized),
+            GameStatus::ChallengerWins => {
+                return Ok(GameObservation::Invalidated {
+                    reason: status.invalidation_reason,
+                });
+            }
+            GameStatus::InProgress => {}
+        }
+
+        // `GameStatus` cannot distinguish a challenged proposal from an unchallenged one; only
+        // the proposal state machine can, and it carries the lane bitmap in the same slot.
+        let claim = self.execution_client.claim_data(game.address).await?;
+        let proof_bitmap = claim.proof_bitmap;
+        Ok(match claim.status {
+            ProposalStatus::Unchallenged | ProposalStatus::UnchallengedAndValidProofProvided => {
                 GameObservation::Proposed {
                     proof_bitmap,
                     has_initial_support: proof_bitmap != 0,
                 }
             }
-            RootState::Challenged => {
-                let proof_bitmap = self.execution_client.proof_bitmap(game.address).await?;
+            ProposalStatus::Challenged | ProposalStatus::ChallengedAndValidProofProvided => {
                 GameObservation::Challenged {
                     proof_bitmap,
                     has_required_support: proof_count(proof_bitmap) >= game.proof_threshold,
                 }
             }
-            RootState::Finalized => GameObservation::Finalized,
-            RootState::Invalidated => GameObservation::Invalidated {
-                reason: status.invalidation_reason,
-            },
-            RootState::None => GameObservation::Unset,
+            // The game sets `Resolved` and its `GameStatus` in the same call, so this is only
+            // reachable if the two ever diverge.
+            ProposalStatus::Resolved => GameObservation::Unset,
         })
     }
 

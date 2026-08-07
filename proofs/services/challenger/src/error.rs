@@ -2,7 +2,9 @@ use alloy_primitives::{Address, TxHash};
 use alloy_provider::{PendingTransactionError, transport::RpcError};
 use alloy_transport::TransportErrorKind;
 use thiserror::Error;
-use world_chain_proofs::{ConsensusError, InvalidationReasonError, RootStateError};
+use world_chain_proof_protocol::{
+    ConsensusError, GameStatusError, InvalidationReasonError, ProposalStatusError,
+};
 
 /// Errors returned by the challenger and its lifecycle managers.
 #[derive(Debug, Error)]
@@ -26,7 +28,9 @@ pub enum ChallengerError {
     #[error("The challenge transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
     #[error(transparent)]
-    InvalidRootState(#[from] RootStateError),
+    InvalidGameStatus(#[from] GameStatusError),
+    #[error(transparent)]
+    InvalidProposalStatus(#[from] ProposalStatusError),
     #[error(transparent)]
     NotExistingInvalidReason(#[from] InvalidationReasonError),
     #[error(transparent)]
@@ -71,6 +75,7 @@ impl ChallengerError {
 /// Error returned while processing a single game.
 #[derive(Debug)]
 pub(crate) struct GameScanError {
-    pub error: ChallengerError,
+    /// Boxed to keep `Result<_, GameScanError>` small (`clippy::result_large_err`).
+    pub error: Box<ChallengerError>,
     pub challenge_deadline: Option<u64>,
 }

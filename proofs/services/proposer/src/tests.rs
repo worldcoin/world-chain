@@ -9,10 +9,10 @@ use std::{
 
 use alloy_primitives::{Address, B256, BlockNumber, U256, address, b256};
 use async_trait::async_trait;
-use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, InvalidationReason, LineageAnchor, LineageError,
+use world_chain_proof_protocol::{
+    ConsensusError, ConsensusProvider, GameStatus, InvalidationReason, LineageAnchor, LineageError,
     LineageGame, LineageProvider, LineageTransition, ProposalCommitment, ResolutionStatus,
-    RootState, SelectedLineageGame,
+    SelectedLineageGame,
 };
 
 use crate::{
@@ -87,7 +87,7 @@ impl LineageProvider for MockContracts {
             .remove(&game)
             .unwrap_or(ResolutionStatus {
                 resolvable: false,
-                root_state: RootState::Proposed,
+                outcome: GameStatus::InProgress,
                 invalidation_reason: InvalidationReason::None,
             }))
     }
@@ -254,10 +254,10 @@ impl BondManagerClient for MockBondClient {
             .contains(&game);
         Ok(ResolutionStatus {
             resolvable: false,
-            root_state: if resolved {
-                RootState::Finalized
+            outcome: if resolved {
+                GameStatus::DefenderWins
             } else {
-                RootState::Proposed
+                GameStatus::InProgress
             },
             invalidation_reason: InvalidationReason::None,
         })
@@ -398,7 +398,7 @@ async fn advance_proposal(
 fn positive_ready_status() -> ResolutionStatus {
     ResolutionStatus {
         resolvable: true,
-        root_state: RootState::Finalized,
+        outcome: GameStatus::DefenderWins,
         invalidation_reason: InvalidationReason::None,
     }
 }
@@ -420,7 +420,7 @@ fn anchor_advanced_onto(anchor_game: Address, l2_block_number: u64) -> LineageAn
 fn timed_out_status() -> ResolutionStatus {
     ResolutionStatus {
         resolvable: false,
-        root_state: RootState::Invalidated,
+        outcome: GameStatus::ChallengerWins,
         invalidation_reason: InvalidationReason::ProofTimeout,
     }
 }
@@ -428,7 +428,7 @@ fn timed_out_status() -> ResolutionStatus {
 fn negatively_resolvable_timeout() -> ResolutionStatus {
     ResolutionStatus {
         resolvable: true,
-        root_state: RootState::Invalidated,
+        outcome: GameStatus::ChallengerWins,
         invalidation_reason: InvalidationReason::ProofTimeout,
     }
 }
@@ -696,7 +696,7 @@ async fn resolve_games_caps_submissions_and_keeps_scanning_finalized_games() {
                 game_3,
                 ResolutionStatus {
                     resolvable: false,
-                    root_state: RootState::Finalized,
+                    outcome: GameStatus::DefenderWins,
                     invalidation_reason: InvalidationReason::None,
                 },
             ),
@@ -751,7 +751,7 @@ async fn finalized_games_do_not_consume_resolution_budget() {
                 GAME_1,
                 ResolutionStatus {
                     resolvable: false,
-                    root_state: RootState::Finalized,
+                    outcome: GameStatus::DefenderWins,
                     invalidation_reason: InvalidationReason::None,
                 },
             ),
@@ -983,7 +983,7 @@ async fn bond_manager_resolves_invalid_parent_before_claiming_refund() {
             game,
             ResolutionStatus {
                 resolvable: true,
-                root_state: RootState::Invalidated,
+                outcome: GameStatus::ChallengerWins,
                 invalidation_reason: InvalidationReason::InvalidParent,
             },
         );
@@ -1028,7 +1028,7 @@ async fn bond_manager_leaves_direct_proof_timeout_to_lineage_proposer() {
             game,
             ResolutionStatus {
                 resolvable: true,
-                root_state: RootState::Invalidated,
+                outcome: GameStatus::ChallengerWins,
                 invalidation_reason: InvalidationReason::ProofTimeout,
             },
         );

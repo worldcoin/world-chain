@@ -3,7 +3,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
-use world_chain_proofs::{
+use world_chain_proof_protocol::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, MULTI_PROOF_GAME_TYPE,
     RegisteredLineageConfig, ResolutionStatus, read_game_for_transition, read_lineage_anchor,
@@ -180,6 +180,7 @@ where
         }
 
         Ok(if credit.is_zero() {
+            world_chain_proof_metrics::record_bond_withdrawn("proposer", pending.amount);
             ClaimSubmission {
                 tx_hash,
                 amount: pending.amount,
@@ -339,6 +340,7 @@ where
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
         }
+        world_chain_proof_metrics::record_bond_posted("proposer", init_bond);
 
         let game_address = receipt
             .logs()

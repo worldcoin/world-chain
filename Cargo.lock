@@ -18587,7 +18587,7 @@ dependencies = [
  "tracing",
  "url",
  "world-chain-proof-metrics",
- "world-chain-proofs",
+ "world-chain-proof-protocol",
 ]
 
 [[package]]
@@ -18666,7 +18666,7 @@ dependencies = [
  "url",
  "world-chain-proof-core",
  "world-chain-proof-metrics",
- "world-chain-proofs",
+ "world-chain-proof-protocol",
  "world-chain-prover-service",
 ]
 
@@ -18716,11 +18716,11 @@ dependencies = [
  "world-chain-node",
  "world-chain-primitives",
  "world-chain-proof-core",
- "world-chain-proof-kona-host-utils",
+ "world-chain-proof-kona-host",
+ "world-chain-proof-protocol",
+ "world-chain-proof-sp1-host",
  "world-chain-proof-sp1-worker",
- "world-chain-proof-succinct-host-utils",
  "world-chain-proof-worker",
- "world-chain-proofs",
  "world-chain-proposer",
  "world-chain-prover-service",
  "world-chain-rpc",
@@ -19011,7 +19011,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-proof-integration-tests"
+name = "world-chain-proof-it"
 version = "2.4.1"
 dependencies = [
  "alloy-primitives",
@@ -19025,14 +19025,14 @@ dependencies = [
  "world-chain-challenger",
  "world-chain-defender",
  "world-chain-proof-core",
+ "world-chain-proof-protocol",
  "world-chain-proof-worker",
- "world-chain-proofs",
  "world-chain-proposer",
  "world-chain-prover-service",
 ]
 
 [[package]]
-name = "world-chain-proof-kona-client-utils"
+name = "world-chain-proof-kona-client"
 version = "2.4.1"
 dependencies = [
  "alloy-consensus 2.1.1",
@@ -19062,7 +19062,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-proof-kona-host-utils"
+name = "world-chain-proof-kona-host"
 version = "2.4.1"
 dependencies = [
  "alloy-consensus 2.1.1",
@@ -19086,7 +19086,7 @@ dependencies = [
  "tracing",
  "world-chain-chainspec",
  "world-chain-proof-core",
- "world-chain-proof-kona-client-utils",
+ "world-chain-proof-kona-client",
 ]
 
 [[package]]
@@ -19140,7 +19140,7 @@ dependencies = [
  "tracing-subscriber 0.3.23",
  "url",
  "world-chain-proof-core",
- "world-chain-proof-kona-client-utils",
+ "world-chain-proof-kona-client",
  "x509-parser",
 ]
 
@@ -19160,11 +19160,71 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-chainspec",
- "world-chain-proof-kona-host-utils",
+ "world-chain-proof-kona-host",
  "world-chain-proof-metrics",
  "world-chain-proof-nitro-enclave",
  "world-chain-proof-worker",
  "world-chain-prover-service",
+]
+
+[[package]]
+name = "world-chain-proof-protocol"
+version = "2.4.1"
+dependencies = [
+ "alloy-contract",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-sol-types",
+ "async-trait",
+ "futures-util",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "world-chain-proof-metrics",
+]
+
+[[package]]
+name = "world-chain-proof-sp1-elfs"
+version = "2.4.1"
+dependencies = [
+ "sp1-build",
+ "sp1-sdk",
+]
+
+[[package]]
+name = "world-chain-proof-sp1-host"
+version = "2.4.1"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "anyhow",
+ "async-trait",
+ "bincode 1.3.3",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_cbor",
+ "sp1-sdk",
+ "strum 0.28.0",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "world-chain-proof-core",
+ "world-chain-proof-kona-host",
+ "world-chain-proof-sp1-elfs",
+ "world-chain-proof-sp1-types",
+ "world-chain-prover-service",
+]
+
+[[package]]
+name = "world-chain-proof-sp1-types"
+version = "2.4.1"
+dependencies = [
+ "alloy-primitives",
+ "rkyv",
+ "serde",
+ "world-chain-proof-core",
 ]
 
 [[package]]
@@ -19188,55 +19248,13 @@ dependencies = [
  "tracing",
  "world-chain-chainspec",
  "world-chain-proof-core",
- "world-chain-proof-kona-host-utils",
+ "world-chain-proof-kona-host",
  "world-chain-proof-metrics",
- "world-chain-proof-succinct-host-utils",
- "world-chain-proof-succinct-utils",
+ "world-chain-proof-protocol",
+ "world-chain-proof-sp1-host",
+ "world-chain-proof-sp1-types",
  "world-chain-proof-worker",
- "world-chain-proofs",
  "world-chain-prover-service",
-]
-
-[[package]]
-name = "world-chain-proof-succinct-elfs"
-version = "2.4.1"
-dependencies = [
- "sp1-build",
- "sp1-sdk",
-]
-
-[[package]]
-name = "world-chain-proof-succinct-host-utils"
-version = "2.4.1"
-dependencies = [
- "alloy-primitives",
- "alloy-sol-types",
- "anyhow",
- "async-trait",
- "bincode 1.3.3",
- "reqwest 0.12.28",
- "serde",
- "serde_cbor",
- "sp1-sdk",
- "strum 0.28.0",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "world-chain-proof-core",
- "world-chain-proof-kona-host-utils",
- "world-chain-proof-succinct-elfs",
- "world-chain-proof-succinct-utils",
- "world-chain-prover-service",
-]
-
-[[package]]
-name = "world-chain-proof-succinct-utils"
-version = "2.4.1"
-dependencies = [
- "alloy-primitives",
- "rkyv",
- "serde",
- "world-chain-proof-core",
 ]
 
 [[package]]
@@ -19252,24 +19270,6 @@ dependencies = [
  "tracing",
  "world-chain-proof-metrics",
  "world-chain-prover-service",
-]
-
-[[package]]
-name = "world-chain-proofs"
-version = "2.4.1"
-dependencies = [
- "alloy-contract",
- "alloy-primitives",
- "alloy-provider",
- "alloy-sol-types",
- "async-trait",
- "futures-util",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "world-chain-proof-metrics",
 ]
 
 [[package]]
@@ -19297,7 +19297,7 @@ dependencies = [
  "tracing",
  "url",
  "world-chain-proof-metrics",
- "world-chain-proofs",
+ "world-chain-proof-protocol",
 ]
 
 [[package]]
@@ -19315,7 +19315,7 @@ dependencies = [
  "tempfile",
  "world-chain-chainspec",
  "world-chain-proof-core",
- "world-chain-proof-kona-host-utils",
+ "world-chain-proof-kona-host",
 ]
 
 [[package]]
@@ -19330,8 +19330,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber 0.3.23",
- "world-chain-proof-kona-host-utils",
- "world-chain-proofs",
+ "world-chain-proof-kona-host",
+ "world-chain-proof-protocol",
  "world-chain-prover-service",
 ]
 
@@ -19389,9 +19389,9 @@ dependencies = [
  "sp1-sdk",
  "tokio",
  "world-chain-proof-core",
- "world-chain-proof-succinct-elfs",
- "world-chain-proof-succinct-host-utils",
- "world-chain-proof-succinct-utils",
+ "world-chain-proof-sp1-elfs",
+ "world-chain-proof-sp1-host",
+ "world-chain-proof-sp1-types",
  "world-chain-prover",
 ]
 
@@ -19598,7 +19598,7 @@ dependencies = [
  "world-chain-node",
  "world-chain-p2p",
  "world-chain-primitives",
- "world-chain-proofs",
+ "world-chain-proof-protocol",
  "world-chain-test-utils",
  "world-chain-validator",
 ]

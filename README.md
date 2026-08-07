@@ -54,8 +54,8 @@ World Chain is a blockchain designed for humans. It prioritizes scalability and 
 | [`world-chain-prover-sp1`](proofs/debug/bin/prover-sp1)        | SP1 zkVM prover CLI. |
 | [`world-chain-prover-nitro`](proofs/debug/bin/prover-nitro)    | AWS Nitro TEE host prover CLI. |
 | [`world-chain-proof-core`](./proofs/core)                      | Shared primitives for SP1 and Nitro TEE fault-proof backends. |
-| [`world-chain-proof-nitro-enclave`](./proofs/nitro/enclave)    | AWS Nitro TEE attestation prover for OP Succinct Lite fault proofs. |
-| [`world-chain-proofs`](./proofs/primitives)                    | Proof primitives and shared types. |
+| [`world-chain-proof-nitro-enclave`](./proofs/backends/nitro/enclave)    | AWS Nitro TEE attestation prover for OP Succinct Lite fault proofs. |
+| [`world-chain-proof-protocol`](./proofs/protocol)                    | Proof primitives and shared types. |
 | [`world-chain-challenger`](proofs/services/challenger)         | Fault-proof challenger service. |
 | [`world-chain-proposer`](proofs/services/proposer)             | Output root proposer service. |
 | [`world-chain-prover-service`](proofs/services/prover-service) | Proof generation service. |

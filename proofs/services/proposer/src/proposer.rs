@@ -1,6 +1,6 @@
 use tracing::{info, warn};
-use world_chain_proofs::{
-    ConsensusProvider, InvalidationReason, LineageStop, RootState, SelectedLineageGame,
+use world_chain_proof_protocol::{
+    ConsensusProvider, GameStatus, InvalidationReason, LineageStop, SelectedLineageGame,
     select_lineage,
 };
 
@@ -138,7 +138,7 @@ where
                 );
                 highest_finalized_game = Some(*selected);
                 resolutions_submitted += 1;
-            } else if resolution_status.root_state == RootState::Finalized {
+            } else if resolution_status.outcome == GameStatus::DefenderWins {
                 // the game was finalized in an earlier iteration or by another keeper
                 highest_finalized_game = Some(*selected);
             }

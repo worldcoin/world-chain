@@ -1,5 +1,5 @@
 use tracing::{info, warn};
-use world_chain_proofs::{InvalidationReason, RootState};
+use world_chain_proof_protocol::{GameStatus, InvalidationReason};
 
 use crate::{ChallengerError, OwnedGames, ResolutionManagerClient, ResolutionManagerConfig};
 
@@ -54,12 +54,12 @@ where
                 if !status.resolvable {
                     return Ok(());
                 }
-                if status.root_state != RootState::Invalidated
+                if status.outcome != GameStatus::ChallengerWins
                     || status.invalidation_reason != InvalidationReason::ProofTimeout
                 {
                     warn!(
                         game_address = %game,
-                        outcome = ?status.root_state,
+                        outcome = ?status.outcome,
                         invalidation_reason = ?status.invalidation_reason,
                         "challenger-owned invalid game has an unexpected resolvable outcome"
                     );
@@ -69,7 +69,7 @@ where
                 info!(
                     game_address = %game,
                     tx_hash = ?submission.tx_hash,
-                    outcome = ?status.root_state,
+                    outcome = ?status.outcome,
                     invalidation_reason = ?status.invalidation_reason,
                     "resolved challenger-owned game"
                 );

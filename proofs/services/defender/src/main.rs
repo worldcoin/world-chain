@@ -18,7 +18,7 @@ use url::Url;
 use world_chain_defender::{
     AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig, WorldChainDefender,
 };
-use world_chain_proofs::{OptimismConsensusClient, VerifyingConsensusProvider};
+use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
 use world_chain_prover_service::RpcProverServiceClient;
 
 #[derive(Debug, Parser)]
@@ -50,6 +50,11 @@ struct Cli {
     /// Hex-encoded private key the defender signs L1 transactions with.
     #[arg(long, env = "DEFENDER_KEY", hide_env_values = true)]
     defender_key: PrivateKeySigner,
+
+    /// Address credited each submitted lane's share of a forfeited challenger bond.
+    /// Defaults to the defender signer.
+    #[arg(long, env = "PROOF_REWARD_RECIPIENT")]
+    proof_reward_recipient: Option<Address>,
 
     /// Seconds between selected-lineage scans.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
@@ -88,6 +93,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let defender_address = cli.defender_key.address();
+    let reward_recipient = cli.proof_reward_recipient.unwrap_or(defender_address);
     let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,
@@ -100,9 +106,14 @@ async fn main() -> Result<()> {
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, defender_address).await;
 
-    let client = AlloyDefenderClient::new(provider, cli.factory_address, cli.l1_tx_confirmations)
-        .await
-        .context("failed to connect defender to the registered proof system")?;
+    let client = AlloyDefenderClient::new(
+        provider,
+        cli.factory_address,
+        cli.l1_tx_confirmations,
+        reward_recipient,
+    )
+    .await
+    .context("failed to connect defender to the registered proof system")?;
     let output_roots = VerifyingConsensusProvider::new(
         OptimismConsensusClient::new(cli.output_root_rpc.clone()),
         cli.verifying_output_root_rpc
@@ -124,6 +135,7 @@ async fn main() -> Result<()> {
         prover_service = %cli.prover_service_url,
         dispute_game_factory = %cli.factory_address,
         defender = %defender_address,
+        reward_recipient = %reward_recipient,
         l1_tx_confirmations = cli.l1_tx_confirmations,
         l1_rpc_timeout_seconds = cli.l1_rpc_timeout_seconds,
         "starting World Chain proof-system defender"

@@ -14,8 +14,9 @@ use std::{
     },
     time::Duration,
 };
-use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, InvalidationReason, ResolutionStatus, RootState,
+use world_chain_proof_protocol::{
+    ConsensusError, ConsensusProvider, GameStatus, InvalidationReason, ProposalStatus,
+    ResolutionStatus,
 };
 
 const CHALLENGER: Address = address!("00000000000000000000000000000000000000cc");
@@ -24,21 +25,17 @@ const GAME_2: Address = address!("0000000000000000000000000000000000000002");
 const GAME_3: Address = address!("0000000000000000000000000000000000000003");
 const L2_BLOCK: u64 = 100;
 
-const STATE_PROPOSED: u8 = 1;
-const STATE_CHALLENGED: u8 = 2;
-const STATE_FINALIZED: u8 = 3;
-const STATE_INVALIDATED: u8 = 4;
 const REASON_NONE: u8 = 0;
 const REASON_PROOF_TIMEOUT: u8 = 1;
 
 #[derive(Debug, Clone, Copy)]
 struct MockGame {
     metadata: GameMetadata,
-    state: u8,
+    proposal_status: ProposalStatus,
     challenge_deadline: u64,
     challenger: Address,
     resolvable: bool,
-    resolution_outcome: u8,
+    resolution_outcome: GameStatus,
     resolution_reason: u8,
     credit: U256,
     pending: PendingWithdrawal,
@@ -54,11 +51,11 @@ impl MockGame {
                 root_claim,
                 l2_block_number,
             },
-            state: STATE_PROPOSED,
+            proposal_status: ProposalStatus::Unchallenged,
             challenge_deadline: u64::MAX,
             challenger: Address::ZERO,
             resolvable: false,
-            resolution_outcome: STATE_PROPOSED,
+            resolution_outcome: GameStatus::InProgress,
             resolution_reason: REASON_NONE,
             credit: U256::ZERO,
             pending: PendingWithdrawal {
@@ -149,15 +146,14 @@ impl ChallengerClient for MockClient {
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
-    async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError> {
-        let raw = self
+    async fn proposal_status(&self, game: Address) -> Result<ProposalStatus, ChallengerError> {
+        Ok(self
             .state
             .lock()
             .expect("not poisoned")
             .games
             .get(&game)
-            .map_or(0, |game| game.state);
-        RootState::try_from(raw).map_err(Into::into)
+            .map_or(ProposalStatus::Resolved, |game| game.proposal_status))
     }
 
     async fn challenge_deadline(&self, game: Address) -> Result<u64, ChallengerError> {
@@ -179,9 +175,9 @@ impl ChallengerClient for MockClient {
             .games
             .get_mut(&game)
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
-        record.state = STATE_CHALLENGED;
+        record.proposal_status = ProposalStatus::Challenged;
         record.challenger = CHALLENGER;
-        record.resolution_outcome = STATE_CHALLENGED;
+        record.resolution_outcome = GameStatus::InProgress;
         state.challenges.push(game);
         Ok(ChallengeSubmission {
             tx_hash: B256::with_last_byte(state.challenges.len() as u8),
@@ -203,7 +199,7 @@ impl ResolutionManagerClient for MockClient {
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
         Ok(ResolutionStatus {
             resolvable: record.resolvable,
-            root_state: RootState::try_from(record.resolution_outcome)?,
+            outcome: record.resolution_outcome,
             invalidation_reason: InvalidationReason::try_from(record.resolution_reason)?,
         })
     }
@@ -214,7 +210,7 @@ impl ResolutionManagerClient for MockClient {
             .games
             .get_mut(&game)
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
-        record.state = record.resolution_outcome;
+        record.proposal_status = ProposalStatus::Resolved;
         record.resolvable = false;
         state.resolutions.push(game);
         Ok(ResolveSubmission {
@@ -472,7 +468,7 @@ async fn tick_rechecks_lookback_without_reducing_forward_progress() {
         .games
         .get_mut(&GAME_2)
         .expect("game exists")
-        .state = STATE_PROPOSED;
+        .proposal_status = ProposalStatus::Unchallenged;
 
     challenger.tick_at(1).await.unwrap();
 
@@ -485,7 +481,7 @@ async fn tick_leaves_valid_and_non_proposed_games() {
     let canonical_root = B256::repeat_byte(0x20);
     let valid = MockGame::proposed(GAME_1, canonical_root, L2_BLOCK);
     let mut challenged = MockGame::proposed(GAME_2, B256::repeat_byte(0x10), L2_BLOCK);
-    challenged.state = STATE_CHALLENGED;
+    challenged.proposal_status = ProposalStatus::Challenged;
     let client = MockClient::new(vec![valid, challenged]);
     let (output_roots, _) =
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
@@ -520,9 +516,9 @@ async fn retry_game_is_challenged_after_l2_finalizes() {
 #[tokio::test]
 async fn resolution_manager_obeys_transaction_budget() {
     let mut first = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
-    first.state = STATE_CHALLENGED;
+    first.proposal_status = ProposalStatus::Challenged;
     first.resolvable = true;
-    first.resolution_outcome = STATE_INVALIDATED;
+    first.resolution_outcome = GameStatus::ChallengerWins;
     first.resolution_reason = REASON_PROOF_TIMEOUT;
     let mut second = first;
     second.metadata.address = GAME_2;
@@ -597,17 +593,17 @@ async fn bond_manager_scans_games_appended_after_recovery() {
 #[tokio::test]
 async fn bond_manager_completes_two_phase_claim_and_prunes_terminal_games() {
     let mut claimable = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
-    claimable.state = STATE_INVALIDATED;
-    claimable.resolution_outcome = STATE_INVALIDATED;
+    claimable.proposal_status = ProposalStatus::Resolved;
+    claimable.resolution_outcome = GameStatus::ChallengerWins;
     claimable.resolution_reason = REASON_PROOF_TIMEOUT;
     claimable.credit = U256::from(10);
     let mut zero_credit = MockGame::proposed(GAME_2, B256::ZERO, L2_BLOCK);
-    zero_credit.state = STATE_FINALIZED;
-    zero_credit.resolution_outcome = STATE_FINALIZED;
+    zero_credit.proposal_status = ProposalStatus::Resolved;
+    zero_credit.resolution_outcome = GameStatus::DefenderWins;
     // Resolved but still inside the registry's finality airgap: `closeGame` would revert.
     let mut awaiting_airgap = MockGame::proposed(GAME_3, B256::ZERO, L2_BLOCK);
-    awaiting_airgap.state = STATE_FINALIZED;
-    awaiting_airgap.resolution_outcome = STATE_FINALIZED;
+    awaiting_airgap.proposal_status = ProposalStatus::Resolved;
+    awaiting_airgap.resolution_outcome = GameStatus::DefenderWins;
     awaiting_airgap.credit = U256::from(5);
     awaiting_airgap.finalized = false;
     let client = MockClient::new(vec![claimable, zero_credit, awaiting_airgap]);
@@ -645,8 +641,8 @@ async fn bond_manager_completes_two_phase_claim_and_prunes_terminal_games() {
 #[tokio::test]
 async fn bond_manager_retries_failed_claim() {
     let mut game = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
-    game.state = STATE_INVALIDATED;
-    game.resolution_outcome = STATE_INVALIDATED;
+    game.proposal_status = ProposalStatus::Resolved;
+    game.resolution_outcome = GameStatus::ChallengerWins;
     game.resolution_reason = REASON_PROOF_TIMEOUT;
     game.credit = U256::from(10);
     let client = MockClient::new(vec![game]);
@@ -678,8 +674,8 @@ async fn bond_manager_retries_failed_claim() {
 #[tokio::test]
 async fn bond_manager_uses_l1_timestamp_for_delayed_withdrawal() {
     let mut game = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
-    game.state = STATE_FINALIZED;
-    game.resolution_outcome = STATE_FINALIZED;
+    game.proposal_status = ProposalStatus::Resolved;
+    game.resolution_outcome = GameStatus::DefenderWins;
     game.pending = PendingWithdrawal {
         amount: U256::from(10),
         unlock_at: 100,

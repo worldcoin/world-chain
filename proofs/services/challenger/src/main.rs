@@ -20,7 +20,7 @@ use world_chain_challenger::{
     DEFAULT_GAME_SCAN_LOOKBACK, DEFAULT_L1_TX_CONFIRMATIONS, OwnedGames, ResolutionManager,
     ResolutionManagerConfig, WorldChainChallenger,
 };
-use world_chain_proofs::{OptimismConsensusClient, VerifyingConsensusProvider};
+use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
 
 #[derive(Debug, Parser)]
 #[command(
