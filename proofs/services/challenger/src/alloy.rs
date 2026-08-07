@@ -175,6 +175,7 @@ where
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
+        world_chain_proof_metrics::record_bond_posted("challenger", challenger_bond);
         Ok(ChallengeSubmission {
             tx_hash,
             bond: challenger_bond,
@@ -281,6 +282,7 @@ where
         }
 
         Ok(if credit.is_zero() {
+            world_chain_proof_metrics::record_bond_withdrawn("challenger", pending.amount);
             ClaimSubmission {
                 tx_hash,
                 amount: pending.amount,
