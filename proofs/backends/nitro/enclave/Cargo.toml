@@ -16,21 +16,8 @@ path = "src/lib.rs"
 # the NSM device interface that is only available inside the enclave runtime.
 [[bin]]
 name = "world-chain-proof-nitro-enclave"
-path = "src/bin/enclave.rs"
+path = "src/main.rs"
 required-features = ["enclave"]
-
-[[bin]]
-name = "test-attestation"
-path = "src/bin/test_attestation.rs"
-required-features = ["enclave"]
-
-[[bin]]
-name = "p384-hints"
-path = "src/bin/p384_hints.rs"
-
-[[bin]]
-name = "gen-test-vector"
-path = "src/bin/gen_test_vector.rs"
 
 [features]
 default = []
@@ -58,7 +45,6 @@ alloy-sol-types.workspace = true
 anyhow.workspace = true
 base64 = { workspace = true }
 ciborium = "0.2"
-clap = { workspace = true }
 hex.workspace = true
 num-bigint = "0.4"
 num-traits = "0.2"
