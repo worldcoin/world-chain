@@ -17,9 +17,9 @@ workspace = true
 
 [dependencies]
 # workspace
-world-chain-proofs.workspace = true
+world-chain-proof-protocol.workspace = true
 world-chain-prover-service.workspace = true
-world-chain-proof-kona-host-utils.workspace = true
+world-chain-proof-kona-host.workspace = true
 
 # alloy
 alloy-primitives = { workspace = true, features = ["serde"] }

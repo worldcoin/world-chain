@@ -109,9 +109,9 @@ COPY --from=builder /app/target/${PROFILE}/${PROVER_BIN} /usr/local/bin/${PROVER
 RUN ln -s /usr/local/bin/${PROVER_BIN} /usr/local/bin/entrypoint
 
 # SP1 guest ELFs are compiled at `cargo build` time by
-# `proofs/succinct/utils/host/build.rs` (sp1_build::build_program_with_args)
+# `proofs/backends/sp1/elfs/build.rs` (sp1_build::build_program_with_args)
 # and embedded into the prover binary at compile time via
-# `sp1_sdk::include_elf!()` (see `proofs/succinct/utils/host/src/env_prover.rs`).
+# `sp1_sdk::include_elf!()` (see `proofs/backends/sp1/elfs/src/lib.rs`).
 # This image therefore needs no extra ELF files baked in — the bytes ship
 # inside the binary itself, matching the OP Succinct upstream pattern.
 

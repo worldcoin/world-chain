@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::{Address, Bytes};
 use async_trait::async_trait;
-use world_chain_proofs::{ClaimData, LineageProvider, ProofLane};
+use world_chain_proof_protocol::{ClaimData, LineageProvider, ProofLane};
 
 #[async_trait]
 pub trait DefenderClient: LineageProvider {

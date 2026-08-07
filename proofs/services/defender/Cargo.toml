@@ -16,7 +16,7 @@ workspace = true
 
 [dependencies]
 # workspace
-world-chain-proofs.workspace = true
+world-chain-proof-protocol.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-metrics.workspace = true
 world-chain-prover-service.workspace = true

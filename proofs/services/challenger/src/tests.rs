@@ -14,7 +14,7 @@ use std::{
     },
     time::Duration,
 };
-use world_chain_proofs::{
+use world_chain_proof_protocol::{
     ConsensusError, ConsensusProvider, GameStatus, InvalidationReason, ProposalStatus,
     ResolutionStatus,
 };

@@ -5,8 +5,8 @@ use alloy_primitives::B256;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
-use world_chain_proof_succinct_host_utils::Sp1ProverKind;
-use world_chain_proof_succinct_utils::RangeProofRequest;
+use world_chain_proof_sp1_host::Sp1ProverKind;
+use world_chain_proof_sp1_types::RangeProofRequest;
 use world_chain_prover::{
     HashRollupConfigArgs, RpcArgs, WitnessArgs, build_range_input_from_args, ensure_parent_dir,
     online_host_config, print_rollup_config_hash, write_json, write_witness,
@@ -121,7 +121,7 @@ async fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
 
     let client = ProverClient::builder().cpu().build().await;
     let (public_values, report) = client
-        .execute(world_chain_proof_succinct_elfs::range_elf(), stdin)
+        .execute(world_chain_proof_sp1_elfs::range_elf(), stdin)
         .calculate_gas(true)
         .await
         .context("SP1 execution failed")?;
@@ -147,7 +147,7 @@ async fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
 
 async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use sp1_sdk::SP1ProofMode;
-    use world_chain_proof_succinct_host_utils::{
+    use world_chain_proof_sp1_host::{
         cpu_prover::CpuSuccinctProver,
         mock_prover::MockSuccinctProver,
         network_prover::NetworkSuccinctProver,
@@ -221,8 +221,8 @@ async fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
     use anyhow::anyhow;
     use sp1_sdk::{CpuProver, HashableKey, Prover, ProvingKey, env::EnvProver};
     use world_chain_proof_core::types::u32_to_u8;
-    let range_elf_bytes = world_chain_proof_succinct_elfs::range_elf();
-    let agg_elf_bytes = world_chain_proof_succinct_elfs::aggregation_elf();
+    let range_elf_bytes = world_chain_proof_sp1_elfs::range_elf();
+    let agg_elf_bytes = world_chain_proof_sp1_elfs::aggregation_elf();
 
     let range_elf_sha256 = hex::encode(Sha256::digest(&*range_elf_bytes));
     let agg_elf_sha256 = hex::encode(Sha256::digest(&*agg_elf_bytes));

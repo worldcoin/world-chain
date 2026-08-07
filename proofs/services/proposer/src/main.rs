@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::info;
 use url::Url;
-use world_chain_proofs::{OptimismConsensusClient, VerifyingConsensusProvider};
+use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
 use world_chain_proposer::{
     AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
 };

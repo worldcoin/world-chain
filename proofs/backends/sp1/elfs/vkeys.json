@@ -1,0 +1,12 @@
+{
+  "aggregation_vkey": "0x006eb98673ac0b3d82ade4b9f91285da3724fcd300eb27951513de3dda4457ef",
+  "elfs": {
+    "world-chain-aggregation": {
+      "sha256": "07d6e5c49c7d63a678ec7a55ecc9cf6125aff57ca4842557991f02624da26c39"
+    },
+    "world-chain-range-ethereum": {
+      "sha256": "732a4c5dcb24170fc426a39452b0ddeaac22d261b8fa984582e60d5c5fd51556"
+    }
+  },
+  "range_vkey_commitment": "0x42466f201e8c5ef77b708584142123526fbf62465ee74d453d390f501deadfe3"
+}

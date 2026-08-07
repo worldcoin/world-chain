@@ -18,7 +18,7 @@ use url::Url;
 use world_chain_defender::{
     AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig, WorldChainDefender,
 };
-use world_chain_proofs::{OptimismConsensusClient, VerifyingConsensusProvider};
+use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
 use world_chain_prover_service::RpcProverServiceClient;
 
 #[derive(Debug, Parser)]

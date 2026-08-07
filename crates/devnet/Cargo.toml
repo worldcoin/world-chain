@@ -15,11 +15,11 @@ world-chain-chainspec.workspace = true
 world-chain-challenger.workspace = true
 world-chain-node.workspace = true
 world-chain-primitives.workspace = true
-world-chain-proofs.workspace = true
+world-chain-proof-protocol.workspace = true
 world-chain-proof-core.workspace = true
-world-chain-proof-kona-host-utils.workspace = true
+world-chain-proof-kona-host.workspace = true
 world-chain-proof-sp1-worker = { workspace = true, default-features = false }
-world-chain-proof-succinct-host-utils = { workspace = true, features = ["sp1"] }
+world-chain-proof-sp1-host = { workspace = true, features = ["sp1"] }
 world-chain-proof-worker.workspace = true
 world-chain-proposer.workspace = true
 world-chain-prover-service.workspace = true

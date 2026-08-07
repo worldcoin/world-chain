@@ -9,7 +9,7 @@ use std::{
 
 use alloy_primitives::{Address, B256, BlockNumber, U256, address, b256};
 use async_trait::async_trait;
-use world_chain_proofs::{
+use world_chain_proof_protocol::{
     ConsensusError, ConsensusProvider, GameStatus, InvalidationReason, LineageAnchor, LineageError,
     LineageGame, LineageProvider, LineageTransition, ProposalCommitment, ResolutionStatus,
     SelectedLineageGame,

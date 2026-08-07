@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Build the world-chain-proof-nitro-enclave EIF and emit its PCR measurements.
 #
-# Builds the enclave container image from proofs/nitro/Dockerfile, then converts
+# Builds the enclave container image from proofs/backends/nitro/enclave/Dockerfile, then converts
 # it to an EIF with nitro-cli (built from source at a pinned tag so the EIF
 # assembly itself is pinned). Runs on any Linux x86_64 host with Docker — Nitro
 # hardware is only needed to *run* the enclave, not to build it.
@@ -34,7 +34,7 @@ mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd)"
 
 echo "[1/3] Building enclave container image ($ENCLAVE_IMAGE_TAG)..."
-docker build -t "$ENCLAVE_IMAGE_TAG" -f proofs/nitro/enclave/Dockerfile .
+docker build -t "$ENCLAVE_IMAGE_TAG" -f proofs/backends/nitro/enclave/Dockerfile .
 
 echo "[2/3] Building nitro-cli $NITRO_CLI_VERSION..."
 nitro_cli_dir="$out_dir/aws-nitro-enclaves-cli-$NITRO_CLI_VERSION"

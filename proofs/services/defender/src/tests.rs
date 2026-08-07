@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 use world_chain_proof_core::boot::TransitionPublicValues;
-use world_chain_proofs::{
+use world_chain_proof_protocol::{
     ClaimData, ConsensusError, ConsensusProvider, GameStatus, InvalidationReason, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, MAX_ATTEMPT_SCAN,
     PROOF_THRESHOLD, ProofLane, ProposalCommitment, ProposalStatus, ResolutionStatus, proof_count,

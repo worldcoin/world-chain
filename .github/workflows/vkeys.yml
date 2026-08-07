@@ -1,12 +1,12 @@
 # Staged CI workflow — copy to .github/workflows/vkeys.yml to activate.
 #
-# Verifies that proofs/succinct/elf/vkeys.json matches the vkeys derived from
+# Verifies that proofs/backends/sp1/elfs/vkeys.json matches the vkeys derived from
 # the current SP1 guest programs. Runs on PRs that touch proof program sources
 # or the committed vkeys.json itself.
 #
 # Prerequisites in the repo:
 #   - `just verify-proof-vkeys` recipe in Justfile (already added)
-#   - proofs/succinct/elf/vkeys.json committed (already added)
+#   - proofs/backends/sp1/elfs/vkeys.json committed (already added)
 #
 # Uses the `world-chain-prover-sp1` package for the `vkeys` subcommand.
 name: verify-vkeys
@@ -14,12 +14,12 @@ name: verify-vkeys
 on:
   pull_request:
     paths:
-      - 'proofs/succinct/programs/**'
-      - 'proofs/succinct/elfs/**'
-      - 'proofs/succinct/elf/vkeys.json'
+      - 'proofs/backends/sp1/programs/**'
+      - 'proofs/backends/sp1/elfs/**'
+      - 'proofs/backends/sp1/elfs/vkeys.json'
       - 'proofs/core/**'
-      - 'proofs/utils/kona-client/**'
-      - 'proofs/primitives/**'
+      - 'proofs/kona/client/**'
+      - 'proofs/protocol/**'
       - 'Cargo.lock'
       - 'Justfile'
       - '.github/workflows/vkeys.yml'

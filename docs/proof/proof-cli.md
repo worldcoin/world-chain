@@ -305,12 +305,12 @@ the same instance; vsock (AF_VSOCK) is Linux-only and does not cross machine bou
 
 ### 1. Build the Docker image
 
-Run from the repo root. The Dockerfile at `proofs/nitro/Dockerfile` compiles the enclave
+Run from the repo root. The Dockerfile at `proofs/backends/nitro/Dockerfile` compiles the enclave
 binary inside the container.
 
 ```bash
 docker build -t world-chain-proof-nitro-enclave \
-  -f proofs/nitro/Dockerfile .
+  -f proofs/backends/nitro/Dockerfile .
 ```
 
 ### 2. Package as an EIF

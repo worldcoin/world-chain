@@ -7,7 +7,7 @@ use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_sol_types::SolInterface;
 use async_trait::async_trait;
-use world_chain_proofs::{
+use world_chain_proof_protocol::{
     ClaimData, IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, PROOF_LANE_COUNT, ProofLane,
     RegisteredLineageConfig, ResolutionStatus, encode_compact_proof, read_game_for_transition,

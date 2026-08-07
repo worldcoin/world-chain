@@ -34,8 +34,8 @@ use alloy_primitives::{Address, B256};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use tracing::{info, warn};
-use world_chain_proof_kona_host_utils::online::resolve_l1_head;
-use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
+use world_chain_proof_kona_host::online::resolve_l1_head;
+use world_chain_proof_protocol::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
     ProofBackend, ProofRequest, ProofRequester, ProofResponse, ProofStatus, RpcProverServiceClient,
 };

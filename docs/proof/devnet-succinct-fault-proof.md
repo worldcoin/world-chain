@@ -81,7 +81,7 @@ Use separate apps instead of replacing the existing Cannon challenger first:
 Copy OP Succinct's fault-proof proposer implementation rather than writing a new lifecycle from
 scratch. Keep the patch narrow:
 
-- Replace embedded ELF imports with `world-chain-proof-succinct-elfs`.
+- Replace embedded ELF imports with `world-chain-proof-sp1-elfs`.
 - Replace upstream `hash_rollup_config(fetcher.rollup_config)` with the World hash helper that
   includes `tropo_time` and `strato_time`.
 - Replace upstream ETH witness generation with the World ETH witness data that carries the schedule.
