@@ -115,15 +115,43 @@ pub struct ExposureChange {
     pub asset: AssetInfo,
 }
 
-/// A call made during execution, forming a full stack trace.
+/// Kind of EVM frame represented by a trace entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TraceKind {
+    Call,
+    CallCode,
+    DelegateCall,
+    StaticCall,
+    Create,
+    Create2,
+}
+
+/// Outcome of a completed EVM trace frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TraceOutcome {
+    Success,
+    Revert,
+    Halt,
+}
+
+/// A call or contract creation made during execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceEntry {
+    pub kind: TraceKind,
     pub from: Address,
-    pub to: Address,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<Address>,
     pub method: Option<String>,
-    pub selector: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
     pub value: String,
+    pub depth: usize,
+    pub outcome: TraceOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revert_reason: Option<String>,
 }
 
 /// Type of contract-management state change detected during simulation.
@@ -195,10 +223,17 @@ pub struct SimulateUnsignedUserOpResult {
 
 #[derive(Debug)]
 struct RawTrace {
+    kind: TraceKind,
     from: Address,
-    to: Address,
-    selector: [u8; 4],
+    to: Option<Address>,
+    selector: Option<[u8; 4]>,
     value: U256,
+    depth: usize,
+    /// Populated by the matching `call_end` or `create_end` hook.
+    outcome: Option<TraceOutcome>,
+    /// Populated by the matching end hook for an explicit REVERT with a
+    /// non-empty payload.
+    revert_reason: Option<String>,
 }
 
 #[derive(Debug)]
@@ -216,13 +251,26 @@ type ContractCreation = (Address, Address);
 /// committed to the inspector's final lists if outermost). On revert/halt
 /// it's dropped — exactly mirroring the EVM's own state-revert semantics
 /// so we never report effects that didn't actually land.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct PendingFrame {
     native_transfers: Vec<NativeTransfer>,
     /// CREATE/CREATE2 deployments inside this frame.
     contract_creations: Vec<ContractCreation>,
     /// Addresses that executed SELFDESTRUCT inside this frame.
     self_destructs: Vec<Address>,
+    /// Index of this frame's entry in [`SimulationInspector::traces`].
+    trace_index: usize,
+}
+
+impl PendingFrame {
+    fn new(trace_index: usize) -> Self {
+        Self {
+            native_transfers: Vec::new(),
+            contract_creations: Vec::new(),
+            self_destructs: Vec::new(),
+            trace_index,
+        }
+    }
 }
 
 /// Captures the call stack and native ETH transfers of a single simulation.
@@ -232,8 +280,9 @@ struct PendingFrame {
 /// returns. No interior mutability needed.
 #[derive(Debug, Default)]
 pub struct SimulationInspector {
-    /// Full call stack trace — every CALL/STATICCALL/DELEGATECALL at every depth.
-    /// Includes reverted calls so debug consumers can see what was attempted.
+    /// Full frame trace — every CALL-family and CREATE-family operation at
+    /// every depth. Includes reverted frames so debug consumers can see what
+    /// was attempted.
     traces: Vec<RawTrace>,
     /// Native ETH transfers committed by successful frames.
     native_transfers: Vec<NativeTransfer>,
@@ -251,18 +300,36 @@ pub struct SimulationInspector {
     /// re-revert up the stack. Halt frames (OOG, invalid opcode, etc.) are
     /// skipped: they have no payload to decode.
     deepest_revert_payload: Option<Bytes>,
+    /// Internal frame-bookkeeping failure. Inspector hooks cannot return an
+    /// error to revm, so defer it until the caller collects the trace.
+    trace_error: Option<&'static str>,
 }
 
 impl SimulationInspector {
-    pub fn take_trace_entries(&mut self) -> Vec<TraceEntry> {
+    pub fn take_trace_entries(&mut self) -> Result<Vec<TraceEntry>, &'static str> {
+        if let Some(error) = self.trace_error.take() {
+            return Err(error);
+        }
+
         std::mem::take(&mut self.traces)
             .into_iter()
-            .map(|t| TraceEntry {
-                from: t.from,
-                to: t.to,
-                method: selector_to_name(t.selector).map(str::to_string),
-                selector: format!("0x{}", hex::encode(t.selector)),
-                value: format!("{:#x}", t.value),
+            .map(|t| {
+                let outcome = t
+                    .outcome
+                    .ok_or("simulation inspector trace frame did not complete")?;
+                Ok(TraceEntry {
+                    kind: t.kind,
+                    from: t.from,
+                    to: t.to,
+                    method: t.selector.and_then(selector_to_name).map(str::to_string),
+                    selector: t
+                        .selector
+                        .map(|selector| format!("0x{}", hex::encode(selector))),
+                    value: format!("{:#x}", t.value),
+                    depth: t.depth,
+                    outcome,
+                    revert_reason: t.revert_reason,
+                })
             })
             .collect()
     }
@@ -321,6 +388,33 @@ impl SimulationInspector {
             self.self_destructs.extend(frame.self_destructs);
         }
     }
+
+    /// Record the outcome of an exiting frame on its trace entry.
+    fn record_trace_outcome(
+        &mut self,
+        trace_index: usize,
+        result: &InstructionResult,
+        output: &Bytes,
+    ) -> Option<&mut RawTrace> {
+        let Some(trace) = self.traces.get_mut(trace_index) else {
+            self.trace_error
+                .get_or_insert("simulation inspector frame referenced a missing trace entry");
+            return None;
+        };
+
+        trace.outcome = Some(if result.is_ok() {
+            TraceOutcome::Success
+        } else if matches!(result, InstructionResult::Revert) {
+            TraceOutcome::Revert
+        } else {
+            TraceOutcome::Halt
+        });
+        if matches!(result, InstructionResult::Revert) && !output.is_empty() {
+            trace.revert_reason = Some(decode_revert_reason(output));
+        }
+
+        Some(trace)
+    }
 }
 
 impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspector {
@@ -350,18 +444,29 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
             }
             _ => [0u8; 4],
         };
+        let trace_index = self.traces.len();
+        let depth = self.pending_frames.len();
         let value = inputs.value.transfer().unwrap_or(U256::ZERO);
         self.traces.push(RawTrace {
+            kind: match inputs.scheme {
+                revm::interpreter::CallScheme::Call => TraceKind::Call,
+                revm::interpreter::CallScheme::CallCode => TraceKind::CallCode,
+                revm::interpreter::CallScheme::DelegateCall => TraceKind::DelegateCall,
+                revm::interpreter::CallScheme::StaticCall => TraceKind::StaticCall,
+            },
             from: inputs.caller,
-            to: inputs.target_address,
-            selector,
+            to: Some(inputs.target_address),
+            selector: Some(selector),
             value,
+            depth,
+            outcome: None,
+            revert_reason: None,
         });
 
         // Open a new frame. If this call reverts, `call_end` will drop the
         // frame and all its tentative effects (native transfers, creates,
         // selfdestructs). Only successful frames commit.
-        let mut frame = PendingFrame::default();
+        let mut frame = PendingFrame::new(trace_index);
         if let Some(value) = inputs.value.transfer()
             && value > U256::ZERO
         {
@@ -378,9 +483,12 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
 
     fn call_end(&mut self, _context: &mut CTX, _inputs: &CallInputs, outcome: &mut CallOutcome) {
         let Some(frame) = self.pending_frames.pop() else {
+            self.trace_error
+                .get_or_insert("simulation inspector CALL ended without a pending frame");
             return;
         };
         let result = outcome.instruction_result();
+        self.record_trace_outcome(frame.trace_index, result, outcome.output());
         if !result.is_ok() {
             // Frame reverted or halted — drop everything tentative inside it.
             // For explicit REVERTs, capture the deepest payload (the first
@@ -400,12 +508,27 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
     fn create(
         &mut self,
         _context: &mut CTX,
-        _inputs: &mut revm::interpreter::CreateInputs,
+        inputs: &mut revm::interpreter::CreateInputs,
     ) -> Option<revm::interpreter::CreateOutcome> {
-        // Mirror `call`: each CREATE/CREATE2 gets its own frame so a parent
-        // revert rolls the deployment back atomically with everything else
-        // that ran inside its constructor.
-        self.pending_frames.push(PendingFrame::default());
+        // Mirror `call`: every CREATE/CREATE2 gets a trace entry and its own
+        // frame so a parent revert rolls the deployment back atomically with
+        // everything else that ran inside its constructor.
+        let trace_index = self.traces.len();
+        self.traces.push(RawTrace {
+            kind: match inputs.scheme() {
+                revm::context_interface::CreateScheme::Create
+                | revm::context_interface::CreateScheme::Custom { .. } => TraceKind::Create,
+                revm::context_interface::CreateScheme::Create2 { .. } => TraceKind::Create2,
+            },
+            from: inputs.caller(),
+            to: None,
+            selector: None,
+            value: inputs.value(),
+            depth: self.pending_frames.len(),
+            outcome: None,
+            revert_reason: None,
+        });
+        self.pending_frames.push(PendingFrame::new(trace_index));
         None
     }
 
@@ -416,9 +539,16 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
         outcome: &mut revm::interpreter::CreateOutcome,
     ) {
         let Some(mut frame) = self.pending_frames.pop() else {
+            self.trace_error
+                .get_or_insert("simulation inspector CREATE ended without a pending frame");
             return;
         };
         let result = outcome.instruction_result();
+        if let Some(trace) = self.record_trace_outcome(frame.trace_index, result, outcome.output())
+            && result.is_ok()
+        {
+            trace.to = outcome.address;
+        }
         if !result.is_ok() {
             // CREATE itself failed — drop the frame. Capture an explicit
             // constructor REVERT before an outer call can replace its useful
@@ -769,7 +899,9 @@ where
         //     side-effects from the inspector. The EVM owns it; recover a
         //     `&mut` via `components_mut()` and drain.
         let (_, inspector, _) = evm.components_mut();
-        let trace = inspector.take_trace_entries();
+        let trace = inspector
+            .take_trace_entries()
+            .map_err(|error| internal_err(format!("simulation inspector failed: {error}")))?;
         asset_changes.extend(inspector.take_native_asset_changes());
         let inspector_creations = inspector.take_contract_creations();
         let force_metadata_refresh: HashSet<Address> = inspector_creations
@@ -1590,6 +1722,41 @@ fn internal_err(msg: impl std::fmt::Display) -> jsonrpsee::types::ErrorObjectOwn
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn missing_trace_entry_is_reported_without_panicking() {
+        let mut inspector = SimulationInspector::default();
+
+        assert!(
+            inspector
+                .record_trace_outcome(0, &InstructionResult::Revert, &Bytes::new())
+                .is_none()
+        );
+        assert!(matches!(
+            inspector.take_trace_entries(),
+            Err("simulation inspector frame referenced a missing trace entry")
+        ));
+    }
+
+    #[test]
+    fn incomplete_trace_is_reported_without_panicking() {
+        let mut inspector = SimulationInspector::default();
+        inspector.traces.push(RawTrace {
+            kind: TraceKind::Call,
+            from: Address::ZERO,
+            to: Some(Address::ZERO),
+            selector: Some([0; 4]),
+            value: U256::ZERO,
+            depth: 0,
+            outcome: None,
+            revert_reason: None,
+        });
+
+        assert!(matches!(
+            inspector.take_trace_entries(),
+            Err("simulation inspector trace frame did not complete")
+        ));
+    }
 
     /// Stand-in "malicious payload": anything that pegs a worker for longer
     /// than `SIMULATION_TIMEOUT`. Crafting bytecode that reliably blows

@@ -154,6 +154,21 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(previousAnchorChild.startingBlockNumber(), parent.l2SequenceNumber());
     }
 
+    function test_Create_RejectsAnchorSentinelAfterAnchorAdvances() public {
+        MultiProofGame parent = _proposeAtAnchor();
+        _resolveUnchallenged(parent);
+        _passAirgap(parent);
+        parent.closeGame();
+        assertEq(address(asr.anchorGame()), address(parent));
+
+        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        vm.prank(proposer);
+        vm.expectRevert(InvalidParentGame.selector);
+        dgf.create{value: PROPOSER_BOND}(
+            WC_GAME_TYPE, Claim.wrap(keccak256("late-bootstrap-root")), _extraData(target, type(uint256).max, 0)
+        );
+    }
+
     function test_Constructor_RejectsInvalidConfiguration() public {
         IMultiProofGame.GameConfig memory config = _gameConfig();
         config.blockInterval = 0;
