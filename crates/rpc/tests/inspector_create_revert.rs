@@ -4,7 +4,7 @@
 
 use alloy_op_evm::{OpEvmFactory, OpTx};
 use alloy_primitives::{Address, Bytes, U256, address};
-use op_revm::{OpSpecId, OpTransaction};
+use op_revm::{OpHaltReason, OpSpecId, OpTransaction};
 use reth_evm::{Evm as RethEvm, EvmFactory};
 use revm::{
     bytecode::Bytecode,
@@ -14,9 +14,13 @@ use revm::{
 use revm_database::{CacheDB, EmptyDB};
 use revm_primitives::TxKind;
 
-use world_chain_rpc::simulate::{SimulationInspector, relax_cfg_for_simulation};
+use world_chain_rpc::simulate::{
+    SimulationInspector, TraceKind, TraceOutcome, relax_cfg_for_simulation,
+};
 
 const CHAIN_ID: u64 = 480;
+const CALLER: Address = address!("00000000000000000000000000000000DeaDBeef");
+const TRAMPOLINE: Address = address!("000000000000000000000000000000000000c0de");
 
 /// Runtime code that executes CREATE with a 12-byte constructor, then hides
 /// the constructor's revert data by reverting the outer frame with no output.
@@ -39,6 +43,30 @@ const CREATE_REVERT_TRAMPOLINE: &[u8] = &[
     0x5f, 0x5f, 0xfd, // REVERT(0, 0)
 ];
 
+/// Same constructor, but the outer frame catches CREATE's failure and STOPs.
+/// This distinguishes the parent and child outcomes and guards trace-index
+/// association across nested frames.
+const CAUGHT_CREATE_REVERT_TRAMPOLINE: &[u8] = &[
+    0x6b, // PUSH12 constructor
+    0x63, 0xde, 0xad, 0xbe, 0xef, // PUSH4 0xdeadbeef
+    0x5f, 0x52, // PUSH0; MSTORE
+    0x60, 0x04, // PUSH1 4 (revert-data length)
+    0x60, 0x1c, // PUSH1 28 (revert-data offset)
+    0xfd, // REVERT
+    0x5f, 0x52, // PUSH0; MSTORE constructor at memory[20..32]
+    0x60, 0x0c, // PUSH1 12 (init-code length)
+    0x60, 0x14, // PUSH1 20 (init-code offset)
+    0x5f, 0xf0, // PUSH0 value; CREATE
+    0x50, 0x00, // POP failed CREATE's zero address; STOP
+];
+
+/// Executes CREATE with empty init code and then stops. Empty init code
+/// successfully deploys an empty contract.
+const SUCCESSFUL_CREATE_TRAMPOLINE: &[u8] = &[
+    0x5f, 0x5f, 0x5f, 0xf0, // CREATE(value=0, offset=0, size=0)
+    0x50, 0x00, // POP deployed address; STOP
+];
+
 fn evm_env() -> reth_evm::EvmEnv<OpSpecId> {
     let mut cfg = CfgEnv::new_with_spec(OpSpecId::ISTHMUS);
     cfg.chain_id = CHAIN_ID;
@@ -59,19 +87,16 @@ fn install_runtime_code(db: &mut CacheDB<EmptyDB>, address: Address, code: Vec<u
     );
 }
 
-#[test]
-fn inspector_captures_constructor_revert_reason() {
-    let caller = address!("00000000000000000000000000000000DeaDBeef");
-    let trampoline = address!("000000000000000000000000000000000000c0de");
+fn run_trampoline(code: &[u8]) -> (ExecutionResult<OpHaltReason>, SimulationInspector) {
     let mut db = CacheDB::<EmptyDB>::default();
     db.insert_account_info(
-        caller,
+        CALLER,
         AccountInfo {
             balance: U256::from(10_u128.pow(21)),
             ..Default::default()
         },
     );
-    install_runtime_code(&mut db, trampoline, CREATE_REVERT_TRAMPOLINE.to_vec());
+    install_runtime_code(&mut db, TRAMPOLINE, code.to_vec());
 
     let mut evm = OpEvmFactory::default().create_evm_with_inspector(
         &mut db,
@@ -82,8 +107,8 @@ fn inspector_captures_constructor_revert_reason() {
         &mut evm,
         OpTx(OpTransaction {
             base: TxEnv {
-                caller,
-                kind: TxKind::Call(trampoline),
+                caller: CALLER,
+                kind: TxKind::Call(TRAMPOLINE),
                 gas_limit: 1_000_000,
                 gas_price: 0,
                 chain_id: Some(CHAIN_ID),
@@ -92,14 +117,94 @@ fn inspector_captures_constructor_revert_reason() {
             ..Default::default()
         }),
     )
-    .expect("EVM transaction should execute");
-
-    assert!(matches!(result.result, ExecutionResult::Revert { .. }));
+    .expect("EVM transaction should execute")
+    .result;
 
     let (_, inspector, _) = evm.components_mut();
+    (result, std::mem::take(inspector))
+}
+
+#[test]
+fn inspector_captures_constructor_revert_reason() {
+    let (result, mut inspector) = run_trampoline(CREATE_REVERT_TRAMPOLINE);
+
+    assert!(matches!(result, ExecutionResult::Revert { .. }));
     assert_eq!(
         inspector.take_deepest_revert_reason().as_deref(),
         Some("0xdeadbeef")
     );
     assert!(inspector.take_contract_creations().is_empty());
+
+    let trace = inspector
+        .take_trace_entries()
+        .expect("completed simulation should produce a complete trace");
+    let [parent, create] = trace.as_slice() else {
+        panic!("expected parent CALL and child CREATE, got {trace:?}");
+    };
+
+    assert_eq!(parent.kind, TraceKind::Call);
+    assert_eq!(parent.depth, 0);
+    assert_eq!(parent.outcome, TraceOutcome::Revert);
+    assert_eq!(parent.revert_reason, None);
+
+    assert_eq!(create.kind, TraceKind::Create);
+    assert_eq!(create.depth, 1);
+    assert_eq!(create.outcome, TraceOutcome::Revert);
+    assert_eq!(create.revert_reason.as_deref(), Some("0xdeadbeef"));
+    assert_eq!(create.to, None);
+    assert_eq!(create.selector, None);
+
+    let create_json = serde_json::to_value(create).expect("serialize CREATE trace entry");
+    assert_eq!(create_json["kind"], "create");
+    assert_eq!(create_json["outcome"], "revert");
+    assert_eq!(create_json["depth"], 1);
+    assert_eq!(create_json["revertReason"], "0xdeadbeef");
+    assert!(create_json.get("to").is_none());
+    assert!(create_json.get("selector").is_none());
+}
+
+#[test]
+fn nested_create_revert_does_not_overwrite_successful_parent_outcome() {
+    let (result, mut inspector) = run_trampoline(CAUGHT_CREATE_REVERT_TRAMPOLINE);
+
+    assert!(matches!(result, ExecutionResult::Success { .. }));
+    let trace = inspector
+        .take_trace_entries()
+        .expect("completed simulation should produce a complete trace");
+    let [parent, create] = trace.as_slice() else {
+        panic!("expected parent CALL and child CREATE, got {trace:?}");
+    };
+    assert_eq!(parent.kind, TraceKind::Call);
+    assert_eq!(parent.outcome, TraceOutcome::Success);
+    assert_eq!(create.kind, TraceKind::Create);
+    assert_eq!(create.outcome, TraceOutcome::Revert);
+    assert_eq!(create.revert_reason.as_deref(), Some("0xdeadbeef"));
+}
+
+#[test]
+fn inspector_traces_successful_create_with_deployed_address() {
+    let (result, mut inspector) = run_trampoline(SUCCESSFUL_CREATE_TRAMPOLINE);
+
+    assert!(matches!(result, ExecutionResult::Success { .. }));
+    let creations = inspector.take_contract_creations();
+    assert_eq!(creations.len(), 1);
+    let (deployer, deployed) = creations[0];
+    assert_eq!(deployer, TRAMPOLINE);
+    assert_ne!(deployed, Address::ZERO);
+
+    let trace = inspector
+        .take_trace_entries()
+        .expect("completed simulation should produce a complete trace");
+    let [parent, create] = trace.as_slice() else {
+        panic!("expected parent CALL and child CREATE, got {trace:?}");
+    };
+    assert_eq!(parent.kind, TraceKind::Call);
+    assert_eq!(parent.depth, 0);
+    assert_eq!(parent.outcome, TraceOutcome::Success);
+    assert_eq!(create.kind, TraceKind::Create);
+    assert_eq!(create.depth, 1);
+    assert_eq!(create.outcome, TraceOutcome::Success);
+    assert_eq!(create.to, Some(deployed));
+    assert_eq!(create.selector, None);
+    assert_eq!(create.revert_reason, None);
 }
