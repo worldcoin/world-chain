@@ -180,6 +180,7 @@ where
         }
 
         Ok(if credit.is_zero() {
+            world_chain_proof_metrics::record_bond_withdrawn("proposer", pending.amount);
             ClaimSubmission {
                 tx_hash,
                 amount: pending.amount,
@@ -339,6 +340,7 @@ where
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
         }
+        world_chain_proof_metrics::record_bond_posted("proposer", init_bond);
 
         let game_address = receipt
             .logs()
