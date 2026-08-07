@@ -338,10 +338,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         Claim rootClaim_ = rootClaim();
         uint256 attempt_ = attempt();
 
-        // INVARIANT: The parent must be a registered, respected, live game of this type.
-        if (parentRef_ != address(anchorStateRegistry) && !_isValidGame(IDisputeGame(parentRef_))) {
-            revert InvalidParentGame();
-        }
+        // INVARIANT: The registry sentinel is only valid while bootstrapping from the starting
+        // anchor. Once an anchor game exists, the parent must be an eligible game.
+        if (!_isValidParent(parentRef_)) revert InvalidParentGame();
 
         // INVARIANT: Each proposal must advance its parent by the configured cadence.
         (, uint256 startingBlockNumber_) = startingProposal();
@@ -394,10 +393,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // Set the game as initialized.
         initialized = true;
 
-        // Deposit the bond into DelayedWETH and track refund credit.
-        refundModeCredit[gameCreator()] += msg.value;
-        totalBonds += msg.value;
-        weth.deposit{value: msg.value}();
+        _depositBond(gameCreator());
 
         // Set the game's starting timestamp.
         createdAt = Timestamp.wrap(uint64(block.timestamp));
@@ -407,11 +403,25 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             anchorStateRegistry.respectedGameType().raw() == GameTypes.MULTI_PROOF_GAME_TYPE.raw();
     }
 
-    /// @notice Checks if the game is registered, respected, not blacklisted, not retired, and not challenged.
+    /// @notice Checks if the game is factory-registered, was respected when created, and has not
+    ///         been invalidated by blacklisting, retirement, or a challenger win.
     function _isValidGame(IDisputeGame game) internal view returns (bool) {
         return anchorStateRegistry.isGameRegistered(game) && anchorStateRegistry.isGameRespected(game)
             && !anchorStateRegistry.isGameBlacklisted(game) && !anchorStateRegistry.isGameRetired(game)
             && (game.status() != GameStatus.CHALLENGER_WINS);
+    }
+
+    function _isValidParent(address parentRef_) internal view returns (bool) {
+        if (parentRef_ == address(anchorStateRegistry)) {
+            return address(anchorStateRegistry.anchorGame()) == address(0);
+        }
+        return _isValidGame(IDisputeGame(parentRef_));
+    }
+
+    function _depositBond(address refundRecipient) internal {
+        refundModeCredit[refundRecipient] += msg.value;
+        totalBonds += msg.value;
+        weth.deposit{value: msg.value}();
     }
 
     ////////////////////////////////////////////////////////////////
@@ -442,10 +452,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // at the challenge, so late challenges cannot extend the game.
         claimData.deadline = proofDeadline();
 
-        // Deposit the bond into DelayedWETH and track refund credit.
-        refundModeCredit[msg.sender] += msg.value;
-        totalBonds += msg.value;
-        weth.deposit{value: msg.value}();
+        _depositBond(msg.sender);
 
         emit Challenged(msg.sender, claimData.deadline.raw());
 
@@ -632,6 +639,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // claim, return instead of reverting so the close is not rolled back.
         bool gameWasOpen = bondDistributionMode == BondDistributionMode.UNDECIDED;
 
+        // Close lazily so claiming does not depend on a separate keeper transaction. This is a
+        // no-op once the distribution mode has been fixed.
         closeGame();
 
         uint256 recipientCredit;
