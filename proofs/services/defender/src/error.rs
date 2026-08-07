@@ -24,9 +24,6 @@ pub enum DefenderError {
     /// An Alloy JSON-RPC request failed.
     #[error(transparent)]
     AlloyJsonRpc(#[from] RpcError<TransportErrorKind>),
-    /// Prover response could not be encoded for its on-chain verifier.
-    #[error("invalid proof payload: {0}")]
-    ProofEncoding(String),
     #[error(transparent)]
     Lineage(#[from] LineageError),
     #[error(transparent)]
