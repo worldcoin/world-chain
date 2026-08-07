@@ -1,7 +1,7 @@
 use std::{env, error::Error};
 
-use vergen::{BuildBuilder, CargoBuilder, Emitter};
-use vergen_git2::Git2Builder;
+use vergen::{Build, Cargo, Emitter};
+use vergen_git2::Git2;
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=VERGEN_GIT_SHA");
@@ -11,20 +11,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         .filter(|sha| !sha.trim().is_empty());
     let mut emitter = Emitter::default();
 
-    emitter.add_instructions(&BuildBuilder::default().build_timestamp(true).build()?)?;
-    emitter.add_instructions(
-        &CargoBuilder::default()
-            .features(true)
-            .target_triple(true)
-            .build()?,
-    )?;
+    emitter.add_instructions(&Build::builder().build_timestamp(true).build())?;
+    emitter.add_instructions(&Cargo::builder().features(true).target_triple(true).build())?;
     if supplied_sha.is_none() {
         emitter.add_instructions(
-            &Git2Builder::default()
+            &Git2::builder()
                 .describe(false, true, None)
                 .dirty(true)
-                .sha(true)
-                .build()?,
+                .sha(false)
+                .build(),
         )?;
     }
 

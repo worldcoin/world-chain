@@ -293,7 +293,7 @@ where
             flashblocks_state: self.flashblocks_state.clone(),
             block_index: index,
             execution_cache: input.cache,
-            trie_handle: input.trie_handle,
+            state_root_handle: input.state_root_handle,
         };
 
         // start the first job right away

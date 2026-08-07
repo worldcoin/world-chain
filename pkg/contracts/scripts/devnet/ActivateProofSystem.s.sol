@@ -3,8 +3,8 @@ pragma solidity 0.8.28;
 
 import {Script} from "forge-std/Script.sol";
 
-import {GameTypes} from "../../src/proofs/GameTypes.sol";
-import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
+import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
+import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
 
 import {GameStatus} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
@@ -84,7 +84,6 @@ contract ActivateProofSystem is Script {
         );
         require(address(gameImpl.teeVerifier()).code.length > 0, "ActivateProofSystem: TEE verifier missing");
         require(address(gameImpl.securityCouncil()).code.length > 0, "ActivateProofSystem: council verifier missing");
-        require(address(gameImpl.stakingRegistry()).code.length > 0, "ActivateProofSystem: staking registry missing");
         require(address(gameImpl.weth()).code.length > 0, "ActivateProofSystem: DelayedWETH missing");
 
         IDisputeGame anchorGame = config.anchorStateRegistry.anchorGame();

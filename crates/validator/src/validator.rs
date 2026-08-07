@@ -11,7 +11,7 @@ use alloy_primitives::Bytes;
 use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::bail;
-use reth_chain_state::{DeferredTrieData, ExecutedBlock};
+use reth_chain_state::ExecutedBlock;
 use world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 
 use reth_evm::{ConfigureEvm, EvmEnvFor};
@@ -20,7 +20,8 @@ use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_provider::StateProviderFactory;
-use tracing::error;
+use reth_trie_common::ComputedTrieData;
+use tracing::{error, trace_span};
 use world_chain_chainspec::WorldChainSpec;
 
 use crate::{
@@ -38,7 +39,24 @@ use world_chain_evm::{
 pub fn into_executed_payload(
     payload: BuiltPayloadExecutedBlock<OpPrimitives>,
 ) -> ExecutedBlock<OpPrimitives> {
-    let trie_data = DeferredTrieData::sort(payload.hashed_state, payload.trie_updates);
+    let (hashed_state, trie_updates) = {
+        let _span = trace_span!(target: "flashblocks::validator", "sort_trie_inputs").entered();
+        rayon::join(
+            || match Arc::try_unwrap(payload.hashed_state) {
+                Ok(state) => state.into_sorted(),
+                Err(state) => state.clone_into_sorted(),
+            },
+            || match Arc::try_unwrap(payload.trie_updates) {
+                Ok(updates) => updates.into_sorted(),
+                Err(updates) => updates.clone_into_sorted(),
+            },
+        )
+    };
+    let trie_data = ComputedTrieData::new_with_changed_paths(
+        Arc::new(hashed_state),
+        Arc::new(trie_updates),
+        payload.changed_paths,
+    );
     ExecutedBlock::new(payload.recovered_block, payload.execution_output, trie_data)
 }
 
