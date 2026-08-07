@@ -16,21 +16,8 @@ path = "src/lib.rs"
 # the NSM device interface that is only available inside the enclave runtime.
 [[bin]]
 name = "world-chain-proof-nitro-enclave"
-path = "src/bin/enclave.rs"
+path = "src/main.rs"
 required-features = ["enclave"]
-
-[[bin]]
-name = "test-attestation"
-path = "src/bin/test_attestation.rs"
-required-features = ["enclave"]
-
-[[bin]]
-name = "p384-hints"
-path = "src/bin/p384_hints.rs"
-
-[[bin]]
-name = "gen-test-vector"
-path = "src/bin/gen_test_vector.rs"
 
 [features]
 default = []
