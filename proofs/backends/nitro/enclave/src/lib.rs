@@ -179,7 +179,7 @@ pub fn transition_commitment(transition_public_values: &TransitionPublicValues) 
 /// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro_enclave::*`.
 pub mod prelude {
     pub use crate::{
-        transition_commitment, ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest,
+        ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest, transition_commitment,
     };
     #[cfg(all(feature = "enclave", target_os = "linux"))]
     pub use crate::{NitroProver, NitroProverError};
@@ -191,9 +191,9 @@ mod tests {
     use world_chain_proof_core::boot::TransitionPublicValues;
 
     use crate::{
-        attestation::{parse_and_check_pcrs, AttestationError},
-        protocol::transition_commitment,
         ExpectedPcrs, NitroRangeProofArtifact, PCR_LEN,
+        attestation::{AttestationError, parse_and_check_pcrs},
+        protocol::transition_commitment,
     };
 
     /// Builds a minimal synthetic COSE_Sign1 attestation document suitable for unit tests.
