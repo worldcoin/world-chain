@@ -22,10 +22,6 @@
 //!
 //! The enclave-side guest is the `world-chain-proof-nitro-enclave` binary (`src/enclave.rs`).
 
-// clap is used by the p384-hints binary; reference it here so the
-// `unused_crate_dependencies` lint does not fire on the lib target.
-use clap as _;
-
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{boot::TransitionPublicValues, witness::WorldRangeWitnessData};
 
@@ -183,7 +179,7 @@ pub fn transition_commitment(transition_public_values: &TransitionPublicValues) 
 /// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro_enclave::*`.
 pub mod prelude {
     pub use crate::{
-        ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest, transition_commitment,
+        transition_commitment, ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest,
     };
     #[cfg(all(feature = "enclave", target_os = "linux"))]
     pub use crate::{NitroProver, NitroProverError};
@@ -195,9 +191,9 @@ mod tests {
     use world_chain_proof_core::boot::TransitionPublicValues;
 
     use crate::{
-        ExpectedPcrs, NitroRangeProofArtifact, PCR_LEN,
-        attestation::{AttestationError, parse_and_check_pcrs},
+        attestation::{parse_and_check_pcrs, AttestationError},
         protocol::transition_commitment,
+        ExpectedPcrs, NitroRangeProofArtifact, PCR_LEN,
     };
 
     /// Builds a minimal synthetic COSE_Sign1 attestation document suitable for unit tests.
