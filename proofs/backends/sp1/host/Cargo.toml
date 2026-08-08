@@ -27,6 +27,6 @@ world-chain-proof-sp1-elfs = { workspace = true, optional = true }
 world-chain-proof-sp1-types.workspace = true
 alloy-sol-types = { workspace = true, optional = true }
 bincode = { version = "1", optional = true }
-sp1-sdk = { version = "=6.1.0", features = ["network"], optional = true }
+sp1-sdk = { version = "=6.2.3", features = ["network"], optional = true }
 async-trait.workspace = true
 world-chain-prover-service.workspace = true
