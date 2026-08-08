@@ -35,6 +35,9 @@ abstract contract OPStackFixtures is Test {
 
     uint256 internal constant CHAIN_ID = 480;
     bytes32 internal constant ROLLUP_CONFIG_HASH = keccak256("world-chain-rollup-config");
+    bytes32 internal constant AGGREGATION_VKEY = keccak256("aggregation-vkey");
+    bytes32 internal constant RANGE_VKEY_COMMITMENT = keccak256("range-vkey-commitment");
+    bytes32 internal constant TEE_IMAGE_ID = keccak256("tee-image-id");
     uint256 internal constant BLOCK_INTERVAL = 100;
 
     bytes32 internal constant STARTING_ANCHOR_ROOT = keccak256("starting-anchor-root");
@@ -131,6 +134,9 @@ abstract contract OPStackFixtures is Test {
             challengerBond: CHALLENGER_BOND,
             protocolFeeRecipient: protocolFeeRecipient,
             proofThreshold: PROOF_THRESHOLD,
+            aggregationVKey: AGGREGATION_VKEY,
+            rangeVKeyCommitment: RANGE_VKEY_COMMITMENT,
+            teeImageId: TEE_IMAGE_ID,
             validityProofVerifier: IWorldChainProofVerifier(address(validityVerifier)),
             teeVerifier: IWorldChainProofVerifier(address(teeVerifier)),
             securityCouncil: IWorldChainProofVerifier(address(councilVerifier)),

@@ -92,7 +92,7 @@ contract NitroEndToEndTest is Test {
     }
 
     function _verify(TransitionPublicValues memory transition, bytes memory sig) internal view returns (bool) {
-        return proofVerifier.verify(ROOT_ID, transition, sig);
+        return proofVerifier.verify(sig, PCR0, abi.encode(transition));
     }
 
     /*//////////////////////////////////////////////////////////////

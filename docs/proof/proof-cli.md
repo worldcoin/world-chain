@@ -266,8 +266,8 @@ world-chain-prover-sp1 prove \
 
 Computes the on-chain verification keys for the (embedded) range and aggregation ELFs: the
 range vkey commitment (`multiBlockVKey` committed by the aggregation guest) and the
-aggregation vkey registered with the SP1 verifier. Runs SP1 setup locally — no proving, no RPC,
-no arguments.
+aggregation vkey. Both are pinned by the `MultiProofGame` implementation. Runs SP1 setup locally —
+no proving, no RPC, no arguments.
 
 ```
 world-chain-prover-sp1 vkeys [--output <FILE>]

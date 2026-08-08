@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {OPStackFixtures} from "./OPStackFixtures.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
-import {LibProof, InvalidationReason, ProofLane} from "../../src/dispute/lib/LibProof.sol";
+import {LibProof, InvalidationReason, ProofLane, TransitionPublicValues} from "../../src/dispute/lib/LibProof.sol";
 
 import {
     BondDistributionMode,
@@ -195,6 +195,21 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
 
+        config = _gameConfig();
+        config.aggregationVKey = bytes32(0);
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
+        config.rangeVKeyCommitment = bytes32(0);
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
+        config.teeImageId = bytes32(0);
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
         // A DelayedWETH wired to a different SystemConfig than the registry's must be rejected.
         config = _gameConfig();
         vm.mockCall(address(weth), abi.encodeWithSignature("systemConfig()"), abi.encode(address(0xdead)));
@@ -216,6 +231,37 @@ contract MultiProofGameTest is OPStackFixtures {
 
             assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
             assertEq(game.credit(proposer), PROPOSER_BOND);
+        }
+    }
+
+    function test_SubmitProofLane_PassesExactGamePinnedVerifierInputs() public {
+        for (uint8 lane; lane < LibProof.PROOF_LANE_COUNT; lane++) {
+            (, uint256 anchorBlock) = asr.getAnchorRoot();
+            MultiProofGame game =
+                _propose(type(uint256).max, keccak256(abi.encode("parameters", lane)), anchorBlock + BLOCK_INTERVAL, 0);
+
+            (Hash startingRoot, uint256 startingBlockNumber) = game.startingProposal();
+            TransitionPublicValues memory transition = TransitionPublicValues({
+                l1Head: Hash.unwrap(game.l1Head()),
+                l2PreRoot: Hash.unwrap(startingRoot),
+                // `initialize` bounds the child block to uint64, so its parent is also safe.
+                // forge-lint: disable-next-line(unsafe-typecast)
+                l2PreBlockNumber: uint64(startingBlockNumber),
+                l2PostRoot: Claim.unwrap(game.rootClaim()),
+                l2PostBlockNumber: uint64(game.l2SequenceNumber()),
+                rollupConfigHash: ROLLUP_CONFIG_HASH
+            });
+
+            if (lane == uint8(ProofLane.VALIDITY_PROOF)) {
+                validityVerifier.setExpectedParameters(AGGREGATION_VKEY, abi.encode(transition, RANGE_VKEY_COMMITMENT));
+            } else if (lane == uint8(ProofLane.TEE_ATTESTATION)) {
+                teeVerifier.setExpectedParameters(TEE_IMAGE_ID, abi.encode(transition));
+            } else {
+                councilVerifier.setExpectedParameters(bytes32(0), abi.encode(game.rootId()));
+            }
+
+            game.submitProofLane(_compact(lane, laneRewardRecipient(lane), abi.encodePacked(game.rootId())));
+            assertTrue(game.proofBitmap().has(ProofLane(lane)));
         }
     }
 
@@ -611,6 +657,9 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(Claim.unwrap(game.rootClaimByChainId(CHAIN_ID + 1)), Claim.unwrap(game.rootClaim()));
 
         assertEq(game.rollupConfigHash(), ROLLUP_CONFIG_HASH);
+        assertEq(game.aggregationVKey(), AGGREGATION_VKEY);
+        assertEq(game.rangeVKeyCommitment(), RANGE_VKEY_COMMITMENT);
+        assertEq(game.teeImageId(), TEE_IMAGE_ID);
         assertEq(game.blockInterval(), BLOCK_INTERVAL);
         assertEq(game.domainHash(), _domainHash());
     }

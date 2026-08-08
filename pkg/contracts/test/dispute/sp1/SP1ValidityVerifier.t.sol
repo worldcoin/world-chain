@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
-import {AggregationPublicValues, SP1ValidityVerifier} from "../../../src/dispute/sp1/SP1ValidityVerifier.sol";
+import {SP1ValidityVerifier} from "../../../src/dispute/sp1/SP1ValidityVerifier.sol";
 import {LibProof, TransitionPublicValues} from "../../../src/dispute/lib/LibProof.sol";
 
 contract StubSP1Verifier is ISP1Verifier {
@@ -50,7 +50,7 @@ contract SP1ValidityVerifierTest is Test {
 
     function setUp() public {
         sp1 = new StubSP1Verifier();
-        verifier = new SP1ValidityVerifier(ISP1Verifier(address(sp1)), AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT);
+        verifier = new SP1ValidityVerifier(ISP1Verifier(address(sp1)));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -73,7 +73,7 @@ contract SP1ValidityVerifierTest is Test {
         pure
         returns (bytes memory)
     {
-        return abi.encode(AggregationPublicValues({transitionPublicValues: transition, multiBlockVKey: multiBlockVKey}));
+        return abi.encode(transition, multiBlockVKey);
     }
 
     function _expectSp1Call(TransitionPublicValues memory transition) internal {
@@ -86,17 +86,7 @@ contract SP1ValidityVerifierTest is Test {
 
     function test_Constructor_RevertsForZeroSP1Verifier() public {
         vm.expectRevert(SP1ValidityVerifier.ZeroSP1Verifier.selector);
-        new SP1ValidityVerifier(ISP1Verifier(address(0)), AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT);
-    }
-
-    function test_Constructor_RevertsForZeroAggregationVKey() public {
-        vm.expectRevert(SP1ValidityVerifier.ZeroAggregationVKey.selector);
-        new SP1ValidityVerifier(ISP1Verifier(address(sp1)), bytes32(0), RANGE_VKEY_COMMITMENT);
-    }
-
-    function test_Constructor_RevertsForZeroRangeVKeyCommitment() public {
-        vm.expectRevert(SP1ValidityVerifier.ZeroRangeVKeyCommitment.selector);
-        new SP1ValidityVerifier(ISP1Verifier(address(sp1)), AGGREGATION_VKEY, bytes32(0));
+        new SP1ValidityVerifier(ISP1Verifier(address(0)));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -107,7 +97,7 @@ contract SP1ValidityVerifierTest is Test {
         TransitionPublicValues memory transition = _transition();
         _expectSp1Call(transition);
 
-        assertTrue(verifier.verify(ROOT_ID, transition, SP1_PROOF_BYTES));
+        assertTrue(verifier.verify(SP1_PROOF_BYTES, AGGREGATION_VKEY, _publicValues(transition, RANGE_VKEY_COMMITMENT)));
     }
 
     function test_Verify_FalseWhenSP1ProofInvalid() public {
@@ -115,14 +105,16 @@ contract SP1ValidityVerifierTest is Test {
         _expectSp1Call(transition);
         sp1.setReject(true);
 
-        assertFalse(verifier.verify(ROOT_ID, transition, SP1_PROOF_BYTES));
+        assertFalse(
+            verifier.verify(SP1_PROOF_BYTES, AGGREGATION_VKEY, _publicValues(transition, RANGE_VKEY_COMMITMENT))
+        );
     }
 
     function test_Verify_FalseForUnexpectedProofBytes() public {
         TransitionPublicValues memory transition = _transition();
         _expectSp1Call(transition);
 
-        assertFalse(verifier.verify(ROOT_ID, transition, hex"deadbeef"));
+        assertFalse(verifier.verify(hex"deadbeef", AGGREGATION_VKEY, _publicValues(transition, RANGE_VKEY_COMMITMENT)));
     }
 
     function test_Verify_FalseWhenProofAttestsDifferentTransition() public {
@@ -132,13 +124,44 @@ contract SP1ValidityVerifierTest is Test {
         TransitionPublicValues memory expected = _transition();
         expected.l2PostRoot = keccak256("other-post-root");
 
-        assertFalse(verifier.verify(ROOT_ID, expected, SP1_PROOF_BYTES));
+        assertFalse(verifier.verify(SP1_PROOF_BYTES, AGGREGATION_VKEY, _publicValues(expected, RANGE_VKEY_COMMITMENT)));
     }
 
     function test_Verify_BindsRangeVKeyCommitment() public {
         TransitionPublicValues memory transition = _transition();
         sp1.setExpectation(AGGREGATION_VKEY, _publicValues(transition, keccak256("wrong-range-vkey")), SP1_PROOF_BYTES);
 
-        assertFalse(verifier.verify(ROOT_ID, transition, SP1_PROOF_BYTES));
+        assertFalse(
+            verifier.verify(SP1_PROOF_BYTES, AGGREGATION_VKEY, _publicValues(transition, RANGE_VKEY_COMMITMENT))
+        );
+    }
+
+    function test_Verify_FalseForDifferentGameVKeys() public {
+        TransitionPublicValues memory transition = _transition();
+        _expectSp1Call(transition);
+        assertFalse(
+            verifier.verify(
+                SP1_PROOF_BYTES, keccak256("new-aggregation-vkey"), _publicValues(transition, RANGE_VKEY_COMMITMENT)
+            )
+        );
+    }
+
+    function test_Verify_ReusesContractAcrossProgramVersions() public {
+        TransitionPublicValues memory transition = _transition();
+        bytes32 newAggregationVKey = keccak256("new-aggregation-vkey");
+        bytes32 newRangeVKeyCommitment = keccak256("new-range-vkey");
+        bytes memory newPublicValues = _publicValues(transition, newRangeVKeyCommitment);
+        sp1.setExpectation(newAggregationVKey, newPublicValues, SP1_PROOF_BYTES);
+
+        assertTrue(verifier.verify(SP1_PROOF_BYTES, newAggregationVKey, newPublicValues));
+    }
+
+    function test_Verify_FalseForZeroGameVKeys() public view {
+        assertFalse(verifier.verify(SP1_PROOF_BYTES, bytes32(0), _publicValues(_transition(), RANGE_VKEY_COMMITMENT)));
+        assertFalse(verifier.verify(SP1_PROOF_BYTES, AGGREGATION_VKEY, _publicValues(_transition(), bytes32(0))));
+    }
+
+    function test_Verify_FalseForMalformedPublicValues() public view {
+        assertFalse(verifier.verify(SP1_PROOF_BYTES, AGGREGATION_VKEY, abi.encode(_transition())));
     }
 }

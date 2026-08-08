@@ -124,6 +124,15 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Recipient of the share of forfeited proposer bonds not paid to a challenger.
     address public immutable protocolFeeRecipient;
 
+    /// @notice SP1 aggregation-program verification key used by the validity lane.
+    bytes32 public immutable aggregationVKey;
+
+    /// @notice SP1 range-program verification-key commitment used by the validity lane.
+    bytes32 public immutable rangeVKeyCommitment;
+
+    /// @notice Nitro PCR0 image identity accepted by the TEE lane.
+    bytes32 public immutable teeImageId;
+
     /// @notice Verifiers backing the proof lanes, indexed by `ProofLane`.
     IWorldChainProofVerifier public immutable validityProofVerifier;
     IWorldChainProofVerifier public immutable teeVerifier;
@@ -183,9 +192,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             config.blockInterval == 0 || config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod
                 || config.proposerBond == 0 || config.challengerBond == 0 || config.proofThreshold == 0
                 || config.proofThreshold > LibProof.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
-                || address(config.anchorStateRegistry) == address(0) || address(config.weth) == address(0)
-                || address(config.validityProofVerifier) == address(0) || address(config.teeVerifier) == address(0)
-                || address(config.securityCouncil) == address(0)
+                || config.aggregationVKey == bytes32(0) || config.rangeVKeyCommitment == bytes32(0)
+                || config.teeImageId == bytes32(0) || address(config.anchorStateRegistry) == address(0)
+                || address(config.weth) == address(0) || address(config.validityProofVerifier) == address(0)
+                || address(config.teeVerifier) == address(0) || address(config.securityCouncil) == address(0)
         ) {
             revert InvalidActivationParameters();
         }
@@ -211,6 +221,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         proposerBond = config.proposerBond;
         challengerBond = config.challengerBond;
         protocolFeeRecipient = config.protocolFeeRecipient;
+        aggregationVKey = config.aggregationVKey;
+        rangeVKeyCommitment = config.rangeVKeyCommitment;
+        teeImageId = config.teeImageId;
         PROOF_THRESHOLD = config.proofThreshold;
         validityProofVerifier = config.validityProofVerifier;
         teeVerifier = config.teeVerifier;
@@ -493,7 +506,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         // Verify the proof against the verifier configured for this lane.
         IWorldChainProofVerifier verifier = lane.verifierFor(validityProofVerifier, teeVerifier, securityCouncil);
-        if (!verifier.verify(rootId_, _transition(), compact.proof)) {
+        bytes32 verifierId = lane.verifierIdFor(aggregationVKey, teeImageId);
+        bytes memory publicValues = lane.publicValuesFor(rootId_, _transition(), rangeVKeyCommitment);
+        if (!verifier.verify(compact.proof, verifierId, publicValues)) {
             revert InvalidProof(lane, rootId_);
         }
 

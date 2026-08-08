@@ -401,8 +401,10 @@ proof-deploy-mocks env="alphanet":
 
 # The three proof-lane verifiers and the staking registry are required inputs — this
 # script never deploys them, and rejects addresses that hold no code or that repeat
-# across lanes. Point them at real contracts; for a devnet, run `proof-deploy-mocks`
-# first and read the four addresses out of deployments/<env>-proof-mocks.json.
+# across lanes. Reuse the SP1 verifier when only the game-pinned vkeys change; rotate
+# its address only if the verifier gateway or proof interface changes. For a devnet,
+# run `proof-deploy-mocks` first and read the four addresses out of
+# deployments/<env>-proof-mocks.json.
 # Phase 2 – Deploy the proof system contracts and register game type 1006.
 proof-deploy-system env="alphanet":
     #!/usr/bin/env bash
@@ -411,6 +413,9 @@ proof-deploy-system env="alphanet":
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     : "${WORLD_CHAIN_L2_CHAIN_ID:?WORLD_CHAIN_L2_CHAIN_ID is required}"
     : "${ROLLUP_CONFIG_HASH:?ROLLUP_CONFIG_HASH is required}"
+    : "${AGGREGATION_VKEY:?AGGREGATION_VKEY is required}"
+    : "${RANGE_VKEY_COMMITMENT:?RANGE_VKEY_COMMITMENT is required}"
+    : "${TEE_IMAGE_ID:?TEE_IMAGE_ID is required}"
     : "${DISPUTE_GAME_FACTORY:?DISPUTE_GAME_FACTORY is required (op-deployer DisputeGameFactoryProxy)}"
     : "${ANCHOR_STATE_REGISTRY:?ANCHOR_STATE_REGISTRY is required (op-deployer AnchorStateRegistryProxy)}"
     : "${SYSTEM_CONFIG:?SYSTEM_CONFIG is required (op-deployer SystemConfigProxy)}"
@@ -438,6 +443,9 @@ proof-deploy-system env="alphanet":
     echo "  proposer bond: $PROPOSER_BOND wei" >&2
     echo "  challenger bond: $CHALLENGER_BOND wei" >&2
     echo "  challenge fee: $CHALLENGE_FEE wei" >&2
+    echo "  aggregation vkey: $AGGREGATION_VKEY" >&2
+    echo "  range vkey commitment: $RANGE_VKEY_COMMITMENT" >&2
+    echo "  TEE image ID: $TEE_IMAGE_ID" >&2
     # A dry run must never overwrite the record of a live deployment: the simulated game and
     # WETH addresses are never deployed, so writing them to the real path silently replaces a
     # true record with fictional addresses.
@@ -752,16 +760,31 @@ proof-setup env="alphanet":
     fi
     export VALIDITY_PROOF_VERIFIER SECURITY_COUNCIL_VERIFIER
 
+    VKEYS="proofs/backends/sp1/elfs/vkeys.json"
+    : "${AGGREGATION_VKEY:=$(jq -r '.aggregation_vkey' "$VKEYS")}"
+    : "${RANGE_VKEY_COMMITMENT:=$(jq -r '.range_vkey_commitment' "$VKEYS")}"
+    export AGGREGATION_VKEY RANGE_VKEY_COMMITMENT
+
+    if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
+        echo "=== Step 1c: Fetching PCRs from running enclave ===" >&2
+        eval $(just proof-get-pcrs {{env}})
+    fi
+    [[ "$PCR0" == 0x* ]] || PCR0="0x$PCR0"
+    [[ "$PCR1" == 0x* ]] || PCR1="0x$PCR1"
+    [[ "$PCR2" == 0x* ]] || PCR2="0x$PCR2"
+    export PCR0 PCR1 PCR2
+    PCR0_HASH=$(cast keccak "$PCR0")
+    TEE_IMAGE_ID=$PCR0_HASH
+    export TEE_IMAGE_ID
+    echo "AGGREGATION_VKEY=$AGGREGATION_VKEY" >&2
+    echo "RANGE_VKEY_COMMITMENT=$RANGE_VKEY_COMMITMENT" >&2
+    echo "TEE_IMAGE_ID=$TEE_IMAGE_ID" >&2
+
     echo "=== Step 2: Deploying proof system contracts ===" >&2
     just dry_run={{dry_run}} proof-deploy-system {{env}}
 
     echo "=== Step 3a: Pre-warming CertManager ===" >&2
     just dry_run={{dry_run}} proof-certmanager-prewarm {{env}}
-
-    if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
-        echo "=== Step 3b-pre: Fetching PCRs from running enclave ===" >&2
-        eval $(just proof-get-pcrs {{env}})
-    fi
 
     echo "=== Step 3b: Approving PCR set ===" >&2
     just dry_run={{dry_run}} proof-approve-pcrs {{env}}

@@ -66,7 +66,7 @@ The `nitro-worker` Kubernetes pod contains two containers:
 
 ```
 NitroProofVerifier           ← World Chain addition: dispute game lane hook
-  │  ecrecover signature → check signer is registered
+  │  ecrecover signature → check signer is registered for the game's image ID
   ▼
 NitroEnclaveKeyRegistry      ← World Chain addition: 3-state signer lifecycle
   │  registerKey() / revokeSigner() / isSignerRegistered()
@@ -85,12 +85,12 @@ CertManager (ICertManager)   ← Base's library
 AWS Nitro Root CA (hardcoded)
 ```
 
-> **Base comparison:** Base's `SystemConfigGlobal` sits at approximately the
-> `NitroAttestationVerifier` + `NitroEnclaveKeyRegistry` layer — it validates the
-> attestation and stores valid signer addresses. World Chain adds `NitroProofVerifier`
-> on top to integrate with the OP Stack dispute game interface
-> (`IWorldChainProofVerifier`). Base doesn't have an equivalent because their system
-> replaces the proposer rather than plugging into the dispute game.
+> **Base comparison:** Base's `AggregateVerifier` pins `TEE_IMAGE_HASH`, while its
+> reusable `TEEVerifier` checks the recovered signer's `signerImageHash` in
+> `TEEProverRegistry`. World Chain follows that split with a game-pinned `teeImageId`, a
+> reusable `NitroProofVerifier`, and `signerImageId` in `NitroEnclaveKeyRegistry`. World Chain
+> retains its existing PCR0/1/2 approval gate at registration. Like Base, it uses the PCR0 hash as
+> the game image ID; Base currently permits registration before an image is active.
 
 ---
 
@@ -349,9 +349,11 @@ The two layers are linked through the **key registration** step:
    secp256k1 key belongs to which enclave (with specific PCRs).
 2. `NitroAttestationVerifier` verifies the full attestation (P-384 sig, cert chain,
    PCRs) and extracts the public key.
-3. `NitroEnclaveKeyRegistry` derives the Ethereum signer address and stores it as `Active`.
+3. `NitroEnclaveKeyRegistry` derives the Ethereum signer address, stores it as `Active`,
+   and records the attested PCR0 as that signer's image ID.
 4. During proof verification, `NitroProofVerifier` uses `ecrecover` on the secp256k1
-   signature and checks that the recovered signer address is registered.
+   signature and checks that the recovered signer is active and its registered image ID
+   matches the PCR0 pinned by the calling game.
 
 This design separates the **expensive operation** (P-384 attestation verification +
 cert chain validation, done once at key registration) from the **cheap operation**
@@ -455,34 +457,22 @@ NitroAttestationVerifier.verifyAttestation(attestationTbs, signature)
 ### Proof Verification (Every Proof)
 
 ```
-verify(rootId, proof)
+verify(signature, imageId, publicValues)
         │
         ▼
 NitroProofVerifier
         │
-        ├─ 1. ABI-decode proof:
-        │      (domainHash, parentRef, l1OriginNumber,
-        │       transitionPublicValues, signature)
-        │
-        ├─ 2. Reconstruct rootId from proof fields
-        │      └─ Assert reconstructed == supplied rootId
-        │
-        ├─ 3. Check l2PreRoot matches parentRef's root claim
-        │
-        ├─ 4. Compute signing commitment:
-        │      keccak256(abi.encode(transitionPublicValues))
-        │
-        ├─ 5. ecrecover(commitment, signature) → recovered signer
-        │      └─ EIP-2 low-s check: reject if s > secp256k1n/2
-        │
-        ├─ 6. Check recovered signer in NitroEnclaveKeyRegistry
-        │      └─ isSignerRegistered(recovered) must return true
-        │
-        └─ 7. Return true (or false on any failure — never reverts)
+        ├─ 1. Receive the exact ABI-encoded TransitionPublicValues
+        │      reconstructed by MultiProofGame
+        ├─ 2. Compute signing commitment: keccak256(publicValues)
+        ├─ 3. ecrecover(commitment, signature) → recovered signer
+        │      └─ EIP-2 low-s check rejects malleable signatures
+        ├─ 4. Require recovered signer is Active
+        └─ 5. Require signerImageId[signer] == game-pinned imageId
 ```
 
-> **Base comparison:** Base's `SystemConfigGlobal.registerSigner()` performs the same
-> steps 1–5 (attestation validation via `NitroValidator`), then derives an Ethereum
+> **Base comparison:** Base's `TEEProverRegistry.registerSigner()` validates a
+> ZK-proven Nitro attestation, then derives an Ethereum
 > address from the attestation's `public_key` field:
 > ```
 > publicKeyHash = keccak256(publicKey[1:])  // skip 0x04 prefix
@@ -764,47 +754,50 @@ oversized length prefix before allocating its receive buffer.
 
 ## Frequently Asked Questions
 
-### Q: Why are PCRs passed into `verifyAttestation` if they are already included in the attestation document?
+### Q: How does `verifyAttestation` know which PCRs are accepted?
 
-**A:** The attestation document contains the *actual* PCR values from the running
-enclave. But the verifier needs *expected* PCR values to compare against — without
-supplying expected PCRs, there is nothing to verify: any enclave image would be
-accepted. The caller provides expected PCRs so the contract can assert the enclave ran
-exactly the image the operator approved. The on-chain `NitroAttestationVerifier`
-maintains an `approvedPCRSets` allowlist; it hashes the PCRs extracted from the
-attestation and checks them against this set.
+**A:** The contract extracts PCR0/1/2 from the signed attestation document and checks
+their hashes against its owner-managed `approvedPCRSets` allowlist. The caller does not
+supply expected PCRs and therefore cannot choose which enclave image is accepted.
 
 ### Q: How does an upgrade to a new enclave version (with new PCRs) work?
 
-**A:** The upgrade is a rolling process:
+**A:** PCR approval controls which enclave keys may be registered, while the game
+implementation's `teeImageId` controls which registered keys may prove that game. Like Base, the
+image ID is `keccak256(rawPCR0)`.
+
+The upgrade is a rolling process:
 
 1. Build a new EIF → get new PCR0/1/2 measurements.
 2. Call `approvePCRSet(newPcr0, newPcr1, newPcr2)` — both old and new PCR sets are
    now approved simultaneously.
 3. Deploy new enclaves; each one registers its ephemeral key via `registerKey` (which
-   succeeds because the new PCRs are approved).
-4. Once all enclaves have migrated, call `revokePCRSet(oldPcr0, oldPcr1, oldPcr2)` —
-   this disallows future key registrations for the old image. Already-registered keys
-   from the old image remain valid until individually revoked if needed.
+   succeeds because the new PCRs are approved). The registry records the image ID alongside the
+   signer.
+4. Deploy and register a new game implementation pinned to the new image ID. The reusable Nitro
+   verifier is unchanged; existing games remain pinned to the old image.
+5. No revocation is required for a routine upgrade: the new game rejects old-image signers by
+   construction. Optionally call `revokePCRSet(oldPcr0, oldPcr1, oldPcr2)` when no further
+   old-image registrations should be admitted. Revoke an individual signer only when its key may
+   be compromised.
 
-This allows zero-downtime upgrades with a window where both old and new enclave
-images are active.
+This allows zero-downtime upgrades without changing what an already-created game trusts.
 
 ### Q: Does `NitroAttestationVerifier` need PCRs in its constructor?
 
 **A:** No. PCR management is fully dynamic — PCR sets are added and removed at runtime
 via `approvePCRSet` / `revokePCRSet`. No PCRs are baked into the contract constructor.
-This allows the owner to approve new enclave images and retire old ones without
-redeploying the verifier contract.
+This allows the owner to admit keys from new enclave images without redeploying the verifier
+contract. Accepting the new image for new games requires a new game implementation; existing games
+keep their original image pin.
 
 ### Q: Why store revoked signers in `NitroEnclaveKeyRegistry` instead of just deleting them?
 
-**A:** To prevent replay attacks. If a key were simply deleted on revocation, an
-attacker who captured that key's original attestation document could re-submit it to
-`registerKey` and restore the signer. The `Revoked` state is permanent — once revoked, a
-signer can never be re-registered regardless of whether a valid attestation document for
-it is available. The lifecycle is strictly `Unknown → Active → Revoked` with no path
-back.
+**A:** Ordinary enclave shutdown destroys the ephemeral signing key and does not need an
+on-chain revocation. Signer revocation is for the stronger incident assumption that the key may
+have been compromised. Because `registerKey` is permissionless, simply deleting the signer would
+also let anyone replay the same still-fresh attestation and reactivate it. The permanent tombstone
+prevents that; the lifecycle is `Unknown → Active → Revoked`.
 
 ### Q: Why is there an `Unknown` state in the key lifecycle enum? Isn't just Active/Revoked enough?
 
@@ -952,10 +945,18 @@ Enclave
 
 #### PCR upgrade flow
 
-1. Add new PCRs to the KMS key policy (both old and new approved simultaneously).
-2. Deploy new enclave — on first boot it reads the existing ciphertext; KMS now
-   accepts the new PCRs, so it can unseal → same secp256k1 key is restored.
-3. Remove old PCRs from the key policy.
+KMS persistence avoids re-registration when the same enclave image restarts. It does
+not let a signing key move to a new image: the on-chain registry permanently records
+the PCR0 image ID proven when that signer was registered.
+
+1. Add the new PCRs to the KMS key policy while retaining the old PCRs during rollout.
+2. Deploy the new image with a fresh secp256k1 key and sealed ciphertext.
+3. Register the fresh key so the registry binds it to the new PCR0 image ID.
+4. Activate a new game implementation pinned to that image ID.
+5. Remove the old PCRs from the KMS policy when the old image no longer needs to restart.
+
+Reusing the old key across image IDs would require a separate authenticated registry
+rebind mechanism and is not part of this proposal.
 
 #### Comparison
 

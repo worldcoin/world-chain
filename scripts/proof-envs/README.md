@@ -52,6 +52,13 @@ targets — they are intentionally **not** stored in config files:
 | `L1_RPC_URL` | `proof-deploy-nitro`, `proof-deploy-system`, `proof-certmanager-prewarm`, `proof-approve-pcrs` |
 | `WORLD_CHAIN_L2_CHAIN_ID` | `proof-deploy-system` |
 | `ROLLUP_CONFIG_HASH` | `proof-deploy-system` |
+| `AGGREGATION_VKEY` | `proof-deploy-system` |
+| `RANGE_VKEY_COMMITMENT` | `proof-deploy-system` |
+| `TEE_IMAGE_ID` | `proof-deploy-system` |
 | `CERT_MANAGER_ADDRESS` | `proof-certmanager-prewarm` |
 | `NITRO_ATTESTATION_VERIFIER` | `proof-approve-pcrs` |
 | `PCR0`, `PCR1`, `PCR2` | `proof-approve-pcrs` |
+
+`proof-setup` reads the two SP1 values from `proofs/backends/sp1/elfs/vkeys.json` and derives
+`TEE_IMAGE_ID` as `keccak256(rawPCR0)`.
+Standalone `proof-deploy-system` calls must supply all three values explicitly.

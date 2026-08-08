@@ -61,7 +61,7 @@ library LibProof {
         return keccak256(abi.encode(chainId, proofSystemVersion, rollupConfigHash, blockInterval));
     }
 
-    /// @dev Identity a proposal's proof lanes attest to.
+    /// @dev Canonical proposal identity used by the game and council attestation.
     function rootId(
         bytes32 domainHash_,
         address parentRef,
@@ -83,6 +83,34 @@ library LibProof {
         if (lane == ProofLane.VALIDITY_PROOF) return validityProofVerifier;
         if (lane == ProofLane.TEE_ATTESTATION) return teeVerifier;
         return securityCouncil;
+    }
+
+    /// @dev Selects the immutable verifier identity backing `lane`.
+    function verifierIdFor(ProofLane lane, bytes32 aggregationVKey, bytes32 teeImageId)
+        internal
+        pure
+        returns (bytes32)
+    {
+        if (lane == ProofLane.VALIDITY_PROOF) return aggregationVKey;
+        if (lane == ProofLane.TEE_ATTESTATION) return teeImageId;
+        return bytes32(0);
+    }
+
+    /// @dev Encodes the exact public values authenticated by `lane`.
+    ///      The validity and TEE lanes bind the transition, not `rootId` or a separate upgrade
+    ///      schedule. A derivation upgrade must therefore rotate at least one bound value:
+    ///      `rollupConfigHash`, the relevant SP1 vkey, or the Nitro PCR0 image ID.
+    function publicValuesFor(
+        ProofLane lane,
+        bytes32 rootId_,
+        TransitionPublicValues memory transition,
+        bytes32 rangeVKeyCommitment
+    ) internal pure returns (bytes memory) {
+        if (lane == ProofLane.VALIDITY_PROOF) {
+            return abi.encode(transition, rangeVKeyCommitment);
+        }
+        if (lane == ProofLane.TEE_ATTESTATION) return abi.encode(transition);
+        return abi.encode(rootId_);
     }
 
     /// @dev Splits a compact payload into its lane id, reward recipient, and verifier proof

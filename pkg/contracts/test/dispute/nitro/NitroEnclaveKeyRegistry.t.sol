@@ -61,6 +61,8 @@ contract NitroEnclaveKeyRegistryTest is Test {
         registry.registerKey(TBS, SIG, "");
 
         assertTrue(registry.isSignerRegistered(signer));
+        assertEq(registry.signerImageId(signer), PCR0);
+        assertTrue(registry.isSignerRegisteredForImage(signer, PCR0));
     }
 
     function test_RegisterKey_RevertsWhenVerifierRejects() public {
@@ -115,6 +117,8 @@ contract NitroEnclaveKeyRegistryTest is Test {
 
         assertTrue(registry.isSignerRegistered(signer));
         assertTrue(registry.isSignerRegistered(otherSigner));
+        assertEq(registry.signerImageId(signer), PCR0);
+        assertEq(registry.signerImageId(otherSigner), PCR0);
     }
 
     function test_Constructor_SetsOwnerAndVerifier() public view {
@@ -294,5 +298,11 @@ contract NitroEnclaveKeyRegistryTest is Test {
         // Both keys are registered.
         assertTrue(registry.isSignerRegistered(signer));
         assertTrue(registry.isSignerRegistered(otherSigner));
+        bytes32 imageA = PCR0;
+        bytes32 imageB = pcr0B;
+        assertTrue(registry.isSignerRegisteredForImage(signer, imageA));
+        assertFalse(registry.isSignerRegisteredForImage(signer, imageB));
+        assertTrue(registry.isSignerRegisteredForImage(otherSigner, imageB));
+        assertFalse(registry.isSignerRegisteredForImage(otherSigner, imageA));
     }
 }

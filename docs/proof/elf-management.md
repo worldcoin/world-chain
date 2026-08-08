@@ -31,8 +31,7 @@ Net effect: the ELFs are never on disk for the host crate to find — they're st
 into every binary that links `world-chain-proof-sp1-elfs` (e.g. `world-chain-proof-sp1-worker`).
 There is no committed ELF blob. The derived vkeys and ELF SHA-256s are recorded in
 `proofs/backends/sp1/elfs/vkeys.json`. The on-chain governance anchor is the SP1 vkey computed from the
-embedded bytes (`just proof-vkeys`), which is exactly what we register on
-`OPSuccinctFaultDisputeGame` (name subject to change once World Chain ships its own proof system).
+embedded bytes (`just proof-vkeys`), which is pinned in the `MultiProofGame` implementation.
 
 ## Reproducibility
 
@@ -81,17 +80,17 @@ because the design choice is to refuse to link a host binary against an absent g
 ## What changed when SP1 programs are updated
 
 A change to the guest source or a bump of the pinned `tag` produces new ELF bytes and therefore
-new vkeys. Both rotate the on-chain measurements (`range_vkey_commitment` and `aggregation_vkey`
-registered on `OPSuccinctFaultDisputeGame`), which is a governance event: the on-chain registries
-need a matching update before the new prover can be deployed.
+new vkeys. Both rotate the on-chain measurements (`range_vkey_commitment` and `aggregation_vkey`)
+pinned in the `MultiProofGame` implementation, which is a governance event: a new game
+implementation must be deployed and activated before the new prover is used.
 
 The workflow is just normal source-control:
 
 1. Edit the guest source or bump the SP1 toolchain `tag` in `proofs/backends/sp1/elfs/build.rs`.
 2. `cargo build -p world-chain-prover-sp1` to confirm the new ELFs build.
 3. `just proof-vkeys` to print the new vkey commitments.
-4. Mention the rotated vkeys in the PR description and link the matching on-chain registry
-   update.
+4. Mention the rotated vkeys in the PR description and link the matching game-implementation
+   deployment.
 
 ## CI
 
@@ -120,7 +119,7 @@ World Chain follows this pattern directly:
 |:---|:---|:---|
 | Source-of-truth artifact | SP1 guest ELF | SP1 guest ELF |
 | Build reproducibility    | `build_program_with_args` + pinned SP1 toolchain tag | `build_program_with_args` + pinned `tag` in `build.rs` (`docker: true`) |
-| On-chain anchor          | SP1 vkey on `OPSuccinctL2OutputOracle` | SP1 vkey on `OPSuccinctFaultDisputeGame` |
+| On-chain anchor          | SP1 vkey on `OPSuccinctL2OutputOracle` | SP1 vkeys pinned in `MultiProofGame` |
 | Where the artifact lives | **Embedded into the host binary via `include_elf!()`** | **Embedded into the host binary via `include_elf!()`** |
 | Committed ELF blob       | None | None |
 
