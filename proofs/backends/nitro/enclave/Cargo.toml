@@ -46,7 +46,7 @@ anyhow.workspace = true
 base64 = { workspace = true }
 ciborium = "0.2"
 hex.workspace = true
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
 rkyv.workspace = true
 serde = { workspace = true, features = ["derive"] }
