@@ -1,0 +1,10 @@
+# Foundry
+out/
+cache/
+broadcast/
+
+# Dependencies (installed via `forge install`, see README)
+/lib/
+
+# Env
+.env
