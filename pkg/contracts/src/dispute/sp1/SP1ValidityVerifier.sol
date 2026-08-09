@@ -8,9 +8,6 @@ import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
 /// @author World Contributors
 /// @custom:security-contact security@toolsforhumanity.com
 contract SP1ValidityVerifier is IWorldChainProofVerifier {
-    /// @dev Six transition words plus the range-program vkey commitment.
-    uint256 internal constant PUBLIC_VALUES_LENGTH = 7 * 32;
-
     /// @notice Thrown when the SP1 verifier gateway address is zero.
     error ZeroSP1Verifier();
 
@@ -31,12 +28,6 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         view
         returns (bool)
     {
-        if (verifierId == bytes32(0) || publicValues.length != PUBLIC_VALUES_LENGTH) return false;
-        bytes32 rangeVKeyCommitment;
-        assembly ("memory-safe") {
-            rangeVKeyCommitment := calldataload(add(publicValues.offset, sub(publicValues.length, 32)))
-        }
-        if (rangeVKeyCommitment == bytes32(0)) return false;
         try sp1Verifier.verifyProof(verifierId, publicValues, proof) {
             return true;
         } catch {

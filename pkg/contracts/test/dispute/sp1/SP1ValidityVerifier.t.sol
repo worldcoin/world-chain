@@ -156,12 +156,10 @@ contract SP1ValidityVerifierTest is Test {
         assertTrue(verifier.verify(SP1_PROOF_BYTES, newAggregationVKey, newPublicValues));
     }
 
-    function test_Verify_FalseForZeroGameVKeys() public view {
-        assertFalse(verifier.verify(SP1_PROOF_BYTES, bytes32(0), _publicValues(_transition(), RANGE_VKEY_COMMITMENT)));
-        assertFalse(verifier.verify(SP1_PROOF_BYTES, AGGREGATION_VKEY, _publicValues(_transition(), bytes32(0))));
-    }
+    function test_Verify_ForwardsPublicValuesWithoutInterpretingThem() public {
+        bytes memory publicValues = hex"deadbeef";
+        sp1.setExpectation(AGGREGATION_VKEY, publicValues, SP1_PROOF_BYTES);
 
-    function test_Verify_FalseForMalformedPublicValues() public view {
-        assertFalse(verifier.verify(SP1_PROOF_BYTES, AGGREGATION_VKEY, abi.encode(_transition())));
+        assertTrue(verifier.verify(SP1_PROOF_BYTES, AGGREGATION_VKEY, publicValues));
     }
 }

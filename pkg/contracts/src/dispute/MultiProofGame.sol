@@ -507,6 +507,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // Verify the proof against the verifier configured for this lane.
         IWorldChainProofVerifier verifier = lane.verifierFor(validityProofVerifier, teeVerifier, securityCouncil);
         bytes32 verifierId = lane.verifierIdFor(aggregationVKey, teeImageId);
+        // The generic interface carries each lane's expected statement into its reusable verifier.
         bytes memory publicValues = lane.publicValuesFor(rootId_, _transition(), rangeVKeyCommitment);
         if (!verifier.verify(compact.proof, verifierId, publicValues)) {
             revert InvalidProof(lane, rootId_);
