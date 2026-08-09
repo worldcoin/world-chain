@@ -5,6 +5,9 @@ use alloy_primitives::{Address, B256, TxHash};
 pub struct GameMetadata {
     pub address: Address,
     pub domain_hash: B256,
+    pub aggregation_vkey: B256,
+    pub range_vkey_commitment: B256,
+    pub tee_image_id: B256,
     pub parent_ref: Address,
     pub root_claim: B256,
     pub l2_block_number: u64,

@@ -35,6 +35,9 @@ const BLOCK_INTERVAL: u64 = 10;
 const L2_BLOCK: u64 = 100;
 const L1_ORIGIN_HASH: B256 = B256::repeat_byte(0x42);
 const DOMAIN_HASH: B256 = B256::repeat_byte(0x43);
+const AGGREGATION_VKEY: B256 = B256::repeat_byte(0x44);
+const RANGE_VKEY_COMMITMENT: B256 = B256::repeat_byte(0x45);
+const TEE_IMAGE_ID: B256 = B256::repeat_byte(0x46);
 
 /// Fake game lifecycle. The contract splits this across `ProposalStatus` (challenged or not)
 /// and `GameStatus` (the terminal outcome); the fake keeps one field and derives both.
@@ -114,6 +117,9 @@ impl MockClient {
         let metadata = GameMetadata {
             address,
             domain_hash: DOMAIN_HASH,
+            aggregation_vkey: AGGREGATION_VKEY,
+            range_vkey_commitment: RANGE_VKEY_COMMITMENT,
+            tee_image_id: TEE_IMAGE_ID,
             parent_ref,
             root_claim,
             l2_block_number,
