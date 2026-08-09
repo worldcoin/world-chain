@@ -352,8 +352,8 @@ The two layers are linked through the **key registration** step:
 3. `NitroEnclaveKeyRegistry` derives the Ethereum signer address, stores it as `Active`,
    and records the attested PCR0 as that signer's image ID.
 4. During proof verification, `NitroProofVerifier` uses `ecrecover` on the secp256k1
-   signature and checks that the recovered signer is active and its registered image ID
-   matches the PCR0 pinned by the calling game.
+   signature and checks that the recovered signer is active and registered for the image ID
+   supplied by the game from its immutable configuration.
 
 This design separates the **expensive operation** (P-384 attestation verification +
 cert chain validation, done once at key registration) from the **cheap operation**
