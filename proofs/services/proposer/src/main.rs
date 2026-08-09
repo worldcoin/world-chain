@@ -7,7 +7,6 @@
 
 use std::time::Duration;
 
-use alloy_network::EthereumWallet;
 use alloy_primitives::Address;
 use alloy_provider::ProviderBuilder;
 use alloy_signer_local::PrivateKeySigner;
@@ -16,6 +15,7 @@ use clap::Parser;
 use tracing::info;
 use url::Url;
 use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
+use world_chain_proof_tx_signer::build_transaction_wallet;
 use world_chain_proposer::{
     AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
 };
@@ -44,7 +44,11 @@ struct Cli {
 
     /// Hex-encoded private key the proposer signs L1 transactions with.
     #[arg(long, env = "PROPOSER_KEY", hide_env_values = true)]
-    proposer_key: PrivateKeySigner,
+    proposer_key: Option<PrivateKeySigner>,
+
+    /// AWS KMS key ID or alias the proposer signs L1 transactions with.
+    #[arg(long, env = "PROPOSER_KMS_KEY_ID", hide_env_values = true)]
+    proposer_kms_key_id: Option<String>,
 
     /// Seconds between output-root polls.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
@@ -89,8 +93,11 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let proposer_address = cli.proposer_key.address();
     let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
+    let signer = build_transaction_wallet(cli.proposer_key, cli.proposer_kms_key_id, &l1_rpc_url)
+        .await
+        .context("failed to initialize proposer signer")?;
+    let proposer_address = signer.address;
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,
         world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
@@ -98,7 +105,7 @@ async fn main() -> Result<()> {
     )
     .context("failed to build the L1 RPC client")?;
     let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(cli.proposer_key))
+        .wallet(signer.wallet)
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, proposer_address).await;
 

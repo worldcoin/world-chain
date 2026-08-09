@@ -42,6 +42,7 @@ members = [
     "proofs/services/challenger",
     "proofs/services/prover-service",
     "proofs/services/defender",
+    "proofs/services/tx-signer",
     "proofs/debug/bin/prover-sp1",
     "proofs/debug/bin/prover-nitro",
     "proofs/debug/bin/prover-cli",
@@ -112,6 +113,7 @@ world-chain-proposer = { path = "proofs/services/proposer", default-features = f
 world-chain-challenger = { path = "proofs/services/challenger", default-features = false }
 world-chain-prover-service = { path = "proofs/services/prover-service", default-features = false }
 world-chain-defender = { path = "proofs/services/defender", default-features = false }
+world-chain-proof-tx-signer = { path = "proofs/services/tx-signer", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.5.0", default-features = false }
@@ -230,6 +232,7 @@ alloy-eip7928 = { version = "0.4.5", default-features = false, features = [
 alloy-genesis = { version = "=2.1.1", default-features = false }
 alloy-rpc-types-debug = "=2.1.1"
 alloy-signer = { version = "=2.1.1", default-features = false }
+alloy-signer-aws = { version = "=2.1.1", default-features = false }
 alloy-signer-local = { version = "=2.1.1", default-features = false, features = [
     "mnemonic",
 ] }
@@ -240,6 +243,9 @@ alloy-trie = { version = "0.9.4", default-features = false, features = [
     "ethereum",
 ] }
 
+# aws
+aws-config = { version = "1", default-features = false, features = ["rt-tokio", "rustls"] }
+aws-sdk-kms = { version = "1", default-features = false, features = ["rt-tokio", "rustls"] }
 
 # revm
 revm = { version = "41.0.0", default-features = false }
