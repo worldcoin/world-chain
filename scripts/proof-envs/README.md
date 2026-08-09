@@ -59,6 +59,6 @@ targets — they are intentionally **not** stored in config files:
 | `NITRO_ATTESTATION_VERIFIER` | `proof-approve-pcrs` |
 | `PCR0`, `PCR1`, `PCR2` | `proof-approve-pcrs` |
 
-`proof-setup` reads the two SP1 values from `proofs/backends/sp1/elfs/vkeys.json` and derives
-`TEE_IMAGE_ID` as `keccak256(rawPCR0)`.
-Standalone `proof-deploy-system` calls must supply all three values explicitly.
+`proof-setup` and standalone `proof-deploy-system` calls require all three verifier identities
+explicitly. During setup, the measured `keccak256(rawPCR0)` must match `TEE_IMAGE_ID` before the
+PCR set is approved.

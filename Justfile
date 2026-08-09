@@ -161,6 +161,7 @@ install *args='':
 # Required env vars (varies by target):
 #   PRIVATE_KEY, OWNER, OWNER_KEY, L1_RPC_URL,
 #   WORLD_CHAIN_L2_CHAIN_ID, ROLLUP_CONFIG_HASH,
+#   AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT, TEE_IMAGE_ID,
 #   CERT_MANAGER_ADDRESS, NITRO_ATTESTATION_VERIFIER
 #
 # Optional env vars (auto-fetched from enclave if not set):
@@ -708,8 +709,9 @@ proof-register-key env="alphanet":
         -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" -- sh -s
 
 # Combined – Run all proof system deployment phases in sequence.
-# Automatically wires contract addresses between steps. PCR0/1/2 are
-# auto-fetched from the running enclave if not pre-set.
+# Automatically wires contract addresses between steps. The game verifier
+# identities are explicit inputs; PCR0/1/2 are fetched only to provision and
+# verify the Nitro allowlist if not pre-set.
 proof-setup env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -717,6 +719,30 @@ proof-setup env="alphanet":
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
     fi
+    : "${AGGREGATION_VKEY:?AGGREGATION_VKEY is required}"
+    : "${RANGE_VKEY_COMMITMENT:?RANGE_VKEY_COMMITMENT is required}"
+    : "${TEE_IMAGE_ID:?TEE_IMAGE_ID is required}"
+    export AGGREGATION_VKEY RANGE_VKEY_COMMITMENT TEE_IMAGE_ID
+
+    if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
+        echo "=== Preflight: Fetching PCRs from running enclave ===" >&2
+        eval "$(just proof-get-pcrs {{env}})"
+    fi
+    [[ "$PCR0" == 0x* ]] || PCR0="0x$PCR0"
+    [[ "$PCR1" == 0x* ]] || PCR1="0x$PCR1"
+    [[ "$PCR2" == 0x* ]] || PCR2="0x$PCR2"
+    export PCR0 PCR1 PCR2
+    PCR0_HASH=$(cast keccak "$PCR0")
+    if [ "${PCR0_HASH,,}" != "${TEE_IMAGE_ID,,}" ]; then
+        echo "Error: running enclave PCR0 image ID does not match TEE_IMAGE_ID" >&2
+        echo "  expected: $TEE_IMAGE_ID" >&2
+        echo "  measured: $PCR0_HASH" >&2
+        exit 1
+    fi
+    echo "AGGREGATION_VKEY=$AGGREGATION_VKEY" >&2
+    echo "RANGE_VKEY_COMMITMENT=$RANGE_VKEY_COMMITMENT" >&2
+    echo "TEE_IMAGE_ID=$TEE_IMAGE_ID" >&2
+
     if [ -z "${WORLD_CHAIN_L2_CHAIN_ID:-}" ]; then
         echo "=== Step 0-pre: Fetching L2 chain ID from op-node ===" >&2
         WORLD_CHAIN_L2_CHAIN_ID=$(just proof-get-chain-id {{env}})
@@ -759,26 +785,6 @@ proof-setup env="alphanet":
         : "${SECURITY_COUNCIL_VERIFIER:=$(jq -r '.securityCouncil' "$MOCKS")}"
     fi
     export VALIDITY_PROOF_VERIFIER SECURITY_COUNCIL_VERIFIER
-
-    VKEYS="proofs/backends/sp1/elfs/vkeys.json"
-    : "${AGGREGATION_VKEY:=$(jq -r '.aggregation_vkey' "$VKEYS")}"
-    : "${RANGE_VKEY_COMMITMENT:=$(jq -r '.range_vkey_commitment' "$VKEYS")}"
-    export AGGREGATION_VKEY RANGE_VKEY_COMMITMENT
-
-    if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
-        echo "=== Step 1c: Fetching PCRs from running enclave ===" >&2
-        eval $(just proof-get-pcrs {{env}})
-    fi
-    [[ "$PCR0" == 0x* ]] || PCR0="0x$PCR0"
-    [[ "$PCR1" == 0x* ]] || PCR1="0x$PCR1"
-    [[ "$PCR2" == 0x* ]] || PCR2="0x$PCR2"
-    export PCR0 PCR1 PCR2
-    PCR0_HASH=$(cast keccak "$PCR0")
-    TEE_IMAGE_ID=$PCR0_HASH
-    export TEE_IMAGE_ID
-    echo "AGGREGATION_VKEY=$AGGREGATION_VKEY" >&2
-    echo "RANGE_VKEY_COMMITMENT=$RANGE_VKEY_COMMITMENT" >&2
-    echo "TEE_IMAGE_ID=$TEE_IMAGE_ID" >&2
 
     echo "=== Step 2: Deploying proof system contracts ===" >&2
     just dry_run={{dry_run}} proof-deploy-system {{env}}
