@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
-
 /// The set of proof lanes accepted for a proposal, one bit per `ProofLane`.
 type Bitmap is uint8;
 
@@ -71,46 +69,6 @@ library LibProof {
         uint256 l1OriginNumber
     ) internal pure returns (bytes32) {
         return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber, l1OriginHash, l1OriginNumber));
-    }
-
-    /// @dev Selects the verifier backing `lane`.
-    function verifierFor(
-        ProofLane lane,
-        IWorldChainProofVerifier validityProofVerifier,
-        IWorldChainProofVerifier teeVerifier,
-        IWorldChainProofVerifier securityCouncil
-    ) internal pure returns (IWorldChainProofVerifier) {
-        if (lane == ProofLane.VALIDITY_PROOF) return validityProofVerifier;
-        if (lane == ProofLane.TEE_ATTESTATION) return teeVerifier;
-        return securityCouncil;
-    }
-
-    /// @dev Selects the immutable verifier identity backing `lane`.
-    function verifierIdFor(ProofLane lane, bytes32 aggregationVKey, bytes32 teeImageId)
-        internal
-        pure
-        returns (bytes32)
-    {
-        if (lane == ProofLane.VALIDITY_PROOF) return aggregationVKey;
-        if (lane == ProofLane.TEE_ATTESTATION) return teeImageId;
-        return bytes32(0);
-    }
-
-    /// @dev Encodes the exact public values authenticated by `lane`.
-    ///      The validity and TEE lanes bind the transition, not `rootId` or a separate upgrade
-    ///      schedule. A derivation upgrade must therefore rotate at least one bound value:
-    ///      `rollupConfigHash`, the relevant SP1 vkey, or the Nitro PCR0 image ID.
-    function publicValuesFor(
-        ProofLane lane,
-        bytes32 rootId_,
-        TransitionPublicValues memory transition,
-        bytes32 rangeVKeyCommitment
-    ) internal pure returns (bytes memory) {
-        if (lane == ProofLane.VALIDITY_PROOF) {
-            return abi.encode(transition, rangeVKeyCommitment);
-        }
-        if (lane == ProofLane.TEE_ATTESTATION) return abi.encode(transition);
-        return abi.encode(rootId_);
     }
 
     /// @dev Splits a compact payload into its lane id, reward recipient, and verifier proof

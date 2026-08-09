@@ -504,11 +504,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             revert DuplicateProofLane(lane, rootId_, claimData.proofBitmap);
         }
 
-        // Verify the proof against the verifier configured for this lane.
-        IWorldChainProofVerifier verifier = lane.verifierFor(validityProofVerifier, teeVerifier, securityCouncil);
-        bytes32 verifierId = lane.verifierIdFor(aggregationVKey, teeImageId);
-        // The generic interface carries each lane's expected statement into its reusable verifier.
-        bytes memory publicValues = lane.publicValuesFor(rootId_, _transition(), rangeVKeyCommitment);
+        (IWorldChainProofVerifier verifier, bytes32 verifierId, bytes memory publicValues) =
+            _verificationCallFor(lane, rootId_, _transition());
         if (!verifier.verify(compact.proof, verifierId, publicValues)) {
             revert InvalidProof(lane, rootId_);
         }
@@ -809,6 +806,22 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @inheritdoc IMultiProofGame
     function proofDeadline() public view returns (Timestamp) {
         return Timestamp.wrap(createdAt.raw() + proofPeriod.raw());
+    }
+
+    /// @dev Selects the verifier and game-pinned statement for `lane`. The generic public-values
+    ///      argument lets each proof system authenticate its native statement through one interface.
+    function _verificationCallFor(ProofLane lane, bytes32 rootId_, TransitionPublicValues memory transition)
+        internal
+        view
+        returns (IWorldChainProofVerifier verifier, bytes32 verifierId, bytes memory publicValues)
+    {
+        if (lane == ProofLane.VALIDITY_PROOF) {
+            return (validityProofVerifier, aggregationVKey, abi.encode(transition, rangeVKeyCommitment));
+        }
+        if (lane == ProofLane.TEE_ATTESTATION) {
+            return (teeVerifier, teeImageId, abi.encode(transition));
+        }
+        return (securityCouncil, bytes32(0), abi.encode(rootId_));
     }
 
     /// @notice The transition public values a proof for this game must attest.
