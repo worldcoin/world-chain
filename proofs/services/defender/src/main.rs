@@ -11,7 +11,7 @@ use alloy_primitives::Address;
 use alloy_provider::ProviderBuilder;
 use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use tracing::info;
 use url::Url;
 use world_chain_defender::{
@@ -24,7 +24,11 @@ use world_chain_prover_service::RpcProverServiceClient;
 #[derive(Debug, Parser)]
 #[command(
     name = "world-chain-defender",
-    about = "World Chain proof-system defender: proves the lineage selected from the anchor"
+    about = "World Chain proof-system defender: proves the lineage selected from the anchor",
+    group = ArgGroup::new("transaction_signer")
+        .required(true)
+        .multiple(false)
+        .args(["defender_key", "defender_kms_key_id"])
 )]
 struct Cli {
     /// Ethereum L1 execution RPC URL.
@@ -97,10 +101,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
-    let signer = build_transaction_wallet(cli.defender_key, cli.defender_kms_key_id, &l1_rpc_url)
+    let wallet = build_transaction_wallet(cli.defender_key, cli.defender_kms_key_id, &l1_rpc_url)
         .await
         .context("failed to initialize defender signer")?;
-    let defender_address = signer.address;
+    let defender_address = wallet.default_signer().address();
     let reward_recipient = cli.proof_reward_recipient.unwrap_or(defender_address);
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,
@@ -109,7 +113,7 @@ async fn main() -> Result<()> {
     )
     .context("failed to build the L1 RPC client")?;
     let provider = ProviderBuilder::new()
-        .wallet(signer.wallet)
+        .wallet(wallet)
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, defender_address).await;
 
