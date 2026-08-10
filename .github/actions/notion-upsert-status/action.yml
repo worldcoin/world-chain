@@ -1,0 +1,43 @@
+name: Notion Upsert Release Status
+description: >-
+  Updates the Status (and optionally Release/RC Tag) of one row in the Notion
+  Release Deployment Tracker, matched by its Environment title. Fails the step
+  if the row can't be found unambiguously or the API call errors — this is a
+  release-visibility signal, not a best-effort notification.
+
+inputs:
+  environment:
+    description: Exact Notion "Environment" title to update (e.g. "Alchemy Sepolia").
+    required: true
+  status:
+    description: One of Deployed, Rolling out, Soaking, Reverted, Unknown.
+    required: true
+  tag:
+    description: Value to write into "Release / RC Tag" (optional).
+    required: false
+    default: ""
+  notion_token:
+    description: Notion internal integration token, scoped to only this database.
+    required: true
+  notion_database_id:
+    description: Notion database ID for the Release Deployment Tracker.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Upsert Notion row
+      shell: bash
+      env:
+        NOTION_TOKEN: ${{ inputs.notion_token }}
+        NOTION_DATABASE_ID: ${{ inputs.notion_database_id }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        STATUS: ${{ inputs.status }}
+        TAG: ${{ inputs.tag }}
+      run: |
+        set -euo pipefail
+        args=(--environment "${ENVIRONMENT}" --status "${STATUS}")
+        if [[ -n "${TAG}" ]]; then
+          args+=(--tag "${TAG}")
+        fi
+        "${{ github.action_path }}/../../scripts/notion-upsert-status.sh" "${args[@]}"
