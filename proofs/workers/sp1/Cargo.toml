@@ -26,7 +26,12 @@ world-chain-proof-worker.workspace = true
 world-chain-prover-service.workspace = true
 
 # alloy
+alloy-contract.workspace = true
+alloy-network.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
+alloy-provider = { workspace = true, features = ["reqwest", "reqwest-rustls-tls"] }
+alloy-signer = { workspace = true, features = ["eip712"] }
+alloy-signer-local.workspace = true
 alloy-sol-types.workspace = true
 
 # misc
@@ -41,6 +46,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time"] }
 tracing.workspace = true
 telemetry-batteries.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 testcontainers.workspace = true

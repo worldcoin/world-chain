@@ -2,14 +2,18 @@
 //! verify them; the aggregation proof mode is configurable (Groth16 for on-chain verification).
 
 use crate::{SuccinctProverError, WorldSuccinctProver};
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 pub use sp1_sdk::SP1ProofMode;
 use sp1_sdk::{
     HashableKey, NetworkProver, ProveRequest, Prover, ProverClient, ProvingKey, SP1Proof,
     SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
-    network::proto::{GetProofRequestStatusResponse, types::FulfillmentStatus},
+    network::{
+        NetworkClient, NetworkMode, get_default_rpc_url_for_mode,
+        proto::{GetProofRequestStatusResponse, types::FulfillmentStatus},
+        signer::NetworkSigner,
+    },
 };
 use world_chain_proof_core::types::AggregationInputs;
 use world_chain_proof_sp1_types::{
@@ -23,6 +27,38 @@ pub struct NetworkSuccinctProver {
     agg_pk: SP1ProvingKey,
     multi_block_vkey: [u32; 8],
     agg_mode: SP1ProofMode,
+}
+
+/// Lightweight client for reading an account's SP1 Network credit balance.
+///
+/// Unlike [`NetworkSuccinctProver`], this does not initialize the SP1 light node or set up the
+/// embedded proving programs. It uses the same private key and `NETWORK_RPC_URL` selection as
+/// the SDK's network prover builder.
+#[derive(Clone)]
+pub struct NetworkCreditClient {
+    client: NetworkClient,
+}
+
+impl NetworkCreditClient {
+    /// Creates a mainnet credit client for `private_key`.
+    pub fn new(private_key: &str) -> anyhow::Result<Self> {
+        let signer = NetworkSigner::local(private_key).context("invalid SP1 private key")?;
+        let network_mode = NetworkMode::Mainnet;
+        let rpc_url = std::env::var("NETWORK_RPC_URL")
+            .unwrap_or_else(|_| get_default_rpc_url_for_mode(network_mode));
+
+        Ok(Self {
+            client: NetworkClient::new(signer, rpc_url, network_mode),
+        })
+    }
+
+    /// Returns the account's available SP1 Network credits in PROVE base units.
+    pub async fn get_balance(&self) -> anyhow::Result<U256> {
+        self.client
+            .get_balance()
+            .await
+            .context("failed to get SP1 Network credit balance")
+    }
 }
 
 impl NetworkSuccinctProver {

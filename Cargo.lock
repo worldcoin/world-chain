@@ -1017,7 +1017,9 @@ version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6913d06ccc0d9c6ab67e2f82e2fbe292706da1f91442f30cded2d04b56bf0d58"
 dependencies = [
+ "alloy-dyn-abi",
  "alloy-primitives",
+ "alloy-sol-types",
  "async-trait",
  "auto_impl",
  "either",
@@ -19251,7 +19253,12 @@ dependencies = [
 name = "world-chain-proof-sp1-worker"
 version = "2.4.1"
 dependencies = [
+ "alloy-contract",
+ "alloy-network 2.1.1",
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer 2.1.1",
+ "alloy-signer-local 2.1.1",
  "alloy-sol-types",
  "anyhow",
  "async-trait",
@@ -19266,6 +19273,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tracing",
+ "url",
  "world-chain-chainspec",
  "world-chain-proof-core",
  "world-chain-proof-kona-host",
