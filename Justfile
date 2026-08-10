@@ -711,6 +711,10 @@ proof-register-key env="alphanet":
         printf 'export ENCLAVE_CID=%s\n' "$(shq "$ENCLAVE_CID")"
         printf 'export NITRO_ENCLAVE_KEY_REGISTRY=%s\n' "$(shq "$NITRO_ENCLAVE_KEY_REGISTRY")"
         printf 'export L1_RPC_URL=%s\n' "$(shq "$L1_RPC_URL")"
+        # `kubectl exec` inherits the container environment. Clear both dedicated signer
+        # variables before setting the selected one so an auto-register configuration on
+        # the Deployment cannot make this one-shot command see two signer sources.
+        printf 'unset REGISTER_PRIVATE_KEY REGISTER_KMS_KEY_ID\n'
         if [ -n "${REGISTER_KMS_KEY_ID:-}" ]; then
             printf 'export REGISTER_KMS_KEY_ID=%s\n' "$(shq "$REGISTER_KMS_KEY_ID")"
         else
