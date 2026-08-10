@@ -144,7 +144,7 @@ async fn shared_buffer_call_resolves_selector() {
 
     let (_, inspector, _) = evm.components_mut();
     let trace = inspector
-        .take_trace_entries()
+        .trace_entries()
         .expect("completed simulation should produce a complete trace");
 
     let inner = trace

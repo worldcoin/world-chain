@@ -195,10 +195,8 @@ pub enum SimulationStatus {
 #[serde(rename_all = "camelCase")]
 pub struct SimulateUnsignedUserOpResult {
     pub status: SimulationStatus,
-    /// Decoded reason for a top-level revert/halt; `None` on success.
-    /// For nested reverts this is the *deepest* reverted frame's payload
-    /// (the root cause), not the outermost — important for ERC-4337 where
-    /// EntryPoint always wraps inner reverts in `FailedOp(...)`.
+    /// Best-effort decoded explanation of the execution failure; `None` on
+    /// success.
     pub revert_reason: Option<String>,
     pub block_number: u64,
     pub gas_used: String,
@@ -233,7 +231,7 @@ struct RawTrace {
     outcome: Option<TraceOutcome>,
     /// Populated by the matching end hook for an explicit REVERT with a
     /// non-empty payload.
-    revert_reason: Option<String>,
+    revert_output: Option<Bytes>,
 }
 
 #[derive(Debug)]
@@ -293,26 +291,19 @@ pub struct SimulationInspector {
     /// Active frame stack. Each CALL or CREATE pushes a new entry; the
     /// matching `*_end` pops it. See [`PendingFrame`].
     pending_frames: Vec<PendingFrame>,
-    /// Raw payload of the deepest frame that exited via REVERT. Set on the
-    /// first `call_end` or `create_end` whose `InstructionResult` is `Revert`
-    /// — since end hooks fire bottom-up, that's the innermost reverter and so
-    /// the root cause when wrappers like EntryPoint's `FailedOp(...)`
-    /// re-revert up the stack. Halt frames (OOG, invalid opcode, etc.) are
-    /// skipped: they have no payload to decode.
-    deepest_revert_payload: Option<Bytes>,
     /// Internal frame-bookkeeping failure. Inspector hooks cannot return an
     /// error to revm, so defer it until the caller collects the trace.
     trace_error: Option<&'static str>,
 }
 
 impl SimulationInspector {
-    pub fn take_trace_entries(&mut self) -> Result<Vec<TraceEntry>, &'static str> {
-        if let Some(error) = self.trace_error.take() {
+    pub fn trace_entries(&self) -> Result<Vec<TraceEntry>, &'static str> {
+        if let Some(error) = self.trace_error {
             return Err(error);
         }
 
-        std::mem::take(&mut self.traces)
-            .into_iter()
+        self.traces
+            .iter()
             .map(|t| {
                 let outcome = t
                     .outcome
@@ -328,7 +319,7 @@ impl SimulationInspector {
                     value: format!("{:#x}", t.value),
                     depth: t.depth,
                     outcome,
-                    revert_reason: t.revert_reason,
+                    revert_reason: t.revert_output.as_ref().map(decode_revert_reason),
                 })
             })
             .collect()
@@ -354,11 +345,9 @@ impl SimulationInspector {
             .collect()
     }
 
-    /// Take the decoded reason of the deepest reverted frame, if any.
-    pub fn take_deepest_revert_reason(&mut self) -> Option<String> {
-        self.deepest_revert_payload
-            .take()
-            .map(|output| decode_revert_reason(&output))
+    /// Decoded reason from the terminally failing frame path, if any.
+    pub fn terminal_revert_reason(&self) -> Option<String> {
+        terminal_revert_payload(&self.traces).map(decode_revert_reason)
     }
 
     /// Drain captured CREATE/CREATE2 deployments. Each entry is
@@ -410,11 +399,115 @@ impl SimulationInspector {
             TraceOutcome::Halt
         });
         if matches!(result, InstructionResult::Revert) && !output.is_empty() {
-            trace.revert_reason = Some(decode_revert_reason(output));
+            trace.revert_output = Some(output.clone());
         }
 
         Some(trace)
     }
+}
+
+/// Response-level revert payload: the best explanation of the failure that
+/// caused the whole simulation to fail, selected from the completed trace.
+///
+/// The trace is a pre-order flattening of the call tree (entries appear in
+/// call order, parents before their children), so `depth` alone recovers
+/// the tree shape. Selection is [`frame_revert_payload`] applied to the
+/// root frame.
+fn terminal_revert_payload(traces: &[RawTrace]) -> Option<&Bytes> {
+    if traces.is_empty() {
+        return None;
+    }
+    frame_revert_payload(traces, 0)
+}
+
+/// Best revert payload attributable to the frame at `index`:
+///
+/// - A successful or halted frame explains nothing (halts have no payload).
+/// - A reverted frame's own non-empty payload wins — it is the terminal
+///   failure at that level — except Safe4337Module's bare `ExecutionFailed()`
+///   from an `executeUserOp` frame, which deliberately replaces the revert
+///   its Safe call caught; recover that via [`safe_execution_revert`].
+/// - An empty revert inherits from its last child if that child also failed.
+///   Earlier failed siblings were superseded by whatever ran after them.
+fn frame_revert_payload(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
+    let mut current = index;
+    loop {
+        let frame = &traces[current];
+        if frame.outcome != Some(TraceOutcome::Revert) {
+            return None;
+        }
+        match &frame.revert_output {
+            Some(output)
+                if output.as_ref() == EXECUTION_FAILED_SELECTOR
+                    && frame.selector == Some(EXECUTE_USER_OP_SELECTOR) =>
+            {
+                return safe_execution_revert(traces, current).or(Some(output));
+            }
+            Some(output) => return Some(output),
+            None => current = last_direct_child(traces, current)?,
+        }
+    }
+}
+
+/// Revert caught by a successful Safe `execTransactionFromModule` call below
+/// the `executeUserOp` frame. Proxy and delegatecall layers may produce more
+/// than one matching frame; the first contains the others and the target.
+fn safe_execution_revert(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
+    let frame_depth = traces[index].depth;
+    for (descendant, trace) in traces.iter().enumerate().skip(index + 1) {
+        if trace.depth <= frame_depth {
+            break;
+        }
+        if trace.outcome == Some(TraceOutcome::Success)
+            && trace.selector == Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR)
+        {
+            return safe_transaction_revert(traces, descendant);
+        }
+    }
+    None
+}
+
+/// Payload of the failed target call made by `execTransactionFromModule`.
+///
+/// Proxy and delegatecall layers preserve the selector, so cross only those
+/// successful wrapper frames. At the implementation frame, the failed direct
+/// child is the target call that made Safe return `false`. Other successful
+/// children may be module-guard callbacks; their internally caught reverts do
+/// not explain `ExecutionFailed()`.
+fn safe_transaction_revert(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
+    let parent_depth = traces[index].depth;
+    for (child, trace) in traces.iter().enumerate().skip(index + 1) {
+        if trace.depth <= parent_depth {
+            break;
+        }
+        if trace.depth == parent_depth + 1 {
+            if trace.outcome == Some(TraceOutcome::Success)
+                && trace.selector == Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR)
+            {
+                if let Some(candidate) = safe_transaction_revert(traces, child) {
+                    return Some(candidate);
+                }
+            } else if trace.outcome == Some(TraceOutcome::Revert) {
+                return frame_revert_payload(traces, child);
+            }
+        }
+    }
+    None
+}
+
+/// Index of the last direct child of the frame at `parent`, if any.
+fn last_direct_child(traces: &[RawTrace], parent: usize) -> Option<usize> {
+    let parent_depth = traces[parent].depth;
+    let mut last = None;
+    for (index, trace) in traces.iter().enumerate().skip(parent + 1) {
+        if trace.depth <= parent_depth {
+            break;
+        }
+        if trace.depth == parent_depth + 1 {
+            last = Some(index);
+        }
+    }
+    last
 }
 
 impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspector {
@@ -460,7 +553,7 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
             value,
             depth,
             outcome: None,
-            revert_reason: None,
+            revert_output: None,
         });
 
         // Open a new frame. If this call reverts, `call_end` will drop the
@@ -491,15 +584,6 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
         self.record_trace_outcome(frame.trace_index, result, outcome.output());
         if !result.is_ok() {
             // Frame reverted or halted — drop everything tentative inside it.
-            // For explicit REVERTs, capture the deepest payload (the first
-            // one we see, since `call_end` fires bottom-up) so wrappers like
-            // EntryPoint's `FailedOp(...)` don't mask the root cause. Halts
-            // and the other `is_revert()` variants (CallTooDeep, OutOfFunds,
-            // EOF init-code) have empty outputs.
-            if matches!(result, InstructionResult::Revert) && self.deepest_revert_payload.is_none()
-            {
-                self.deepest_revert_payload = Some(outcome.output().clone());
-            }
             return;
         }
         self.commit_or_bubble(frame);
@@ -526,7 +610,7 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
             value: inputs.value(),
             depth: self.pending_frames.len(),
             outcome: None,
-            revert_reason: None,
+            revert_output: None,
         });
         self.pending_frames.push(PendingFrame::new(trace_index));
         None
@@ -550,13 +634,7 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
             trace.to = outcome.address;
         }
         if !result.is_ok() {
-            // CREATE itself failed — drop the frame. Capture an explicit
-            // constructor REVERT before an outer call can replace its useful
-            // payload with a wrapper error.
-            if matches!(result, InstructionResult::Revert) && self.deepest_revert_payload.is_none()
-            {
-                self.deepest_revert_payload = Some(outcome.output().clone());
-            }
+            // CREATE itself failed — drop the frame.
             return;
         }
         // Successful create: record `(deployer, deployed)` into the create
@@ -899,8 +977,9 @@ where
         //     side-effects from the inspector. The EVM owns it; recover a
         //     `&mut` via `components_mut()` and drain.
         let (_, inspector, _) = evm.components_mut();
+        let terminal_revert_reason = inspector.terminal_revert_reason();
         let trace = inspector
-            .take_trace_entries()
+            .trace_entries()
             .map_err(|error| internal_err(format!("simulation inspector failed: {error}")))?;
         asset_changes.extend(inspector.take_native_asset_changes());
         let inspector_creations = inspector.take_contract_creations();
@@ -910,24 +989,17 @@ where
             .collect();
         let inspector_destructs = inspector.take_self_destructs();
 
-        // `revert_reason` is the *root cause* — the deepest reverted frame's
-        // payload — so consumers see the contract-specific custom error from
-        // the inner call rather than wrappers like EntryPoint's
-        // `FailedOp(...)` that live further up the stack. Falls back to the
-        // outer payload if the inspector somehow saw no `Revert` frame, and
-        // halts surface their `HaltReason` debug name unchanged.
+        // Halts surface their `HaltReason` debug name unchanged; the outer
+        // payload is the last resort when trace selection produced nothing.
+        let outer_revert_reason = match &result_and_state.result {
+            ExecutionResult::Revert { output, .. } => Some(decode_revert_reason(output)),
+            _ => None,
+        };
         let revert_reason = match status {
             SimulationStatus::Success => None,
-            SimulationStatus::Revert => halt_reason.or_else(|| {
-                inspector
-                    .take_deepest_revert_reason()
-                    .or_else(|| match &result_and_state.result {
-                        ExecutionResult::Revert { output, .. } => {
-                            Some(decode_revert_reason(output))
-                        }
-                        _ => None,
-                    })
-            }),
+            SimulationStatus::Revert => halt_reason
+                .or(terminal_revert_reason)
+                .or(outer_revert_reason),
         };
 
         // Apply the simulated state diff to the in-memory DB before metadata
@@ -1723,6 +1795,285 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    /// Completed trace entry for hand-built `terminal_revert_payload` trees.
+    fn completed_trace(
+        depth: usize,
+        outcome: TraceOutcome,
+        selector: Option<[u8; 4]>,
+        revert_output: Option<&'static [u8]>,
+    ) -> RawTrace {
+        completed_trace_with_kind(TraceKind::Call, depth, outcome, selector, revert_output)
+    }
+
+    fn completed_trace_with_kind(
+        kind: TraceKind,
+        depth: usize,
+        outcome: TraceOutcome,
+        selector: Option<[u8; 4]>,
+        revert_output: Option<&'static [u8]>,
+    ) -> RawTrace {
+        RawTrace {
+            kind,
+            from: Address::ZERO,
+            to: Some(Address::ZERO),
+            selector,
+            value: U256::ZERO,
+            depth,
+            outcome: Some(outcome),
+            revert_output: revert_output.map(Bytes::from_static),
+        }
+    }
+
+    #[test]
+    fn terminal_selection_handles_trivial_shapes() {
+        assert_eq!(terminal_revert_payload(&[]), None);
+        assert_eq!(
+            terminal_revert_payload(&[completed_trace(0, TraceOutcome::Success, None, None)]),
+            None
+        );
+        assert_eq!(
+            terminal_revert_payload(&[completed_trace(0, TraceOutcome::Halt, None, None)]),
+            None
+        );
+    }
+
+    #[test]
+    fn empty_revert_inherits_only_from_a_failed_last_child() {
+        // Failed child then successful sibling: nothing to inherit.
+        let superseded = [
+            completed_trace(0, TraceOutcome::Revert, None, None),
+            completed_trace(1, TraceOutcome::Revert, None, Some(b"\xaa")),
+            completed_trace(1, TraceOutcome::Success, None, None),
+        ];
+        assert_eq!(terminal_revert_payload(&superseded), None);
+
+        // Successful child then failed sibling: the last child explains it.
+        let inherited = [
+            completed_trace(0, TraceOutcome::Revert, None, None),
+            completed_trace(1, TraceOutcome::Success, None, None),
+            completed_trace(1, TraceOutcome::Revert, None, Some(b"\xbb")),
+        ];
+        assert_eq!(
+            terminal_revert_payload(&inherited),
+            Some(&Bytes::from_static(b"\xbb"))
+        );
+
+        // A halted last child has no payload to inherit.
+        let halted = [
+            completed_trace(0, TraceOutcome::Revert, None, None),
+            completed_trace(1, TraceOutcome::Halt, None, None),
+        ];
+        assert_eq!(terminal_revert_payload(&halted), None);
+    }
+
+    #[test]
+    fn last_direct_child_ignores_an_earlier_siblings_grandchildren() {
+        // Root reverts empty. First child succeeded (its own inner revert was
+        // caught and is irrelevant); the *last direct child* is the later
+        // sibling, not the deeper grandchild that appears between them.
+        let traces = [
+            completed_trace(0, TraceOutcome::Revert, None, None),
+            completed_trace(1, TraceOutcome::Success, None, None),
+            completed_trace(2, TraceOutcome::Revert, None, Some(b"\xaa")),
+            completed_trace(1, TraceOutcome::Revert, None, Some(b"\xbb")),
+        ];
+        assert_eq!(
+            terminal_revert_payload(&traces),
+            Some(&Bytes::from_static(b"\xbb"))
+        );
+    }
+
+    #[test]
+    fn safe_execution_failed_recovers_revert_from_successful_subtree() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
+        // executeUserOp frame reverts bare ExecutionFailed(); proxy and
+        // delegatecall layers both retain the execTransactionFromModule
+        // selector, with the caught target revert below them.
+        let traces = [
+            completed_trace(
+                0,
+                TraceOutcome::Revert,
+                Some(EXECUTE_USER_OP_SELECTOR),
+                Some(execution_failed),
+            ),
+            // Safe4337Module calls the Safe proxy.
+            completed_trace(
+                1,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            // The proxy delegates the same calldata to the Safe singleton.
+            completed_trace_with_kind(
+                TraceKind::DelegateCall,
+                2,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            completed_trace(3, TraceOutcome::Revert, None, Some(b"\xaa")),
+        ];
+        assert_eq!(
+            terminal_revert_payload(&traces),
+            Some(&Bytes::from_static(b"\xaa"))
+        );
+    }
+
+    #[test]
+    fn safe_execution_failed_recovers_revert_before_trailing_success() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
+        let traces = [
+            completed_trace(
+                0,
+                TraceOutcome::Revert,
+                Some(EXECUTE_USER_OP_SELECTOR),
+                Some(execution_failed),
+            ),
+            completed_trace(
+                1,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            completed_trace(2, TraceOutcome::Revert, None, Some(b"\xbb")),
+            // Safe 1.5 may run a successful post-execution check after the
+            // target call; that later success must not hide the target revert.
+            completed_trace(2, TraceOutcome::Success, None, None),
+        ];
+        assert_eq!(
+            terminal_revert_payload(&traces),
+            Some(&Bytes::from_static(b"\xbb"))
+        );
+    }
+
+    #[test]
+    fn safe_execution_failed_ignores_revert_caught_by_post_execution_check() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
+        let traces = [
+            completed_trace(
+                0,
+                TraceOutcome::Revert,
+                Some(EXECUTE_USER_OP_SELECTOR),
+                Some(execution_failed),
+            ),
+            completed_trace(
+                1,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            // This failed target call makes execTransactionFromModule return
+            // false and is the reason executeUserOp reverts ExecutionFailed().
+            completed_trace(2, TraceOutcome::Revert, None, Some(b"\xaa")),
+            // A later post-execution check succeeds after catching an
+            // unrelated revert inside its own subtree.
+            completed_trace(2, TraceOutcome::Success, None, None),
+            completed_trace(3, TraceOutcome::Revert, None, Some(b"\xbb")),
+        ];
+        assert_eq!(
+            terminal_revert_payload(&traces),
+            Some(&Bytes::from_static(b"\xaa"))
+        );
+    }
+
+    #[test]
+    fn safe_recovery_requires_exec_transaction_from_module() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
+        let traces = [
+            completed_trace(
+                0,
+                TraceOutcome::Revert,
+                Some(EXECUTE_USER_OP_SELECTOR),
+                Some(execution_failed),
+            ),
+            completed_trace(1, TraceOutcome::Success, None, None),
+            completed_trace(2, TraceOutcome::Revert, None, Some(b"\xaa")),
+        ];
+        assert_eq!(
+            terminal_revert_payload(&traces),
+            Some(&Bytes::from_static(execution_failed))
+        );
+    }
+
+    #[test]
+    fn safe_execution_failed_falls_back_without_descendant_revert() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
+        // Without a descendant revert the wrapper itself is all we know.
+        let traces = [completed_trace(
+            0,
+            TraceOutcome::Revert,
+            Some(EXECUTE_USER_OP_SELECTOR),
+            Some(execution_failed),
+        )];
+        assert_eq!(
+            terminal_revert_payload(&traces),
+            Some(&Bytes::from_static(execution_failed))
+        );
+    }
+
+    #[test]
+    fn safe_recovery_requires_exact_selector_and_payload() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
+        // Recovery is gated on the executeUserOp selector: any other frame
+        // reverting with the same bytes keeps its own payload.
+        let wrong_selector = [
+            completed_trace(
+                0,
+                TraceOutcome::Revert,
+                Some([0xde, 0xad, 0xbe, 0xef]),
+                Some(execution_failed),
+            ),
+            completed_trace(
+                1,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            completed_trace(2, TraceOutcome::Revert, None, Some(b"\xaa")),
+        ];
+        assert_eq!(
+            terminal_revert_payload(&wrong_selector),
+            Some(&Bytes::from_static(execution_failed))
+        );
+
+        // ...and on an exact payload: ExecutionFailed with appended data is
+        // some other error that happens to share the selector.
+        let inexact: &'static [u8] = b"\xac\xfd\xb4\x44\xde\xad\xbe\xef";
+        let inexact_payload = [
+            completed_trace(
+                0,
+                TraceOutcome::Revert,
+                Some(EXECUTE_USER_OP_SELECTOR),
+                Some(inexact),
+            ),
+            completed_trace(
+                1,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            completed_trace(2, TraceOutcome::Revert, None, Some(b"\xaa")),
+        ];
+        assert_eq!(
+            terminal_revert_payload(&inexact_payload),
+            Some(&Bytes::from_static(inexact))
+        );
+    }
+
+    #[test]
+    fn terminal_reason_remains_available_after_reading_trace_entries() {
+        let mut inspector = SimulationInspector::default();
+        inspector.traces.push(completed_trace(
+            0,
+            TraceOutcome::Revert,
+            None,
+            Some(b"\xaa"),
+        ));
+
+        assert_eq!(inspector.trace_entries().expect("complete trace").len(), 1);
+        assert_eq!(inspector.terminal_revert_reason().as_deref(), Some("0xaa"));
+    }
+
     #[test]
     fn missing_trace_entry_is_reported_without_panicking() {
         let mut inspector = SimulationInspector::default();
@@ -1733,7 +2084,7 @@ mod tests {
                 .is_none()
         );
         assert!(matches!(
-            inspector.take_trace_entries(),
+            inspector.trace_entries(),
             Err("simulation inspector frame referenced a missing trace entry")
         ));
     }
@@ -1749,11 +2100,11 @@ mod tests {
             value: U256::ZERO,
             depth: 0,
             outcome: None,
-            revert_reason: None,
+            revert_output: None,
         });
 
         assert!(matches!(
-            inspector.take_trace_entries(),
+            inspector.trace_entries(),
             Err("simulation inspector trace frame did not complete")
         ));
     }
