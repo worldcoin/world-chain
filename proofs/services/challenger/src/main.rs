@@ -7,12 +7,11 @@
 
 use std::time::Duration;
 
-use alloy_network::EthereumWallet;
 use alloy_primitives::Address;
 use alloy_provider::ProviderBuilder;
 use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use tracing::info;
 use url::Url;
 use world_chain_challenger::{
@@ -21,11 +20,16 @@ use world_chain_challenger::{
     ResolutionManagerConfig, WorldChainChallenger,
 };
 use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
+use world_chain_proof_tx_signer::build_transaction_wallet;
 
 #[derive(Debug, Parser)]
 #[command(
     name = "world-chain-challenger",
-    about = "World Chain proof-system challenger: challenges invalid output-root proposals on L1"
+    about = "World Chain proof-system challenger: challenges invalid output-root proposals on L1",
+    group = ArgGroup::new("transaction_signer")
+        .required(true)
+        .multiple(false)
+        .args(["challenger_key", "challenger_kms_key_id"])
 )]
 struct Cli {
     /// Ethereum L1 execution RPC URL.
@@ -46,7 +50,11 @@ struct Cli {
 
     /// Hex-encoded private key the challenger signs L1 transactions with.
     #[arg(long, env = "CHALLENGER_KEY", hide_env_values = true)]
-    challenger_key: PrivateKeySigner,
+    challenger_key: Option<PrivateKeySigner>,
+
+    /// AWS KMS key ID or alias the challenger signs L1 transactions with.
+    #[arg(long, env = "CHALLENGER_KMS_KEY_ID", hide_env_values = true)]
+    challenger_kms_key_id: Option<String>,
 
     /// Seconds between game-factory polls.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
@@ -120,8 +128,12 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let challenger_address = cli.challenger_key.address();
     let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
+    let wallet =
+        build_transaction_wallet(cli.challenger_key, cli.challenger_kms_key_id, &l1_rpc_url)
+            .await
+            .context("failed to initialize challenger signer")?;
+    let challenger_address = wallet.default_signer().address();
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,
         world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
@@ -129,7 +141,7 @@ async fn main() -> Result<()> {
     )
     .context("failed to build the L1 RPC client")?;
     let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(cli.challenger_key))
+        .wallet(wallet)
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, challenger_address).await;
 
