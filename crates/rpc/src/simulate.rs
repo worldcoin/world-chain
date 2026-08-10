@@ -426,11 +426,11 @@ fn terminal_revert_payload(traces: &[RawTrace]) -> Option<&Bytes> {
 /// - A reverted frame's own non-empty payload wins — it is the terminal
 ///   failure at that level — except Safe4337Module's bare `ExecutionFailed()`
 ///   from an `executeUserOp` frame, which deliberately replaces the revert
-///   its Safe call caught; recover that via [`latest_descendant_revert`].
+///   its Safe call caught; recover that via [`safe_execution_revert`].
 /// - An empty revert inherits from its last child if that child also failed.
 ///   Earlier failed siblings were superseded by whatever ran after them.
 fn frame_revert_payload(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
-    let frame = &traces[index];
+    let frame: &RawTrace = &traces[index];
     if frame.outcome != Some(TraceOutcome::Revert) {
         return None;
     }
@@ -439,7 +439,7 @@ fn frame_revert_payload(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
             if output.as_ref() == EXECUTION_FAILED_SELECTOR
                 && frame.selector == Some(EXECUTE_USER_OP_SELECTOR) =>
         {
-            latest_descendant_revert(traces, index).or(Some(output))
+            safe_execution_revert(traces, index).or(Some(output))
         }
         Some(output) => Some(output),
         None => {
@@ -449,18 +449,48 @@ fn frame_revert_payload(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
     }
 }
 
+/// Revert caught by a successful Safe `execTransactionFromModule` call below
+/// the `executeUserOp` frame. Proxy and delegatecall layers may produce more
+/// than one matching frame; the first contains the others and the target.
+fn safe_execution_revert(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
+    let frame_depth = traces[index].depth;
+    for (descendant, trace) in traces.iter().enumerate().skip(index + 1) {
+        if trace.depth <= frame_depth {
+            break;
+        }
+        if trace.outcome == Some(TraceOutcome::Success)
+            && trace.selector == Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR)
+        {
+            return latest_descendant_revert(traces, descendant);
+        }
+    }
+    None
+}
+
 /// Payload of the most recent revert below the frame at `index`, crossing
 /// successful frames: Safe's `execTransactionFromModule` catches the target
 /// revert and succeeds returning `false`, so the revert that explains
-/// `ExecutionFailed()` sits inside a successful subtree. Only the chain of
-/// *last* children is followed — anything that ran later superseded earlier
-/// failures.
+/// `ExecutionFailed()` sits inside a successful subtree. The latest child
+/// branch containing a revert wins; a later successful module-guard callback
+/// with no revert therefore does not hide the target failure.
 fn latest_descendant_revert(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
-    let last_child = last_direct_child(traces, index)?;
-    match traces[last_child].outcome {
-        Some(TraceOutcome::Success) => latest_descendant_revert(traces, last_child),
-        _ => frame_revert_payload(traces, last_child),
+    let parent_depth = traces[index].depth;
+    let mut latest = None;
+    for (child, trace) in traces.iter().enumerate().skip(index + 1) {
+        if trace.depth <= parent_depth {
+            break;
+        }
+        if trace.depth == parent_depth + 1 {
+            let candidate = match trace.outcome {
+                Some(TraceOutcome::Success) => latest_descendant_revert(traces, child),
+                _ => frame_revert_payload(traces, child),
+            };
+            if candidate.is_some() {
+                latest = candidate;
+            }
+        }
     }
+    latest
 }
 
 /// Index of the last direct child of the frame at `parent`, if any.
@@ -1770,8 +1800,18 @@ mod tests {
         selector: Option<[u8; 4]>,
         revert_output: Option<&'static [u8]>,
     ) -> RawTrace {
+        completed_trace_with_kind(TraceKind::Call, depth, outcome, selector, revert_output)
+    }
+
+    fn completed_trace_with_kind(
+        kind: TraceKind,
+        depth: usize,
+        outcome: TraceOutcome,
+        selector: Option<[u8; 4]>,
+        revert_output: Option<&'static [u8]>,
+    ) -> RawTrace {
         RawTrace {
-            kind: TraceKind::Call,
+            kind,
             from: Address::ZERO,
             to: Some(Address::ZERO),
             selector,
@@ -1844,8 +1884,69 @@ mod tests {
     #[test]
     fn safe_execution_failed_recovers_revert_from_successful_subtree() {
         let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
-        // executeUserOp frame reverts bare ExecutionFailed(); the caught
-        // target revert sits under a successful execTransactionFromModule.
+        // executeUserOp frame reverts bare ExecutionFailed(); proxy and
+        // delegatecall layers both retain the execTransactionFromModule
+        // selector, with the caught target revert below them.
+        let traces = [
+            completed_trace(
+                0,
+                TraceOutcome::Revert,
+                Some(EXECUTE_USER_OP_SELECTOR),
+                Some(execution_failed),
+            ),
+            // Safe4337Module calls the Safe proxy.
+            completed_trace(
+                1,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            // The proxy delegates the same calldata to the Safe singleton.
+            completed_trace_with_kind(
+                TraceKind::DelegateCall,
+                2,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            completed_trace(3, TraceOutcome::Revert, None, Some(b"\xaa")),
+        ];
+        assert_eq!(
+            terminal_revert_payload(&traces),
+            Some(&Bytes::from_static(b"\xaa"))
+        );
+    }
+
+    #[test]
+    fn safe_execution_failed_recovers_revert_before_trailing_success() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
+        let traces = [
+            completed_trace(
+                0,
+                TraceOutcome::Revert,
+                Some(EXECUTE_USER_OP_SELECTOR),
+                Some(execution_failed),
+            ),
+            completed_trace(
+                1,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            completed_trace(2, TraceOutcome::Revert, None, Some(b"\xbb")),
+            // Safe 1.5 may run a successful post-execution check after the
+            // target call; that later success must not hide the target revert.
+            completed_trace(2, TraceOutcome::Success, None, None),
+        ];
+        assert_eq!(
+            terminal_revert_payload(&traces),
+            Some(&Bytes::from_static(b"\xbb"))
+        );
+    }
+
+    #[test]
+    fn safe_recovery_requires_exec_transaction_from_module() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
         let traces = [
             completed_trace(
                 0,
@@ -1858,21 +1959,29 @@ mod tests {
         ];
         assert_eq!(
             terminal_revert_payload(&traces),
-            Some(&Bytes::from_static(b"\xaa"))
+            Some(&Bytes::from_static(execution_failed))
         );
+    }
 
+    #[test]
+    fn safe_execution_failed_falls_back_without_descendant_revert() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
         // Without a descendant revert the wrapper itself is all we know.
-        let bare = [completed_trace(
+        let traces = [completed_trace(
             0,
             TraceOutcome::Revert,
             Some(EXECUTE_USER_OP_SELECTOR),
             Some(execution_failed),
         )];
         assert_eq!(
-            terminal_revert_payload(&bare),
+            terminal_revert_payload(&traces),
             Some(&Bytes::from_static(execution_failed))
         );
+    }
 
+    #[test]
+    fn safe_recovery_requires_exact_selector_and_payload() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
         // Recovery is gated on the executeUserOp selector: any other frame
         // reverting with the same bytes keeps its own payload.
         let wrong_selector = [
@@ -1882,7 +1991,12 @@ mod tests {
                 Some([0xde, 0xad, 0xbe, 0xef]),
                 Some(execution_failed),
             ),
-            completed_trace(1, TraceOutcome::Success, None, None),
+            completed_trace(
+                1,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
             completed_trace(2, TraceOutcome::Revert, None, Some(b"\xaa")),
         ];
         assert_eq!(
@@ -1900,7 +2014,12 @@ mod tests {
                 Some(EXECUTE_USER_OP_SELECTOR),
                 Some(inexact),
             ),
-            completed_trace(1, TraceOutcome::Success, None, None),
+            completed_trace(
+                1,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
             completed_trace(2, TraceOutcome::Revert, None, Some(b"\xaa")),
         ];
         assert_eq!(

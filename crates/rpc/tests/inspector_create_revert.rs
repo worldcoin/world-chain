@@ -17,7 +17,9 @@ use revm_primitives::TxKind;
 
 use world_chain_rpc::{
     simulate::{SimulationInspector, TraceKind, TraceOutcome, relax_cfg_for_simulation},
-    simulate_consts::{EXECUTE_USER_OP_SELECTOR, EXECUTION_FAILED_SELECTOR},
+    simulate_consts::{
+        EXEC_TRANSACTION_FROM_MODULE_SELECTOR, EXECUTE_USER_OP_SELECTOR, EXECUTION_FAILED_SELECTOR,
+    },
 };
 
 const CHAIN_ID: u64 = 480;
@@ -25,6 +27,7 @@ const CALLER: Address = address!("00000000000000000000000000000000DeaDBeef");
 const TRAMPOLINE: Address = address!("000000000000000000000000000000000000c0de");
 const REVERTING_CHILD: Address = address!("000000000000000000000000000000000000cafe");
 const CATCHING_CHILD: Address = address!("000000000000000000000000000000000000beef");
+const MODULE_GUARD: Address = address!("000000000000000000000000000000000000feed");
 
 /// Reverts with `0xaaaaaaaa`.
 const CHILD_REVERT: &[u8] = &[
@@ -149,13 +152,34 @@ fn run_trampoline_with_input(
     (result, std::mem::take(inspector))
 }
 
-/// Calls `child` (discarding its result), then reverts with the supplied
-/// four-byte payload.
-fn call_then_revert(child: Address, parent_payload: [u8; 4]) -> Vec<u8> {
-    let mut code = vec![
-        0x5f, 0x5f, 0x5f, 0x5f, 0x5f, // Empty CALL output/input and zero value
+/// Calls `child` with an optional four-byte selector (discarding its result),
+/// then reverts with the supplied four-byte payload.
+fn call_then_revert(
+    child: Address,
+    child_selector: Option<[u8; 4]>,
+    parent_payload: [u8; 4],
+) -> Vec<u8> {
+    let mut code = Vec::new();
+    if let Some(selector) = child_selector {
+        code.push(0x63); // PUSH4 selector
+        code.extend_from_slice(&selector);
+        code.extend_from_slice(&[0x5f, 0x52]); // PUSH0; MSTORE
+    }
+    code.extend_from_slice(&[
+        0x5f, 0x5f, // Empty CALL output
+    ]);
+    if child_selector.is_some() {
+        code.extend_from_slice(&[
+            0x60, 0x04, // PUSH1 4 (input length)
+            0x60, 0x1c, // PUSH1 28 (input offset)
+        ]);
+    } else {
+        code.extend_from_slice(&[0x5f, 0x5f]); // Empty CALL input
+    }
+    code.extend_from_slice(&[
+        0x5f, // Zero value
         0x73, // PUSH20 child address
-    ];
+    ]);
     code.extend_from_slice(child.as_slice());
     code.extend_from_slice(&[
         0x61, 0xff, 0xff, // PUSH2 65535 gas
@@ -183,6 +207,24 @@ fn call_then_stop(child: Address) -> Vec<u8> {
         0xf1, 0x50, // CALL; POP result
         0x00, // STOP
     ]);
+    code
+}
+
+/// Calls `first` and then `second`, discarding both results, before stopping.
+fn call_two_then_stop(first: Address, second: Address) -> Vec<u8> {
+    let mut code = Vec::new();
+    for child in [first, second] {
+        code.extend_from_slice(&[
+            0x5f, 0x5f, 0x5f, 0x5f, 0x5f, // Empty CALL output/input and zero value
+            0x73, // PUSH20 child address
+        ]);
+        code.extend_from_slice(child.as_slice());
+        code.extend_from_slice(&[
+            0x61, 0xff, 0xff, // PUSH2 65535 gas
+            0xf1, 0x50, // CALL; POP result
+        ]);
+    }
+    code.push(0x00); // STOP
     code
 }
 
@@ -274,7 +316,7 @@ fn inspector_traces_successful_create_with_deployed_address() {
 
 #[test]
 fn terminal_parent_revert_ignores_earlier_caught_child() {
-    let trampoline = call_then_revert(REVERTING_CHILD, [0xbb; 4]);
+    let trampoline = call_then_revert(REVERTING_CHILD, None, [0xbb; 4]);
     let (result, inspector) = run_trampoline_with_input(
         &trampoline,
         &[(REVERTING_CHILD, CHILD_REVERT)],
@@ -303,7 +345,11 @@ fn safe_execution_failed_retains_revert_across_successful_catching_frame() {
     // false successfully. Safe4337Module.executeUserOp then replaces that
     // return value with the exact `ExecutionFailed()` custom error.
     let catching_child = call_then_stop(REVERTING_CHILD);
-    let trampoline = call_then_revert(CATCHING_CHILD, EXECUTION_FAILED_SELECTOR);
+    let trampoline = call_then_revert(
+        CATCHING_CHILD,
+        Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+        EXECUTION_FAILED_SELECTOR,
+    );
     let (result, inspector) = run_trampoline_with_input(
         &trampoline,
         &[
@@ -325,5 +371,45 @@ fn safe_execution_failed_retains_revert_across_successful_catching_frame() {
     assert_eq!(trace[0].selector.as_deref(), Some("0x7bb37428"));
     assert_eq!(trace[0].revert_reason.as_deref(), Some("0xacfdb444"));
     assert_eq!(trace[1].outcome, TraceOutcome::Success);
+    assert_eq!(trace[1].selector.as_deref(), Some("0x468721a7"));
     assert_eq!(trace[2].revert_reason.as_deref(), Some("0xaaaaaaaa"));
+}
+
+#[test]
+fn safe_execution_failed_retains_revert_before_successful_module_guard() {
+    // Safe 1.5 calls checkAfterModuleExecution after the target. The trailing
+    // successful guard call must not hide the target revert that caused
+    // execTransactionFromModule to return false.
+    let catching_child = call_two_then_stop(REVERTING_CHILD, MODULE_GUARD);
+    let trampoline = call_then_revert(
+        CATCHING_CHILD,
+        Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+        EXECUTION_FAILED_SELECTOR,
+    );
+    let (result, inspector) = run_trampoline_with_input(
+        &trampoline,
+        &[
+            (CATCHING_CHILD, &catching_child),
+            (REVERTING_CHILD, CHILD_REVERT),
+            (MODULE_GUARD, &[0x00]),
+        ],
+        Bytes::copy_from_slice(&EXECUTE_USER_OP_SELECTOR),
+    );
+
+    assert!(matches!(result, ExecutionResult::Revert { .. }));
+    assert_eq!(
+        inspector.terminal_revert_reason().as_deref(),
+        Some("0xaaaaaaaa")
+    );
+
+    let trace = inspector
+        .trace_entries()
+        .expect("completed simulation should produce a complete trace");
+    let [execute_user_op, safe, target, guard] = trace.as_slice() else {
+        panic!("expected executeUserOp, Safe, target, and guard frames, got {trace:?}");
+    };
+    assert_eq!(execute_user_op.outcome, TraceOutcome::Revert);
+    assert_eq!(safe.outcome, TraceOutcome::Success);
+    assert_eq!(target.revert_reason.as_deref(), Some("0xaaaaaaaa"));
+    assert_eq!(guard.outcome, TraceOutcome::Success);
 }

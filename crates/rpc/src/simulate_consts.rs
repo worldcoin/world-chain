@@ -131,6 +131,9 @@ pub(crate) const PANIC_UINT256_SELECTOR: [u8; 4] = [0x4e, 0x48, 0x7b, 0x71];
 /// Safe4337Module `executeUserOp(address,uint256,bytes,uint8)` selector.
 pub const EXECUTE_USER_OP_SELECTOR: [u8; 4] = [0x7b, 0xb3, 0x74, 0x28];
 
+/// Safe `execTransactionFromModule(address,uint256,bytes,uint8)` selector.
+pub const EXEC_TRANSACTION_FROM_MODULE_SELECTOR: [u8; 4] = [0x46, 0x87, 0x21, 0xa7];
+
 /// Safe4337Module `ExecutionFailed()` selector.
 pub const EXECUTION_FAILED_SELECTOR: [u8; 4] = [0xac, 0xfd, 0xb4, 0x44];
 
