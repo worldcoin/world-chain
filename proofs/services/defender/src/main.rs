@@ -81,6 +81,15 @@ struct Cli {
     )]
     l1_tx_confirmations: u64,
 
+    /// Maximum seconds to wait for an L1 transaction receipt and required confirmations.
+    #[arg(
+        long,
+        env = "L1_TX_RECEIPT_TIMEOUT_SECONDS",
+        default_value_t = world_chain_proof_protocol::DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    l1_tx_receipt_timeout_seconds: u64,
+
     /// Per-request timeout applied to every L1 RPC call, in seconds.
     #[arg(
         long,
@@ -122,6 +131,7 @@ async fn main() -> Result<()> {
         provider,
         cli.factory_address,
         cli.l1_tx_confirmations,
+        Duration::from_secs(cli.l1_tx_receipt_timeout_seconds),
         reward_recipient,
     )
     .await
@@ -149,6 +159,7 @@ async fn main() -> Result<()> {
         defender = %defender_address,
         reward_recipient = %reward_recipient,
         l1_tx_confirmations = cli.l1_tx_confirmations,
+        l1_tx_receipt_timeout_seconds = cli.l1_tx_receipt_timeout_seconds,
         l1_rpc_timeout_seconds = cli.l1_rpc_timeout_seconds,
         "starting World Chain proof-system defender"
     );
