@@ -529,6 +529,11 @@ The operator calls `NitroEnclaveKeyRegistry.registerKey(attestationTbs, signatur
 - Derives its Ethereum signer address as `keccak256(publicKey[1:65])[12:]`
 - Signer state transitions from `Unknown` → `Active`
 
+The host-side funding account that submits this transaction can use either a local private key
+(`REGISTER_PRIVATE_KEY`, with `PRIVATE_KEY` as a legacy fallback) or an AWS KMS key
+(`REGISTER_KMS_KEY_ID`). This is only transaction signing by the host worker; it is separate from
+the proposed KMS-based persistence of the enclave's ephemeral proof-signing key.
+
 ### 6. Prove
 
 The enclave can now produce range proofs whose secp256k1 signatures will be accepted
