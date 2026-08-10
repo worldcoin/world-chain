@@ -2,14 +2,18 @@
 //! verify them; the aggregation proof mode is configurable (Groth16 for on-chain verification).
 
 use crate::{SuccinctProverError, WorldSuccinctProver};
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 pub use sp1_sdk::SP1ProofMode;
 use sp1_sdk::{
-    HashableKey, NetworkProver, ProveRequest, Prover, ProverClient, ProvingKey, SP1Proof,
+    HashableKey, NetworkProver, ProveRequest, Prover, ProvingKey, SP1Proof,
     SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
-    network::proto::{GetProofRequestStatusResponse, types::FulfillmentStatus},
+    network::{
+        NetworkClient, NetworkMode, get_default_rpc_url_for_mode,
+        proto::{GetProofRequestStatusResponse, types::FulfillmentStatus},
+        signer::NetworkSigner,
+    },
 };
 use world_chain_proof_core::types::AggregationInputs;
 use world_chain_proof_sp1_types::{
@@ -25,17 +29,64 @@ pub struct NetworkSuccinctProver {
     agg_mode: SP1ProofMode,
 }
 
+/// Lightweight client for reading an account's SP1 Network credit balance.
+///
+/// Unlike [`NetworkSuccinctProver`], this does not initialize the SP1 light node or set up the
+/// embedded proving programs. It uses the same private key and `NETWORK_RPC_URL` selection as
+/// the SDK's network prover builder.
+#[derive(Clone)]
+pub struct NetworkCreditClient {
+    client: NetworkClient,
+}
+
+struct NetworkConnection {
+    signer: NetworkSigner,
+    rpc_url: String,
+    mode: NetworkMode,
+}
+
+fn network_connection(private_key: &str) -> anyhow::Result<NetworkConnection> {
+    let signer = NetworkSigner::local(private_key).context("invalid SP1 private key")?;
+    // PROVE deposits fund the auction-based SP1 Network --> Network = Mainnet
+    let mode = NetworkMode::Mainnet;
+    let rpc_url =
+        std::env::var("NETWORK_RPC_URL").unwrap_or_else(|_| get_default_rpc_url_for_mode(mode));
+
+    Ok(NetworkConnection {
+        signer,
+        rpc_url,
+        mode,
+    })
+}
+
+impl NetworkCreditClient {
+    /// Creates a mainnet credit client for `private_key`.
+    pub fn new(private_key: &str) -> anyhow::Result<Self> {
+        let connection = network_connection(private_key)?;
+
+        Ok(Self {
+            client: NetworkClient::new(connection.signer, connection.rpc_url, connection.mode),
+        })
+    }
+
+    /// Returns the account's available SP1 Network credits in PROVE base units.
+    pub async fn get_balance(&self) -> anyhow::Result<U256> {
+        self.client
+            .get_balance()
+            .await
+            .context("failed to get SP1 Network credit balance")
+    }
+}
+
 impl NetworkSuccinctProver {
     /// Creates the prover using caller-supplied ELFs. Use this in production binaries with
     /// ELFs embedded at compile time via `world_chain_proof_sp1_elfs`.
     pub async fn new(agg_mode: SP1ProofMode, private_key: &str) -> anyhow::Result<Self> {
         let range_elf = world_chain_proof_sp1_elfs::range_elf();
         let agg_elf = world_chain_proof_sp1_elfs::aggregation_elf();
-        let client = ProverClient::builder()
-            .network()
-            .private_key(private_key)
-            .build()
-            .await;
+        let connection = network_connection(private_key)?;
+        let client =
+            NetworkProver::new(connection.signer, &connection.rpc_url, connection.mode).await;
         let range_pk = client
             .setup(range_elf.clone())
             .await

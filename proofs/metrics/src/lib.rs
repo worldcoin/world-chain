@@ -46,6 +46,10 @@ pub const METRICS_PROOF_JOB_DURATION_SECONDS: &str = "proof_job.duration_seconds
 pub const METRICS_ENCLAVE_KEY_REGISTERED: &str = "enclave_key.registered";
 /// Enclave key registration attempts, by outcome.
 pub const METRICS_ENCLAVE_REGISTRATION_ATTEMPTS: &str = "enclave_key.registration_attempts";
+/// Current SP1 Network credit balance in human-readable PROVE.
+pub const METRICS_SP1_NETWORK_PROVE_BALANCE: &str = "sp1_network_prove_balance";
+/// Whether the SP1 Network credit balance meets the worker's startup threshold.
+pub const METRICS_SP1_NETWORK_BALANCE_SUFFICIENT: &str = "sp1_network_balance_sufficient";
 
 /// Registers shared metric descriptions.
 pub fn describe_metrics() {
@@ -116,6 +120,27 @@ pub fn describe_metrics() {
         metrics::Unit::Count,
         "Enclave key registration attempts by outcome (registered, already_registered, failed)."
     );
+    metrics::describe_gauge!(
+        METRICS_SP1_NETWORK_PROVE_BALANCE,
+        metrics::Unit::Count,
+        "Current SP1 Network credit balance in human-readable PROVE."
+    );
+    metrics::describe_gauge!(
+        METRICS_SP1_NETWORK_BALANCE_SUFFICIENT,
+        metrics::Unit::Count,
+        "1 when SP1 Network credits meet the worker threshold, 0 otherwise."
+    );
+}
+
+/// Updates the SP1 Network credit balance and sufficiency gauges.
+pub fn record_sp1_network_balance(balance_prove: f64, sufficient: bool) {
+    metrics::gauge!(METRICS_SP1_NETWORK_PROVE_BALANCE).set(balance_prove);
+    metrics::gauge!(METRICS_SP1_NETWORK_BALANCE_SUFFICIENT).set(if sufficient { 1.0 } else { 0.0 });
+}
+
+/// Marks the SP1 Network credit balance as insufficient when it cannot be read.
+pub fn record_sp1_network_balance_unavailable() {
+    metrics::gauge!(METRICS_SP1_NETWORK_BALANCE_SUFFICIENT).set(0.0);
 }
 
 /// Sets the enclave-key registration gauge.
