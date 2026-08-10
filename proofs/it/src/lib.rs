@@ -42,6 +42,9 @@ pub const BLOCK_INTERVAL: u64 = 10;
 pub const CHAIN_ID: u64 = 4801;
 pub const ANCHOR: Address = address!("0000000000000000000000000000000000001006");
 pub const FAKE_PROPOSER: Address = address!("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1");
+const AGGREGATION_VKEY: B256 = B256::repeat_byte(0x44);
+const RANGE_VKEY_COMMITMENT: B256 = B256::repeat_byte(0x45);
+const TEE_IMAGE_ID: B256 = B256::repeat_byte(0x46);
 
 /// Fake game lifecycle. The contract splits this across `ProposalStatus` (challenged or not)
 /// and `GameStatus` (the terminal outcome); the fake keeps one field and derives both.
@@ -586,6 +589,9 @@ impl DefenderClient for FakeExecution {
             .map(|record| DefenderGameMetadata {
                 address: game,
                 domain_hash: state.domain_hash,
+                aggregation_vkey: AGGREGATION_VKEY,
+                range_vkey_commitment: RANGE_VKEY_COMMITMENT,
+                tee_image_id: TEE_IMAGE_ID,
                 parent_ref: record.creation.parent_ref,
                 root_claim: record.creation.root_claim,
                 l2_block_number: record.creation.l2_block_number,

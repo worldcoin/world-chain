@@ -102,6 +102,9 @@ where
         let game = self.game(address);
         let (
             domain_hash,
+            aggregation_vkey,
+            range_vkey_commitment,
+            tee_image_id,
             parent_ref,
             root_claim,
             l2_block_number,
@@ -114,6 +117,9 @@ where
             .provider
             .multicall()
             .add(game.proposalDomainHash())
+            .add(game.aggregationVKey())
+            .add(game.rangeVKeyCommitment())
+            .add(game.teeImageId())
             .add(game.parentRef())
             .add(game.rootClaim())
             .add(game.l2SequenceNumber())
@@ -134,6 +140,9 @@ where
         Ok(GameMetadata {
             address,
             domain_hash,
+            aggregation_vkey,
+            range_vkey_commitment,
+            tee_image_id,
             parent_ref,
             root_claim,
             l2_block_number: u256_to_u64(l2_block_number)?,
