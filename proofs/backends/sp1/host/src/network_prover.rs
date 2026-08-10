@@ -20,6 +20,15 @@ use world_chain_proof_sp1_types::{
     AggregationProofRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
 };
 
+/// Signer type used by SP1 network prover.
+#[derive(Debug, Clone, Copy)]
+pub enum SignerType {
+    /// Local signer.
+    Local,
+    /// AWS KMS signer.
+    Aws,
+}
+
 /// [`WorldSuccinctProver`] network implementation over the sp1-sdk network prover.
 pub struct NetworkSuccinctProver {
     client: NetworkProver,
@@ -45,8 +54,16 @@ struct NetworkConnection {
     mode: NetworkMode,
 }
 
-fn network_connection(private_key: &str) -> anyhow::Result<NetworkConnection> {
-    let signer = NetworkSigner::local(private_key).context("invalid SP1 private key")?;
+async fn network_connection(
+    secret: &str,
+    signer_type: SignerType,
+) -> anyhow::Result<NetworkConnection> {
+    let signer = match signer_type {
+        SignerType::Local => NetworkSigner::local(secret).context("invalid SP1 private key")?,
+        SignerType::Aws => NetworkSigner::aws_kms(secret)
+            .await
+            .context("invalid AWS KMS key id")?,
+    };
     // PROVE deposits fund the auction-based SP1 Network --> Network = Mainnet
     let mode = NetworkMode::Mainnet;
     let rpc_url =
@@ -60,9 +77,9 @@ fn network_connection(private_key: &str) -> anyhow::Result<NetworkConnection> {
 }
 
 impl NetworkCreditClient {
-    /// Creates a mainnet credit client for `private_key`.
-    pub fn new(private_key: &str) -> anyhow::Result<Self> {
-        let connection = network_connection(private_key)?;
+    /// Creates a mainnet credit client for the provided secret.
+    pub async fn new(secret: &str, signer_type: SignerType) -> anyhow::Result<Self> {
+        let connection = network_connection(secret, signer_type).await?;
 
         Ok(Self {
             client: NetworkClient::new(connection.signer, connection.rpc_url, connection.mode),
@@ -81,10 +98,14 @@ impl NetworkCreditClient {
 impl NetworkSuccinctProver {
     /// Creates the prover using caller-supplied ELFs. Use this in production binaries with
     /// ELFs embedded at compile time via `world_chain_proof_sp1_elfs`.
-    pub async fn new(agg_mode: SP1ProofMode, private_key: &str) -> anyhow::Result<Self> {
+    pub async fn new(
+        agg_mode: SP1ProofMode,
+        secret: &str,
+        signer_type: SignerType,
+    ) -> anyhow::Result<Self> {
         let range_elf = world_chain_proof_sp1_elfs::range_elf();
         let agg_elf = world_chain_proof_sp1_elfs::aggregation_elf();
-        let connection = network_connection(private_key)?;
+        let connection = network_connection(secret, signer_type).await?;
         let client =
             NetworkProver::new(connection.signer, &connection.rpc_url, connection.mode).await;
         let range_pk = client
