@@ -235,12 +235,10 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
             .await
         }
         Sp1ProverKind::Network => {
-            let l1_rpc_url = Url::parse(
-                cli.sp1_network_l1_rpc_url
-                    .as_deref()
-                    .context("SP1_NETWORK_L1_RPC_URL is required when --prover network")?,
-            )
-            .context("invalid SP1 Network L1 RPC URL")?;
+            let l1_rpc_url = cli
+                .sp1_network_l1_rpc_url
+                .as_ref()
+                .context("SP1_NETWORK_L1_RPC_URL is required when --prover network")?;
             let (network_secret, signer_type) = match (&cli.sp1_private_key, &cli.sp1_kms_key_id) {
                 (Some(private_key), None) => (private_key.as_str(), SignerType::Local),
                 (None, Some(key_id)) => (key_id.as_str(), SignerType::AwsKms),
@@ -249,7 +247,7 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
             let vapp_address = cli
                 .succinct_vapp_address
                 .context("SUCCINCT_VAPP_ADDRESS is required when --prover network")?;
-            let settlement = load_settlement_config(l1_rpc_url.as_str(), vapp_address)
+            let settlement = load_settlement_config(l1_rpc_url, vapp_address)
                 .await
                 .context("validating Succinct settlement configuration")?;
             let minimum_balance = minimum_network_balance(settlement.min_deposit_amount)?;
