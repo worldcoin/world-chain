@@ -11,7 +11,7 @@ use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
-    network_prover::{NetworkCreditClient, NetworkSuccinctProver, SignerType},
+    network_prover::{NetworkConnection, NetworkCreditClient, NetworkSuccinctProver, SignerType},
 };
 use world_chain_proof_sp1_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
@@ -250,7 +250,8 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
                 .await
                 .context("validating Succinct settlement configuration")?;
             let minimum_balance = minimum_network_balance(settlement.min_deposit_amount)?;
-            let credit_client = NetworkCreditClient::new(network_secret, signer_type).await?;
+            let connection = NetworkConnection::new(network_secret, signer_type).await?;
+            let credit_client = NetworkCreditClient::from_connection(connection.clone());
 
             if !wait_for_sufficient_network_balance(
                 &credit_client,
@@ -266,8 +267,7 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
             run_worker(
                 &cli,
                 host,
-                NetworkSuccinctProver::new(SP1ProofMode::Groth16, network_secret, signer_type)
-                    .await?,
+                NetworkSuccinctProver::from_connection(SP1ProofMode::Groth16, connection).await?,
             )
             .await
         }
