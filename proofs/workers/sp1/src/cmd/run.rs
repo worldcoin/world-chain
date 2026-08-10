@@ -1,7 +1,6 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::{Address, B256, U256};
-use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use url::Url;
@@ -18,7 +17,6 @@ use world_chain_proof_sp1_host::{
 use world_chain_proof_sp1_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
 };
-use world_chain_proof_tx_signer::build_transaction_signer;
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;
 
@@ -238,20 +236,16 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
         }
         Sp1ProverKind::Network => {
             let l1_rpc_url = Url::parse(
-                &cli.sp1_network_l1_rpc_url
+                cli.sp1_network_l1_rpc_url
+                    .as_deref()
                     .context("SP1_NETWORK_L1_RPC_URL is required when --prover network")?,
             )
             .context("invalid SP1 Network L1 RPC URL")?;
-            let l1_private_key = cli
-                .sp1_private_key
-                .as_deref()
-                .map(str::parse::<PrivateKeySigner>)
-                .transpose()
-                .context("invalid SP1 private key")?;
-            let l1_signer =
-                build_transaction_signer(l1_private_key, cli.sp1_kms_key_id.clone(), &l1_rpc_url)
-                    .await
-                    .context("initializing L1 transaction signer")?;
+            let (network_secret, signer_type) = match (&cli.sp1_private_key, &cli.sp1_kms_key_id) {
+                (Some(private_key), None) => (private_key.as_str(), SignerType::Local),
+                (None, Some(key_id)) => (key_id.as_str(), SignerType::AwsKms),
+                _ => bail!("configure exactly one SP1 private key or AWS KMS key ID"),
+            };
             let vapp_address = cli
                 .succinct_vapp_address
                 .context("SUCCINCT_VAPP_ADDRESS is required when --prover network")?;
@@ -259,7 +253,7 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
                 .await
                 .context("validating Succinct settlement configuration")?;
             let minimum_balance = minimum_network_balance(settlement.min_deposit_amount)?;
-            let credit_client = NetworkCreditClient::new(l1_signer);
+            let credit_client = NetworkCreditClient::new(network_secret, signer_type).await?;
 
             if !wait_for_sufficient_network_balance(
                 &credit_client,
@@ -275,7 +269,8 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
             run_worker(
                 &cli,
                 host,
-                NetworkSuccinctProver::new(SP1ProofMode::Groth16, l1_signer).await?,
+                NetworkSuccinctProver::new(SP1ProofMode::Groth16, network_secret, signer_type)
+                    .await?,
             )
             .await
         }

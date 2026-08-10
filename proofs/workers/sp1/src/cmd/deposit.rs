@@ -8,9 +8,7 @@ use alloy_sol_types::eip712_domain;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use url::Url;
-use world_chain_proof_sp1_host::network_prover::{
-    NetworkCreditClient, SignerType, network_connection,
-};
+use world_chain_proof_sp1_host::network_prover::{NetworkCreditClient, SignerType};
 use world_chain_proof_tx_signer::{TransactionSigner, build_transaction_signer};
 
 use super::succinct::{
@@ -77,7 +75,16 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
         build_transaction_signer(l1_private_key, args.sp1_kms_key_id.clone(), &l1_rpc_url)
             .await
             .context("initializing L1 transaction signer")?;
-    let credit_client = NetworkCreditClient::new(l1_signer);
+    let (network_secret, signer_type) = match (&args.sp1_private_key, &args.sp1_kms_key_id) {
+        (Some(private_key), None) => (private_key.as_str(), SignerType::Local),
+        (None, Some(key_id)) => (key_id.as_str(), SignerType::AwsKms),
+        _ => bail!("configure exactly one SP1 private key or AWS KMS key ID"),
+    };
+    let signer_address = match &l1_signer {
+        TransactionSigner::Local(signer) => signer.address(),
+        TransactionSigner::Aws(signer) => signer.address(),
+    };
+    let credit_client = NetworkCreditClient::new(network_secret, signer_type).await?;
     let credit_before = credit_client
         .get_balance()
         .await

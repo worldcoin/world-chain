@@ -9,7 +9,12 @@ repository.workspace = true
 
 [features]
 # SP1 zkVM proving via the sp1-sdk environment provers.
-sp1 = ["dep:sp1-sdk", "dep:bincode", "dep:alloy-sol-types", "dep:world-chain-proof-sp1-elfs"]
+sp1 = [
+    "dep:sp1-sdk",
+    "dep:bincode",
+    "dep:alloy-sol-types",
+    "dep:world-chain-proof-sp1-elfs",
+]
 
 [dependencies]
 alloy-primitives = { workspace = true, features = ["serde"] }
@@ -30,4 +35,3 @@ bincode = { version = "1", optional = true }
 sp1-sdk = { version = "=6.1.0", features = ["network"], optional = true }
 async-trait.workspace = true
 world-chain-prover-service.workspace = true
-world-chain-proof-tx-signer.workspace = true
