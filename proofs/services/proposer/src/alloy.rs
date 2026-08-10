@@ -3,6 +3,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
+use std::time::Duration;
 use world_chain_proof_protocol::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, MULTI_PROOF_GAME_TYPE,
@@ -27,6 +28,7 @@ pub struct AlloyProofSystemClient<P> {
     registered: RegisteredLineageConfig,
     /// Number of confirmations to require after sending a tx onchain.
     confirmations: u64,
+    receipt_timeout: Duration,
     provider: P,
 }
 
@@ -43,6 +45,7 @@ where
         provider: P,
         factory_address: Address,
         confirmations: u64,
+        receipt_timeout: Duration,
     ) -> Result<Self, ProposerError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
@@ -59,6 +62,7 @@ where
             anchor,
             registered,
             confirmations,
+            receipt_timeout,
             provider,
         })
     }
@@ -103,6 +107,7 @@ where
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
@@ -172,6 +177,7 @@ where
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
@@ -303,6 +309,7 @@ where
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
@@ -334,6 +341,7 @@ where
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;

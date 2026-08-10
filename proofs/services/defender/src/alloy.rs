@@ -7,6 +7,7 @@ use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_sol_types::SolInterface;
 use async_trait::async_trait;
+use std::time::Duration;
 use world_chain_proof_protocol::{
     ClaimData, IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, PROOF_LANE_COUNT, ProofLane,
@@ -24,6 +25,7 @@ pub struct AlloyDefenderClient<P> {
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     registered: RegisteredLineageConfig,
     confirmations: u64,
+    receipt_timeout: Duration,
     /// Credited this lane's share of a forfeited challenger bond when the game resolves.
     reward_recipient: Address,
     provider: P,
@@ -38,6 +40,7 @@ where
         provider: P,
         factory_address: Address,
         confirmations: u64,
+        receipt_timeout: Duration,
         reward_recipient: Address,
     ) -> Result<Self, DefenderError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
@@ -55,6 +58,7 @@ where
             anchor,
             registered,
             confirmations,
+            receipt_timeout,
             reward_recipient,
             provider,
         })
@@ -187,6 +191,7 @@ where
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;

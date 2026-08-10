@@ -78,6 +78,15 @@ struct Cli {
     #[arg(long, env = "CONFIRMATIONS", default_value_t = 5)]
     confirmations: u64,
 
+    /// Maximum seconds to wait for an L1 transaction receipt and required confirmations.
+    #[arg(
+        long,
+        env = "L1_TX_RECEIPT_TIMEOUT_SECONDS",
+        default_value_t = world_chain_proof_protocol::DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    l1_tx_receipt_timeout_seconds: u64,
+
     /// Per-request timeout applied to every L1 RPC call, in seconds.
     #[arg(
         long,
@@ -114,9 +123,14 @@ async fn main() -> Result<()> {
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, proposer_address).await;
 
-    let contracts = AlloyProofSystemClient::new(provider, cli.factory_address, cli.confirmations)
-        .await
-        .context("failed to bind the World Chain proof system")?;
+    let contracts = AlloyProofSystemClient::new(
+        provider,
+        cli.factory_address,
+        cli.confirmations,
+        Duration::from_secs(cli.l1_tx_receipt_timeout_seconds),
+    )
+    .await
+    .context("failed to bind the World Chain proof system")?;
     let bond_manager_config = BondManagerConfig {
         poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
         initial_scan_limit: cli.bond_manager_initial_scan_limit,
@@ -147,6 +161,7 @@ async fn main() -> Result<()> {
         max_resolutions_per_tick = cli.max_resolutions_per_tick,
         bond_manager_poll_interval_seconds = cli.bond_manager_poll_interval_seconds,
         bond_manager_initial_scan_limit = cli.bond_manager_initial_scan_limit,
+        l1_tx_receipt_timeout_seconds = cli.l1_tx_receipt_timeout_seconds,
         l1_rpc_timeout_seconds = cli.l1_rpc_timeout_seconds,
         "starting World Chain proof-system proposer"
     );
