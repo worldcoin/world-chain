@@ -59,9 +59,13 @@ impl NetworkConnection {
     pub async fn new(secret: &str, signer_type: SignerType) -> anyhow::Result<Self> {
         let signer = match signer_type {
             SignerType::Local => NetworkSigner::local(secret).context("invalid SP1 private key")?,
-            SignerType::AwsKms => Box::pin(NetworkSigner::aws_kms(secret))
-                .await
-                .context("failed to initialize AWS KMS signer for SP1 SDK")?,
+            SignerType::AwsKms => {
+                // Keep the AWS SDK future boxed. Storing it inline makes the enclosing
+                // devnet futures exceed rustc's query-depth limit during workspace clippy.
+                Box::pin(NetworkSigner::aws_kms(secret))
+                    .await
+                    .context("failed to initialize AWS KMS signer for SP1 SDK")?
+            }
         };
         // PROVE deposits fund the auction-based SP1 Network --> Network = Mainnet
         let mode = NetworkMode::Mainnet;
