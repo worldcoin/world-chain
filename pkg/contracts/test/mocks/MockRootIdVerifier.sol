@@ -2,7 +2,10 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../../src/dispute/interfaces/IWorldChainProofVerifier.sol";
-import {LibProof, TransitionPublicValues} from "../../src/dispute/lib/LibProof.sol";
+
+interface IRootIdSource {
+    function rootId() external view returns (bytes32);
+}
 
 /// @title MockRootIdVerifier
 /// @author World Contributors
@@ -10,6 +13,9 @@ import {LibProof, TransitionPublicValues} from "../../src/dispute/lib/LibProof.s
 contract MockRootIdVerifier is IWorldChainProofVerifier {
     mapping(bytes32 rootId => bool accepted) public acceptedRoots;
     bool public acceptAny;
+    bool public enforceParameters;
+    bytes32 public expectedVerifierId;
+    bytes32 public expectedPublicValuesHash;
 
     constructor(bool acceptAny_) {
         acceptAny = acceptAny_;
@@ -23,13 +29,26 @@ contract MockRootIdVerifier is IWorldChainProofVerifier {
         acceptedRoots[rootId] = accepted;
     }
 
-    function verify(bytes32 rootId, TransitionPublicValues calldata, bytes calldata proof)
+    function setExpectedParameters(bytes32 verifierId, bytes calldata publicValues) external {
+        enforceParameters = true;
+        expectedVerifierId = verifierId;
+        expectedPublicValuesHash = keccak256(publicValues);
+    }
+
+    function verify(bytes calldata proof, bytes32 verifierId, bytes calldata publicValues)
         external
         view
         returns (bool)
     {
-        if (acceptAny || acceptedRoots[rootId]) return true;
+        if (enforceParameters && verifierId != expectedVerifierId) return false;
+        if (enforceParameters && keccak256(publicValues) != expectedPublicValuesHash) return false;
+        if (acceptAny) return true;
         if (proof.length != 32) return false;
-        return abi.decode(proof, (bytes32)) == rootId;
+        bytes32 rootId = abi.decode(proof, (bytes32));
+        try IRootIdSource(msg.sender).rootId() returns (bytes32 expectedRootId) {
+            return rootId == expectedRootId || acceptedRoots[rootId];
+        } catch {
+            return acceptedRoots[rootId];
+        }
     }
 }

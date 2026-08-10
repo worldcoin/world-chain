@@ -58,11 +58,15 @@ import {NitroProofVerifier} from "../../src/dispute/nitro/NitroProofVerifier.sol
 ///        3. Roll out new enclaves; each registers via
 ///           `NitroEnclaveKeyRegistry.registerKey`, which calls
 ///           `NitroAttestationVerifier.verifyAttestation`. The verifier
-///           accepts both old- and new-image attestations during overlap.
-///        4. After migration, `verifier.revokePCRSet(oldPcr0, oldPcr1,
-///           oldPcr2)` to stop accepting new registrations for the retired
-///           image. Already-registered signers remain in the registry until
-///           individually revoked via `registry.revokeSigner(signer)`.
+///           records each signer's PCR0 image ID.
+///        4. Deploy a new game implementation pinned to
+///           `newPcr0`. The Nitro
+///           verifier is reusable; existing games remain pinned to the old
+///           image.
+///        5. No revocation is required for a routine upgrade: games pinned to
+///           `newPcr0` reject old-image signers. Optionally revoke the old PCR
+///           set to stop future old-image registrations. Revoke an individual
+///           signer only if its key may be compromised.
 contract DeployNitro is Script {
     function run() external {
         address owner = vm.envAddress("OWNER");

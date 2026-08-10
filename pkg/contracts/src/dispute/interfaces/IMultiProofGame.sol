@@ -57,6 +57,9 @@ interface IMultiProofGame is IDisputeGame {
         uint256 challengerBond;
         address protocolFeeRecipient;
         uint8 proofThreshold;
+        bytes32 aggregationVKey;
+        bytes32 rangeVKeyCommitment;
+        bytes32 teeImageId;
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
@@ -131,6 +134,15 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Recipient of the share of forfeited proposer bonds not paid to a challenger.
     function protocolFeeRecipient() external view returns (address);
+
+    /// @notice SP1 aggregation-program verification key pinned to this implementation.
+    function aggregationVKey() external view returns (bytes32);
+
+    /// @notice SP1 range-program verification-key commitment pinned to this implementation.
+    function rangeVKeyCommitment() external view returns (bytes32);
+
+    /// @notice Nitro enclave image identity pinned to this implementation.
+    function teeImageId() external view returns (bytes32);
 
     /// @notice Verifier backing the validity-proof lane.
     function validityProofVerifier() external view returns (IWorldChainProofVerifier);

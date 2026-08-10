@@ -161,6 +161,7 @@ install *args='':
 # Required env vars (varies by target):
 #   PRIVATE_KEY, OWNER, OWNER_KEY, L1_RPC_URL,
 #   WORLD_CHAIN_L2_CHAIN_ID, ROLLUP_CONFIG_HASH,
+#   AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT, TEE_IMAGE_ID,
 #   CERT_MANAGER_ADDRESS, NITRO_ATTESTATION_VERIFIER
 #
 # Optional env vars (auto-fetched from enclave if not set):
@@ -401,8 +402,10 @@ proof-deploy-mocks env="alphanet":
 
 # The three proof-lane verifiers and the staking registry are required inputs — this
 # script never deploys them, and rejects addresses that hold no code or that repeat
-# across lanes. Point them at real contracts; for a devnet, run `proof-deploy-mocks`
-# first and read the four addresses out of deployments/<env>-proof-mocks.json.
+# across lanes. Reuse the SP1 verifier when only the game-pinned vkeys change; rotate
+# its address only if the verifier gateway or proof interface changes. For a devnet,
+# run `proof-deploy-mocks` first and read the four addresses out of
+# deployments/<env>-proof-mocks.json.
 # Phase 2 – Deploy the proof system contracts and register game type 1006.
 proof-deploy-system env="alphanet":
     #!/usr/bin/env bash
@@ -411,6 +414,9 @@ proof-deploy-system env="alphanet":
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     : "${WORLD_CHAIN_L2_CHAIN_ID:?WORLD_CHAIN_L2_CHAIN_ID is required}"
     : "${ROLLUP_CONFIG_HASH:?ROLLUP_CONFIG_HASH is required}"
+    : "${AGGREGATION_VKEY:?AGGREGATION_VKEY is required}"
+    : "${RANGE_VKEY_COMMITMENT:?RANGE_VKEY_COMMITMENT is required}"
+    : "${TEE_IMAGE_ID:?TEE_IMAGE_ID is required}"
     : "${DISPUTE_GAME_FACTORY:?DISPUTE_GAME_FACTORY is required (op-deployer DisputeGameFactoryProxy)}"
     : "${ANCHOR_STATE_REGISTRY:?ANCHOR_STATE_REGISTRY is required (op-deployer AnchorStateRegistryProxy)}"
     : "${SYSTEM_CONFIG:?SYSTEM_CONFIG is required (op-deployer SystemConfigProxy)}"
@@ -438,6 +444,9 @@ proof-deploy-system env="alphanet":
     echo "  proposer bond: $PROPOSER_BOND wei" >&2
     echo "  challenger bond: $CHALLENGER_BOND wei" >&2
     echo "  challenge fee: $CHALLENGE_FEE wei" >&2
+    echo "  aggregation vkey: $AGGREGATION_VKEY" >&2
+    echo "  range vkey commitment: $RANGE_VKEY_COMMITMENT" >&2
+    echo "  TEE image ID: $TEE_IMAGE_ID" >&2
     # A dry run must never overwrite the record of a live deployment: the simulated game and
     # WETH addresses are never deployed, so writing them to the real path silently replaces a
     # true record with fictional addresses.
@@ -700,8 +709,9 @@ proof-register-key env="alphanet":
         -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" -- sh -s
 
 # Combined – Run all proof system deployment phases in sequence.
-# Automatically wires contract addresses between steps. PCR0/1/2 are
-# auto-fetched from the running enclave if not pre-set.
+# Automatically wires contract addresses between steps. The game verifier
+# identities are explicit inputs; PCR0/1/2 are fetched only to provision and
+# verify the Nitro allowlist if not pre-set.
 proof-setup env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -709,6 +719,30 @@ proof-setup env="alphanet":
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
     fi
+    : "${AGGREGATION_VKEY:?AGGREGATION_VKEY is required}"
+    : "${RANGE_VKEY_COMMITMENT:?RANGE_VKEY_COMMITMENT is required}"
+    : "${TEE_IMAGE_ID:?TEE_IMAGE_ID is required}"
+    export AGGREGATION_VKEY RANGE_VKEY_COMMITMENT TEE_IMAGE_ID
+
+    if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
+        echo "=== Preflight: Fetching PCRs from running enclave ===" >&2
+        eval "$(just proof-get-pcrs {{env}})"
+    fi
+    [[ "$PCR0" == 0x* ]] || PCR0="0x$PCR0"
+    [[ "$PCR1" == 0x* ]] || PCR1="0x$PCR1"
+    [[ "$PCR2" == 0x* ]] || PCR2="0x$PCR2"
+    export PCR0 PCR1 PCR2
+    PCR0_HASH=$(cast keccak "$PCR0")
+    if [ "${PCR0_HASH,,}" != "${TEE_IMAGE_ID,,}" ]; then
+        echo "Error: running enclave PCR0 image ID does not match TEE_IMAGE_ID" >&2
+        echo "  expected: $TEE_IMAGE_ID" >&2
+        echo "  measured: $PCR0_HASH" >&2
+        exit 1
+    fi
+    echo "AGGREGATION_VKEY=$AGGREGATION_VKEY" >&2
+    echo "RANGE_VKEY_COMMITMENT=$RANGE_VKEY_COMMITMENT" >&2
+    echo "TEE_IMAGE_ID=$TEE_IMAGE_ID" >&2
+
     if [ -z "${WORLD_CHAIN_L2_CHAIN_ID:-}" ]; then
         echo "=== Step 0-pre: Fetching L2 chain ID from op-node ===" >&2
         WORLD_CHAIN_L2_CHAIN_ID=$(just proof-get-chain-id {{env}})
@@ -757,11 +791,6 @@ proof-setup env="alphanet":
 
     echo "=== Step 3a: Pre-warming CertManager ===" >&2
     just dry_run={{dry_run}} proof-certmanager-prewarm {{env}}
-
-    if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
-        echo "=== Step 3b-pre: Fetching PCRs from running enclave ===" >&2
-        eval $(just proof-get-pcrs {{env}})
-    fi
 
     echo "=== Step 3b: Approving PCR set ===" >&2
     just dry_run={{dry_run}} proof-approve-pcrs {{env}}

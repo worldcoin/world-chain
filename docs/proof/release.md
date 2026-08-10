@@ -6,9 +6,10 @@ Prover deployables are released independently of the node via `proof/vX.Y.Z` tag
 
 ## Why a separate tag namespace
 
-A prover release is a governance event whenever its measurements change: the SP1 vkeys and the
-Nitro enclave PCRs are registered on-chain (per WIP-1006's proof-lane registries), and a release
-that changes them requires a registry update before it can be deployed. Decoupling the tag
+A prover release is a governance event whenever its measurements change. The active game
+implementation pins both SP1 vkeys and the PCR0 Nitro image ID; Nitro PCR approval separately
+controls which image-bound enclave keys may register. A release that changes a measurement requires
+a new game implementation, plus PCR approval for a changed Nitro image, before activation. Decoupling the tag
 namespaces lets prover releases follow proof-system iteration instead of node/hardfork cadence,
 and keeps measurement changes reviewable on their own.
 
@@ -25,7 +26,7 @@ and keeps measurement changes reviewable on their own.
 | `ghcr.io/worldcoin/world-chain-proof:<version>`          | Multi-arch prover image (sp1 + nitro backends, ELFs baked in) |
 
 The draft release notes include a measurements section that diffs the vkeys/PCRs against the
-previous `proof/v*` release and flags when an on-chain registry update is required.
+previous `proof/v*` release and flags when a new game implementation or PCR approval is required.
 
 ## Cutting a release
 
@@ -50,10 +51,11 @@ release for human review. Review the measurements section, then publish.
   reproducibility is enforced by the pinned `cargo-prove` toolchain (`docker: true` by default,
   or a pinned `sp1up --version v6.1.0` install inside `Dockerfile.proof`). See
   [elf-management.md](./elf-management.md).
-- **The enclave EIF** must be bit-for-bit reproducible so anyone can re-derive the registered
+- **The enclave EIF** must be bit-for-bit reproducible so anyone can re-derive the game-pinned
   PCRs from source: `proofs/backends/nitro/Dockerfile` pins base images by digest and apt packages to a
   fixed snapshot.debian.org timestamp, and `scripts/build-eif.sh` pins the nitro-cli version that
-  assembles the EIF. Bumping any of these pins changes the PCRs — expect to re-register them.
+  assembles the EIF. Bumping any of these pins changes the PCRs — expect to approve the new PCR set,
+  register new image-bound signers, and activate a game implementation pinned to its PCR0 image ID.
 
 ## Verifying a release locally
 

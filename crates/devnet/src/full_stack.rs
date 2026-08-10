@@ -1201,6 +1201,18 @@ async fn deploy_world_proof_system(
         .env("WORLD_CHAIN_L2_CHAIN_ID", DEV_CHAIN_ID.to_string())
         .env("ROLLUP_CONFIG_HASH", &rollup_config_hash_hex)
         .env(
+            "AGGREGATION_VKEY",
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .env(
+            "RANGE_VKEY_COMMITMENT",
+            "0x2222222222222222222222222222222222222222222222222222222222222222",
+        )
+        .env(
+            "TEE_IMAGE_ID",
+            "0x3333333333333333333333333333333333333333333333333333333333333333",
+        )
+        .env(
             "PROOF_SYSTEM_BLOCK_INTERVAL",
             PROOF_SYSTEM_BLOCK_INTERVAL.to_string(),
         )

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
-
 /// The set of proof lanes accepted for a proposal, one bit per `ProofLane`.
 type Bitmap is uint8;
 
@@ -61,7 +59,7 @@ library LibProof {
         return keccak256(abi.encode(chainId, proofSystemVersion, rollupConfigHash, blockInterval));
     }
 
-    /// @dev Identity a proposal's proof lanes attest to.
+    /// @dev Canonical proposal identity used by the game and council attestation.
     function rootId(
         bytes32 domainHash_,
         address parentRef,
@@ -71,18 +69,6 @@ library LibProof {
         uint256 l1OriginNumber
     ) internal pure returns (bytes32) {
         return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber, l1OriginHash, l1OriginNumber));
-    }
-
-    /// @dev Selects the verifier backing `lane`.
-    function verifierFor(
-        ProofLane lane,
-        IWorldChainProofVerifier validityProofVerifier,
-        IWorldChainProofVerifier teeVerifier,
-        IWorldChainProofVerifier securityCouncil
-    ) internal pure returns (IWorldChainProofVerifier) {
-        if (lane == ProofLane.VALIDITY_PROOF) return validityProofVerifier;
-        if (lane == ProofLane.TEE_ATTESTATION) return teeVerifier;
-        return securityCouncil;
     }
 
     /// @dev Splits a compact payload into its lane id, reward recipient, and verifier proof
