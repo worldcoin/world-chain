@@ -2,11 +2,11 @@
   "councilOwners": [
     "0x629D8810D0177cB7f2315272F8237E68A8E2017f"
   ],
-  "councilSafe": "0xC92aa36664Dfd9FFc65452712f4dFbfAEEd92135",
+  "councilSafe": "0xDd84fc8Ec84a735979d34fc5e4e1d5adeBad3554",
   "councilThreshold": 1,
-  "safeFallbackHandler": "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99",
-  "safeProxyFactory": "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67",
+  "safeFallbackHandler": "0xA049D897Eb1831a3973d4a8F8B67b3b4aAb9c33C",
+  "safeProxyFactory": "0xf0F01686E119d49dFCa13c64Bc997c16a05A0f25",
   "safeSaltNonce": 0,
-  "safeSingleton": "0x41675C099F32341bf84BFc5382aF534df5C7461a",
-  "securityCouncilVerifier": "0xF9B686b5EF6dAcd53b5fb3770C5939EED126B239"
+  "safeSingleton": "0xf98ac01CcC2ef34DDc84c474f01c162B39732Bc3",
+  "securityCouncilVerifier": "0x9Ea4EF54aF8eBC385D915FF60B27a614EC942674"
 }
