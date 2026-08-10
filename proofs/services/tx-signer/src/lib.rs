@@ -119,9 +119,10 @@ mod tests {
     async fn builds_local_wallet_with_derived_address() {
         let expected = local_signer().address();
         let rpc_url = "http://127.0.0.1:8545".parse().expect("valid URL");
-        let wallet = build_transaction_wallet(Some(local_signer()), None, &rpc_url)
+        let wallet = build_transaction_signer(Some(local_signer()), None, &rpc_url)
             .await
-            .expect("local wallet builds");
+            .expect("local wallet builds")
+            .wallet();
 
         assert_eq!(wallet.default_signer().address(), expected);
         assert!(<EthereumWallet as NetworkWallet<Ethereum>>::has_signer_for(
