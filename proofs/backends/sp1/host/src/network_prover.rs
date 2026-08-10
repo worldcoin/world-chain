@@ -2,7 +2,7 @@
 //! verify them; the aggregation proof mode is configurable (Groth16 for on-chain verification).
 
 use crate::{SuccinctProverError, WorldSuccinctProver};
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 pub use sp1_sdk::SP1ProofMode;
@@ -19,15 +19,7 @@ use world_chain_proof_core::types::AggregationInputs;
 use world_chain_proof_sp1_types::{
     AggregationProofRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
 };
-
-/// Signer type used by SP1 network prover.
-#[derive(Debug, Clone, Copy)]
-pub enum SignerType {
-    /// Local signer.
-    Local,
-    /// AWS KMS signer.
-    Aws,
-}
+use world_chain_proof_tx_signer::TransactionSigner;
 
 /// [`WorldSuccinctProver`] network implementation over the sp1-sdk network prover.
 pub struct NetworkSuccinctProver {
@@ -48,42 +40,38 @@ pub struct NetworkCreditClient {
     client: NetworkClient,
 }
 
-struct NetworkConnection {
-    signer: NetworkSigner,
+#[derive(Debug)]
+pub struct NetworkConnection {
+    pub signer: NetworkSigner,
     rpc_url: String,
     mode: NetworkMode,
 }
 
-async fn network_connection(
-    secret: &str,
-    signer_type: SignerType,
-) -> anyhow::Result<NetworkConnection> {
-    let signer = match signer_type {
-        SignerType::Local => NetworkSigner::local(secret).context("invalid SP1 private key")?,
-        SignerType::Aws => NetworkSigner::aws_kms(secret)
-            .await
-            .context("invalid AWS KMS key id")?,
+pub fn network_connection(transaction_signer: TransactionSigner) -> NetworkConnection {
+    let signer = match transaction_signer {
+        TransactionSigner::Local(local_signer) => NetworkSigner::Local(local_signer),
+        TransactionSigner::Aws(aws_signer) => NetworkSigner::Aws(aws_signer),
     };
     // PROVE deposits fund the auction-based SP1 Network --> Network = Mainnet
     let mode = NetworkMode::Mainnet;
     let rpc_url =
         std::env::var("NETWORK_RPC_URL").unwrap_or_else(|_| get_default_rpc_url_for_mode(mode));
 
-    Ok(NetworkConnection {
+    NetworkConnection {
         signer,
         rpc_url,
         mode,
-    })
+    }
 }
 
 impl NetworkCreditClient {
     /// Creates a mainnet credit client for the provided secret.
-    pub async fn new(secret: &str, signer_type: SignerType) -> anyhow::Result<Self> {
-        let connection = network_connection(secret, signer_type).await?;
+    pub fn new(transaction_signer: TransactionSigner) -> Self {
+        let connection = network_connection(transaction_signer);
 
-        Ok(Self {
+        Self {
             client: NetworkClient::new(connection.signer, connection.rpc_url, connection.mode),
-        })
+        }
     }
 
     /// Returns the account's available SP1 Network credits in PROVE base units.
@@ -100,12 +88,11 @@ impl NetworkSuccinctProver {
     /// ELFs embedded at compile time via `world_chain_proof_sp1_elfs`.
     pub async fn new(
         agg_mode: SP1ProofMode,
-        secret: &str,
-        signer_type: SignerType,
+        transaction_signer: TransactionSigner,
     ) -> anyhow::Result<Self> {
         let range_elf = world_chain_proof_sp1_elfs::range_elf();
         let agg_elf = world_chain_proof_sp1_elfs::aggregation_elf();
-        let connection = network_connection(secret, signer_type).await?;
+        let connection = network_connection(transaction_signer);
         let client =
             NetworkProver::new(connection.signer, &connection.rpc_url, connection.mode).await;
         let range_pk = client
