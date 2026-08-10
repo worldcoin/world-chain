@@ -3,7 +3,6 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use alloy_primitives::{Address, B256, U256};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use url::Url;
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host::online::{
     OnlineHostConfig, build_online_config, hardfork_config_from_chain_spec,

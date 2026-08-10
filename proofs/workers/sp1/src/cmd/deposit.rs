@@ -65,26 +65,17 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
     }
     let l1_rpc_url =
         Url::parse(&args.sp1_network_l1_rpc_url).context("invalid SP1 Network L1 RPC URL")?;
-    let l1_private_key = args
-        .sp1_private_key
-        .as_deref()
-        .map(str::parse::<PrivateKeySigner>)
-        .transpose()
-        .context("invalid SP1 private key")?;
-    let l1_signer =
-        build_transaction_signer(l1_private_key, args.sp1_kms_key_id.clone(), &l1_rpc_url)
-            .await
-            .context("initializing L1 transaction signer")?;
-    let (network_secret, signer_type) = match (&args.sp1_private_key, &args.sp1_kms_key_id) {
+    let (signer_secret, signer_type) = match (&args.sp1_private_key, &args.sp1_kms_key_id) {
         (Some(private_key), None) => (private_key.as_str(), SignerType::Local),
-        (None, Some(key_id)) => (key_id.as_str(), SignerType::AwsKms),
+        (None, Some(key_id)) if !key_id.trim().is_empty() => (key_id.as_str(), SignerType::AwsKms),
         _ => bail!("configure exactly one SP1 private key or AWS KMS key ID"),
     };
+    let l1_signer = build_l1_signer(signer_secret, signer_type, &l1_rpc_url).await?;
     let signer_address = match &l1_signer {
         TransactionSigner::Local(signer) => signer.address(),
         TransactionSigner::Aws(signer) => signer.address(),
     };
-    let credit_client = NetworkCreditClient::new(network_secret, signer_type).await?;
+    let credit_client = NetworkCreditClient::new(signer_secret, signer_type).await?;
     let credit_before = credit_client
         .get_balance()
         .await
@@ -269,6 +260,26 @@ async fn wait_for_credit_reflection(
         }
         tokio::time::sleep(CREDIT_POLL_INTERVAL).await;
     }
+}
+
+async fn build_l1_signer(
+    secret: &str,
+    signer_type: SignerType,
+    rpc_url: &Url,
+) -> Result<TransactionSigner> {
+    let signer = match signer_type {
+        SignerType::Local => {
+            let private_key = secret
+                .parse::<PrivateKeySigner>()
+                .context("invalid SP1 private key")?;
+            build_transaction_signer(Some(private_key), None, rpc_url).await
+        }
+        SignerType::AwsKms => {
+            build_transaction_signer(None, Some(secret.to_owned()), rpc_url).await
+        }
+    };
+
+    signer.context("initializing L1 transaction signer")
 }
 
 #[cfg(test)]
