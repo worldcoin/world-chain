@@ -9,7 +9,12 @@ repository.workspace = true
 
 [features]
 # SP1 zkVM proving via the sp1-sdk environment provers.
-sp1 = ["dep:sp1-sdk", "dep:bincode", "dep:alloy-sol-types", "dep:world-chain-proof-sp1-elfs"]
+sp1 = [
+    "dep:sp1-sdk",
+    "dep:bincode",
+    "dep:alloy-sol-types",
+    "dep:world-chain-proof-sp1-elfs",
+]
 
 [dependencies]
 alloy-primitives = { workspace = true, features = ["serde"] }

@@ -15,7 +15,7 @@ use clap::{ArgGroup, Parser};
 use tracing::info;
 use url::Url;
 use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
-use world_chain_proof_tx_signer::build_transaction_wallet;
+use world_chain_proof_tx_signer::build_transaction_signer;
 use world_chain_proposer::{
     AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
 };
@@ -98,9 +98,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
-    let wallet = build_transaction_wallet(cli.proposer_key, cli.proposer_kms_key_id, &l1_rpc_url)
+    let wallet = build_transaction_signer(cli.proposer_key, cli.proposer_kms_key_id, &l1_rpc_url)
         .await
-        .context("failed to initialize proposer signer")?;
+        .context("failed to initialize proposer signer")?
+        .wallet();
     let proposer_address = wallet.default_signer().address();
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,

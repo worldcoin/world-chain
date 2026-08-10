@@ -32,41 +32,67 @@ pub struct NetworkSuccinctProver {
 /// Lightweight client for reading an account's SP1 Network credit balance.
 ///
 /// Unlike [`NetworkSuccinctProver`], this does not initialize the SP1 light node or set up the
-/// embedded proving programs. It uses the same private key and `NETWORK_RPC_URL` selection as
+/// embedded proving programs. It uses the same credentials and `NETWORK_RPC_URL` selection as
 /// the SDK's network prover builder.
 #[derive(Clone)]
 pub struct NetworkCreditClient {
     client: NetworkClient,
 }
 
-struct NetworkConnection {
+/// Initialized SP1 network signer and endpoint configuration reusable across network clients.
+#[derive(Clone)]
+pub struct NetworkConnection {
     signer: NetworkSigner,
     rpc_url: String,
     mode: NetworkMode,
 }
 
-fn network_connection(private_key: &str) -> anyhow::Result<NetworkConnection> {
-    let signer = NetworkSigner::local(private_key).context("invalid SP1 private key")?;
-    // PROVE deposits fund the auction-based SP1 Network --> Network = Mainnet
-    let mode = NetworkMode::Mainnet;
-    let rpc_url =
-        std::env::var("NETWORK_RPC_URL").unwrap_or_else(|_| get_default_rpc_url_for_mode(mode));
+/// Signer type used by the SP1 network clients.
+#[derive(Clone, Copy, Debug)]
+pub enum SignerType {
+    Local,
+    AwsKms,
+}
 
-    Ok(NetworkConnection {
-        signer,
-        rpc_url,
-        mode,
-    })
+impl NetworkConnection {
+    /// Initializes a reusable SP1 network connection.
+    pub async fn new(secret: &str, signer_type: SignerType) -> anyhow::Result<Self> {
+        let signer = match signer_type {
+            SignerType::Local => NetworkSigner::local(secret).context("invalid SP1 private key")?,
+            SignerType::AwsKms => {
+                // Keep the AWS SDK future boxed. Storing it inline makes the enclosing
+                // devnet futures exceed rustc's query-depth limit during workspace clippy.
+                Box::pin(NetworkSigner::aws_kms(secret))
+                    .await
+                    .context("failed to initialize AWS KMS signer for SP1 SDK")?
+            }
+        };
+        // PROVE deposits fund the auction-based SP1 Network --> Network = Mainnet
+        let mode = NetworkMode::Mainnet;
+        let rpc_url =
+            std::env::var("NETWORK_RPC_URL").unwrap_or_else(|_| get_default_rpc_url_for_mode(mode));
+
+        Ok(Self {
+            signer,
+            rpc_url,
+            mode,
+        })
+    }
 }
 
 impl NetworkCreditClient {
-    /// Creates a mainnet credit client for `private_key`.
-    pub fn new(private_key: &str) -> anyhow::Result<Self> {
-        let connection = network_connection(private_key)?;
+    /// Creates a mainnet credit client for the provided signer.
+    pub async fn new(secret: &str, signer_type: SignerType) -> anyhow::Result<Self> {
+        let connection = NetworkConnection::new(secret, signer_type).await?;
 
-        Ok(Self {
+        Ok(Self::from_connection(connection))
+    }
+
+    /// Creates a credit client from an initialized network connection.
+    pub fn from_connection(connection: NetworkConnection) -> Self {
+        Self {
             client: NetworkClient::new(connection.signer, connection.rpc_url, connection.mode),
-        })
+        }
     }
 
     /// Returns the account's available SP1 Network credits in PROVE base units.
@@ -81,10 +107,23 @@ impl NetworkCreditClient {
 impl NetworkSuccinctProver {
     /// Creates the prover using caller-supplied ELFs. Use this in production binaries with
     /// ELFs embedded at compile time via `world_chain_proof_sp1_elfs`.
-    pub async fn new(agg_mode: SP1ProofMode, private_key: &str) -> anyhow::Result<Self> {
+    pub async fn new(
+        agg_mode: SP1ProofMode,
+        secret: &str,
+        signer_type: SignerType,
+    ) -> anyhow::Result<Self> {
+        let connection = NetworkConnection::new(secret, signer_type).await?;
+
+        Self::from_connection(agg_mode, connection).await
+    }
+
+    /// Creates the prover from an initialized network connection.
+    pub async fn from_connection(
+        agg_mode: SP1ProofMode,
+        connection: NetworkConnection,
+    ) -> anyhow::Result<Self> {
         let range_elf = world_chain_proof_sp1_elfs::range_elf();
         let agg_elf = world_chain_proof_sp1_elfs::aggregation_elf();
-        let connection = network_connection(private_key)?;
         let client =
             NetworkProver::new(connection.signer, &connection.rpc_url, connection.mode).await;
         let range_pk = client
