@@ -18,7 +18,7 @@ use world_chain_defender::{
     AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig, WorldChainDefender,
 };
 use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
-use world_chain_proof_tx_signer::build_transaction_wallet;
+use world_chain_proof_tx_signer::build_transaction_signer;
 use world_chain_prover_service::RpcProverServiceClient;
 
 #[derive(Debug, Parser)]
@@ -101,9 +101,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
-    let wallet = build_transaction_wallet(cli.defender_key, cli.defender_kms_key_id, &l1_rpc_url)
+    let wallet = build_transaction_signer(cli.defender_key, cli.defender_kms_key_id, &l1_rpc_url)
         .await
-        .context("failed to initialize defender signer")?;
+        .context("failed to initialize defender signer")?
+        .wallet();
     let defender_address = wallet.default_signer().address();
     let reward_recipient = cli.proof_reward_recipient.unwrap_or(defender_address);
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
