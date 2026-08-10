@@ -61,7 +61,7 @@ use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
-    network_prover::NetworkSuccinctProver,
+    network_prover::{NetworkSuccinctProver, SignerType},
 };
 use world_chain_proof_sp1_worker::{Sp1Backend, Sp1BackendConfig};
 use world_chain_proof_worker::{
@@ -3043,9 +3043,10 @@ async fn start_sp1_worker(
             let private_key = std::env::var(SP1_PRIVATE_KEY_ENV).wrap_err_with(|| {
                 format!("{SP1_PRIVATE_KEY_ENV} is required when {SP1_WORKER_PROVER_ENV}=network")
             })?;
-            let prover = NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key)
-                .await
-                .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+            let prover =
+                NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key, SignerType::Local)
+                    .await
+                    .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
             start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
         }
     }

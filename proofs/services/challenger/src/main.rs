@@ -20,7 +20,7 @@ use world_chain_challenger::{
     ResolutionManagerConfig, WorldChainChallenger,
 };
 use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
-use world_chain_proof_tx_signer::build_transaction_wallet;
+use world_chain_proof_tx_signer::build_transaction_signer;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -130,9 +130,10 @@ async fn main() -> Result<()> {
 
     let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
     let wallet =
-        build_transaction_wallet(cli.challenger_key, cli.challenger_kms_key_id, &l1_rpc_url)
+        build_transaction_signer(cli.challenger_key, cli.challenger_kms_key_id, &l1_rpc_url)
             .await
-            .context("failed to initialize challenger signer")?;
+            .context("failed to initialize challenger signer")?
+            .wallet();
     let challenger_address = wallet.default_signer().address();
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,

@@ -11,7 +11,7 @@ use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
-    network_prover::{NetworkCreditClient, NetworkSuccinctProver},
+    network_prover::{NetworkConnection, NetworkCreditClient, NetworkSuccinctProver},
 };
 use world_chain_proof_sp1_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
@@ -19,7 +19,10 @@ use world_chain_proof_sp1_worker::{
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;
 
-use super::succinct::{format_prove, load_settlement_config, prove_as_f64};
+use super::{
+    select_network_signer,
+    succinct::{format_prove, load_settlement_config, prove_as_f64},
+};
 
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: usize = 10;
 const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
@@ -114,9 +117,17 @@ pub struct WorkerArgs {
     )]
     prover: Sp1ProverKind,
 
-    /// SP1 network private key. Required when --prover network.
+    /// SP1 network private key.
+    ///
+    /// Required when --prover network and sp1_kms_key_id is not provided.
     #[arg(long, env = "SP1_PRIVATE_KEY")]
     sp1_private_key: Option<String>,
+
+    /// AWS KMS key ID or alias the sp1 proof worker signs proof requests.
+    ///
+    /// Required when --prover network and sp1_private_key is not provided.
+    #[arg(long, env = "SP1_KMS_KEY_ID", hide_env_values = true)]
+    sp1_kms_key_id: Option<String>,
 
     /// Ethereum mainnet RPC used to validate the Succinct VApp and its deposit threshold.
     /// Required when --prover network.
@@ -211,7 +222,7 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
     match prover_kind {
         Sp1ProverKind::Cpu => {
             run_worker(
-                cli,
+                &cli,
                 host,
                 CpuSuccinctProver::new(SP1ProofMode::Groth16).await?,
             )
@@ -219,29 +230,30 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
         }
         Sp1ProverKind::Mock => {
             run_worker(
-                cli,
+                &cli,
                 host,
                 MockSuccinctProver::new(SP1ProofMode::Groth16).await?,
             )
             .await
         }
         Sp1ProverKind::Network => {
-            let private_key = cli
-                .sp1_private_key
-                .clone()
-                .context("SP1_PRIVATE_KEY is required when --prover network")?;
             let l1_rpc_url = cli
                 .sp1_network_l1_rpc_url
-                .clone()
+                .as_ref()
                 .context("SP1_NETWORK_L1_RPC_URL is required when --prover network")?;
+            let (network_secret, signer_type) = select_network_signer(
+                cli.sp1_private_key.as_deref(),
+                cli.sp1_kms_key_id.as_deref(),
+            )?;
             let vapp_address = cli
                 .succinct_vapp_address
                 .context("SUCCINCT_VAPP_ADDRESS is required when --prover network")?;
-            let settlement = load_settlement_config(&l1_rpc_url, vapp_address)
+            let settlement = load_settlement_config(l1_rpc_url, vapp_address)
                 .await
                 .context("validating Succinct settlement configuration")?;
             let minimum_balance = minimum_network_balance(settlement.min_deposit_amount)?;
-            let credit_client = NetworkCreditClient::new(&private_key)?;
+            let connection = NetworkConnection::new(network_secret, signer_type).await?;
+            let credit_client = NetworkCreditClient::from_connection(connection.clone());
 
             if !wait_for_sufficient_network_balance(
                 &credit_client,
@@ -255,9 +267,9 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
 
             monitor_network_balance(credit_client, minimum_balance, settlement.prove_decimals);
             run_worker(
-                cli,
+                &cli,
                 host,
-                NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key).await?,
+                NetworkSuccinctProver::from_connection(SP1ProofMode::Groth16, connection).await?,
             )
             .await
         }
@@ -354,7 +366,7 @@ fn record_network_balance(balance: U256, minimum_balance: U256, decimals: u8) ->
     sufficient
 }
 
-async fn run_worker<P>(cli: WorkerArgs, host: OnlineHostConfig, prover: P) -> Result<()>
+async fn run_worker<P>(cli: &WorkerArgs, host: OnlineHostConfig, prover: P) -> Result<()>
 where
     P: WorldSuccinctProver + Send + Sync + 'static,
 {

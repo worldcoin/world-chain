@@ -8,6 +8,13 @@ use alloy_transport::TransportError;
 use thiserror::Error;
 use url::Url;
 
+/// An L1 transaction signer backed by a local private key or AWS KMS.
+#[derive(Clone)]
+pub enum TransactionSigner {
+    Local(PrivateKeySigner),
+    Aws(AwsSigner),
+}
+
 enum TransactionSignerSource {
     Local(PrivateKeySigner),
     AwsKms(String),
@@ -26,14 +33,14 @@ fn select_signer_source(
     }
 }
 
-/// Builds an Alloy wallet from exactly one local private key or AWS KMS key ID.
-pub async fn build_transaction_wallet(
+/// Builds a transaction signer from exactly one local private key or AWS KMS key ID.
+pub async fn build_transaction_signer(
     private_key: Option<PrivateKeySigner>,
     aws_kms_key_id: Option<String>,
     rpc_url: &Url,
-) -> Result<EthereumWallet, TransactionSignerError> {
+) -> Result<TransactionSigner, TransactionSignerError> {
     match select_signer_source(private_key, aws_kms_key_id)? {
-        TransactionSignerSource::Local(signer) => Ok(EthereumWallet::from(signer)),
+        TransactionSignerSource::Local(signer) => Ok(TransactionSigner::Local(signer)),
         TransactionSignerSource::AwsKms(key_id) => {
             let chain_id = ProviderBuilder::new()
                 .connect_http(rpc_url.clone())
@@ -50,7 +57,18 @@ pub async fn build_transaction_wallet(
             )
             .await
             .map_err(|error| TransactionSignerError::AwsKms(Box::new(error)))?;
-            Ok(EthereumWallet::from(signer))
+            Ok(TransactionSigner::Aws(signer))
+        }
+    }
+}
+
+impl TransactionSigner {
+    /// Wraps this signer in an Ethereum wallet suitable for Alloy providers.
+    #[must_use]
+    pub fn wallet(&self) -> EthereumWallet {
+        match self {
+            Self::Local(signer) => EthereumWallet::from(signer.clone()),
+            Self::Aws(signer) => EthereumWallet::from(signer.clone()),
         }
     }
 }
@@ -101,9 +119,10 @@ mod tests {
     async fn builds_local_wallet_with_derived_address() {
         let expected = local_signer().address();
         let rpc_url = "http://127.0.0.1:8545".parse().expect("valid URL");
-        let wallet = build_transaction_wallet(Some(local_signer()), None, &rpc_url)
+        let wallet = build_transaction_signer(Some(local_signer()), None, &rpc_url)
             .await
-            .expect("local wallet builds");
+            .expect("local wallet builds")
+            .wallet();
 
         assert_eq!(wallet.default_signer().address(), expected);
         assert!(<EthereumWallet as NetworkWallet<Ethereum>>::has_signer_for(

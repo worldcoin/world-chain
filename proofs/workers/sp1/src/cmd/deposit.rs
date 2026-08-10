@@ -1,19 +1,22 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, B256, U256, utils::parse_units};
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_signer::SignerSync;
+use alloy_signer::{Signer, SignerSync};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::eip712_domain;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use url::Url;
-use world_chain_proof_sp1_host::network_prover::NetworkCreditClient;
+use world_chain_proof_sp1_host::network_prover::{NetworkCreditClient, SignerType};
+use world_chain_proof_tx_signer::{TransactionSigner, build_transaction_signer};
 
-use super::succinct::{
-    ETHEREUM_MAINNET_CHAIN_ID, IProveToken, ISuccinctVApp, Permit, format_prove,
-    load_settlement_config,
+use super::{
+    select_network_signer,
+    succinct::{
+        ETHEREUM_MAINNET_CHAIN_ID, IProveToken, ISuccinctVApp, Permit, format_prove,
+        load_settlement_config,
+    },
 };
 
 const PERMIT_VALIDITY: Duration = Duration::from_secs(60 * 60);
@@ -36,7 +39,11 @@ pub struct DepositArgs {
 
     /// Private key for both the PROVE holder and the corresponding SP1 Network account.
     #[arg(long, env = "SP1_PRIVATE_KEY")]
-    sp1_private_key: String,
+    sp1_private_key: Option<String>,
+
+    /// AWS KMS key ID for both the PROVE holder and the corresponding SP1 Network account.
+    #[arg(long, env = "SP1_KMS_KEY_ID", hide_env_values = true)]
+    sp1_kms_key_id: Option<String>,
 }
 
 pub async fn deposit(args: DepositArgs) -> Result<()> {
@@ -53,23 +60,25 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
             format_prove(settlement.min_deposit_amount, settlement.prove_decimals),
         );
     }
-
-    let signer: PrivateKeySigner = args
-        .sp1_private_key
-        .parse()
-        .context("invalid SP1_PRIVATE_KEY")?;
-    let signer_address = signer.address();
-    let credit_client = NetworkCreditClient::new(&args.sp1_private_key)?;
+    let l1_rpc_url =
+        Url::parse(&args.sp1_network_l1_rpc_url).context("invalid SP1 Network L1 RPC URL")?;
+    let (signer_secret, signer_type) = select_network_signer(
+        args.sp1_private_key.as_deref(),
+        args.sp1_kms_key_id.as_deref(),
+    )?;
+    let l1_signer = build_l1_signer(signer_secret, signer_type, &l1_rpc_url).await?;
+    let signer_address = match &l1_signer {
+        TransactionSigner::Local(signer) => signer.address(),
+        TransactionSigner::Aws(signer) => signer.address(),
+    };
+    let credit_client = NetworkCreditClient::new(signer_secret, signer_type).await?;
     let credit_before = credit_client
         .get_balance()
         .await
         .context("reading SP1 Network credit balance before deposit")?;
-
     let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(signer.clone()))
-        .connect_http(
-            Url::parse(&args.sp1_network_l1_rpc_url).context("invalid SP1 Network L1 RPC URL")?,
-        );
+        .wallet(l1_signer.wallet())
+        .connect_http(l1_rpc_url);
     let token = IProveToken::new(settlement.prove_token_address, provider.clone());
     let vapp = ISuccinctVApp::new(settlement.vapp_address, provider.clone());
 
@@ -129,10 +138,12 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
         nonce,
         deadline,
     };
-    let signature = signer
-        .sign_typed_data_sync(&permit, &permit_domain)
-        .context("signing PROVE permit")?
-        .as_bytes();
+    let signature = match &l1_signer {
+        TransactionSigner::Local(signer) => signer.sign_typed_data_sync(&permit, &permit_domain),
+        TransactionSigner::Aws(signer) => signer.sign_typed_data(&permit, &permit_domain).await,
+    }
+    .context("signing PROVE permit")?
+    .as_bytes();
     let r = B256::from_slice(&signature[..32]);
     let s = B256::from_slice(&signature[32..64]);
     let v = signature[64];
@@ -245,6 +256,26 @@ async fn wait_for_credit_reflection(
         }
         tokio::time::sleep(CREDIT_POLL_INTERVAL).await;
     }
+}
+
+async fn build_l1_signer(
+    secret: &str,
+    signer_type: SignerType,
+    rpc_url: &Url,
+) -> Result<TransactionSigner> {
+    let signer = match signer_type {
+        SignerType::Local => {
+            let private_key = secret
+                .parse::<PrivateKeySigner>()
+                .context("invalid SP1 private key")?;
+            build_transaction_signer(Some(private_key), None, rpc_url).await
+        }
+        SignerType::AwsKms => {
+            build_transaction_signer(None, Some(secret.to_owned()), rpc_url).await
+        }
+    };
+
+    signer.context("initializing L1 transaction signer")
 }
 
 #[cfg(test)]

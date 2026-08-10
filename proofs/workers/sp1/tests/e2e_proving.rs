@@ -37,7 +37,7 @@ use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
-    network_prover::NetworkSuccinctProver,
+    network_prover::{NetworkSuccinctProver, SignerType},
 };
 use world_chain_proof_sp1_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
@@ -181,9 +181,10 @@ async fn worker_proves_real_range_end_to_end() {
             let Some(private_key) = required("SP1_PRIVATE_KEY") else {
                 return;
             };
-            let prover = NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key)
-                .await
-                .expect("build prover");
+            let prover =
+                NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key, SignerType::Local)
+                    .await
+                    .expect("build prover");
             run_worker_proves_real_range_end_to_end_with_prover(
                 host,
                 prover,

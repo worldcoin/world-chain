@@ -19281,6 +19281,7 @@ dependencies = [
  "world-chain-proof-protocol",
  "world-chain-proof-sp1-host",
  "world-chain-proof-sp1-types",
+ "world-chain-proof-tx-signer",
  "world-chain-proof-worker",
  "world-chain-prover-service",
 ]
