@@ -11,7 +11,7 @@ use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
-    network_prover::{NetworkConnection, NetworkCreditClient, NetworkSuccinctProver, SignerType},
+    network_prover::{NetworkConnection, NetworkCreditClient, NetworkSuccinctProver},
 };
 use world_chain_proof_sp1_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
@@ -19,7 +19,10 @@ use world_chain_proof_sp1_worker::{
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;
 
-use super::succinct::{format_prove, load_settlement_config, prove_as_f64};
+use super::{
+    select_network_signer,
+    succinct::{format_prove, load_settlement_config, prove_as_f64},
+};
 
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: usize = 10;
 const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
@@ -238,11 +241,10 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
                 .sp1_network_l1_rpc_url
                 .as_ref()
                 .context("SP1_NETWORK_L1_RPC_URL is required when --prover network")?;
-            let (network_secret, signer_type) = match (&cli.sp1_private_key, &cli.sp1_kms_key_id) {
-                (Some(private_key), None) => (private_key.as_str(), SignerType::Local),
-                (None, Some(key_id)) => (key_id.as_str(), SignerType::AwsKms),
-                _ => bail!("configure exactly one SP1 private key or AWS KMS key ID"),
-            };
+            let (network_secret, signer_type) = select_network_signer(
+                cli.sp1_private_key.as_deref(),
+                cli.sp1_kms_key_id.as_deref(),
+            )?;
             let vapp_address = cli
                 .succinct_vapp_address
                 .context("SUCCINCT_VAPP_ADDRESS is required when --prover network")?;

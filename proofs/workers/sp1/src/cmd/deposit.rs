@@ -11,9 +11,12 @@ use url::Url;
 use world_chain_proof_sp1_host::network_prover::{NetworkCreditClient, SignerType};
 use world_chain_proof_tx_signer::{TransactionSigner, build_transaction_signer};
 
-use super::succinct::{
-    ETHEREUM_MAINNET_CHAIN_ID, IProveToken, ISuccinctVApp, Permit, format_prove,
-    load_settlement_config,
+use super::{
+    select_network_signer,
+    succinct::{
+        ETHEREUM_MAINNET_CHAIN_ID, IProveToken, ISuccinctVApp, Permit, format_prove,
+        load_settlement_config,
+    },
 };
 
 const PERMIT_VALIDITY: Duration = Duration::from_secs(60 * 60);
@@ -21,12 +24,6 @@ const CREDIT_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const CREDIT_REFLECTION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Args)]
-#[command(
-    group = clap::ArgGroup::new("transaction_signer")
-        .required(true)
-        .multiple(false)
-        .args(&["sp1_private_key", "sp1_kms_key_id"])
-)]
 pub struct DepositArgs {
     /// Human-readable amount of PROVE to deposit (for example `1000` or `12.5`).
     #[arg(long)]
@@ -65,11 +62,10 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
     }
     let l1_rpc_url =
         Url::parse(&args.sp1_network_l1_rpc_url).context("invalid SP1 Network L1 RPC URL")?;
-    let (signer_secret, signer_type) = match (&args.sp1_private_key, &args.sp1_kms_key_id) {
-        (Some(private_key), None) => (private_key.as_str(), SignerType::Local),
-        (None, Some(key_id)) if !key_id.trim().is_empty() => (key_id.as_str(), SignerType::AwsKms),
-        _ => bail!("configure exactly one SP1 private key or AWS KMS key ID"),
-    };
+    let (signer_secret, signer_type) = select_network_signer(
+        args.sp1_private_key.as_deref(),
+        args.sp1_kms_key_id.as_deref(),
+    )?;
     let l1_signer = build_l1_signer(signer_secret, signer_type, &l1_rpc_url).await?;
     let signer_address = match &l1_signer {
         TransactionSigner::Local(signer) => signer.address(),
