@@ -7,7 +7,8 @@ use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_sol_types::SolInterface;
 use async_trait::async_trait;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
 use world_chain_proof_protocol::{
     ClaimData, IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, PROOF_LANE_COUNT, ProofLane,
@@ -28,6 +29,7 @@ pub struct AlloyDefenderClient<P> {
     receipt_timeout: Duration,
     /// Credited this lane's share of a forfeited challenger bond when the game resolves.
     reward_recipient: Address,
+    semaphore: Arc<Semaphore>,
     provider: P,
 }
 
@@ -52,6 +54,7 @@ where
             registered.anchor_registry,
             provider.clone(),
         );
+        let semaphore = Arc::new(Semaphore::new(1));
 
         Ok(Self {
             factory,
@@ -60,6 +63,7 @@ where
             confirmations,
             receipt_timeout,
             reward_recipient,
+            semaphore,
             provider,
         })
     }
@@ -175,6 +179,7 @@ where
         lane: ProofLane,
         proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
+        let _permit = self.semaphore.acquire().await?;
         let compact = encode_compact_proof(lane, self.reward_recipient, &proof);
         let pending = self
             .game(game)
