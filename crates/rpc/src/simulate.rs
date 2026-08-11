@@ -232,6 +232,8 @@ struct RawTrace {
     /// Populated by the matching end hook for an explicit REVERT with a
     /// non-empty payload.
     revert_output: Option<Bytes>,
+    /// Populated by the matching end hook for an exceptional EVM halt.
+    halt_reason: Option<InstructionResult>,
 }
 
 #[derive(Debug)]
@@ -319,7 +321,11 @@ impl SimulationInspector {
                     value: format!("{:#x}", t.value),
                     depth: t.depth,
                     outcome,
-                    revert_reason: t.revert_output.as_ref().map(decode_revert_reason),
+                    revert_reason: t
+                        .revert_output
+                        .as_ref()
+                        .map(decode_revert_reason)
+                        .or_else(|| t.halt_reason.map(|reason| format!("{reason:?}"))),
                 })
             })
             .collect()
@@ -347,7 +353,10 @@ impl SimulationInspector {
 
     /// Decoded reason from the terminally failing frame path, if any.
     pub fn terminal_revert_reason(&self) -> Option<String> {
-        terminal_revert_payload(&self.traces).map(decode_revert_reason)
+        terminal_failure(&self.traces).map(|failure| match failure {
+            FrameFailure::Revert(output) => decode_revert_reason(output),
+            FrameFailure::Halt(reason) => format!("{reason:?}"),
+        })
     }
 
     /// Drain captured CREATE/CREATE2 deployments. Each entry is
@@ -391,68 +400,82 @@ impl SimulationInspector {
             return None;
         };
 
-        trace.outcome = Some(if result.is_ok() {
+        let outcome = if result.is_ok() {
             TraceOutcome::Success
         } else if matches!(result, InstructionResult::Revert) {
             TraceOutcome::Revert
         } else {
             TraceOutcome::Halt
-        });
+        };
+        trace.outcome = Some(outcome);
         if matches!(result, InstructionResult::Revert) && !output.is_empty() {
             trace.revert_output = Some(output.clone());
+        } else if outcome == TraceOutcome::Halt {
+            trace.halt_reason = Some(*result);
         }
 
         Some(trace)
     }
 }
 
-/// Response-level revert payload: the best explanation of the failure that
-/// caused the whole simulation to fail, selected from the completed trace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrameFailure<'a> {
+    Revert(&'a Bytes),
+    Halt(InstructionResult),
+}
+
+/// Best explanation of the failure that caused the whole simulation to fail,
+/// selected from the completed trace.
 ///
 /// The trace is a pre-order flattening of the call tree (entries appear in
-/// call order, parents before their children), so `depth` alone recovers
-/// the tree shape. Selection is [`frame_revert_payload`] applied to the
-/// root frame.
-fn terminal_revert_payload(traces: &[RawTrace]) -> Option<&Bytes> {
+/// call order, parents before their children), so `depth` alone recovers the
+/// tree shape. Selection is [`frame_failure`] applied to the root frame.
+fn terminal_failure(traces: &[RawTrace]) -> Option<FrameFailure<'_>> {
     if traces.is_empty() {
         return None;
     }
-    frame_revert_payload(traces, 0)
+    frame_failure(traces, 0)
 }
 
-/// Best revert payload attributable to the frame at `index`:
+/// Best failure attributable to the frame at `index`:
 ///
-/// - A successful or halted frame explains nothing (halts have no payload).
+/// - A successful frame explains nothing.
+/// - A halted frame contributes its EVM instruction result.
 /// - A reverted frame's own non-empty payload wins — it is the terminal
 ///   failure at that level — except Safe4337Module's bare `ExecutionFailed()`
 ///   from an `executeUserOp` frame, which deliberately replaces the revert
-///   its Safe call caught; recover that via [`safe_execution_revert`].
+///   or halt its Safe call caught; recover that via [`safe_execution_failure`].
 /// - An empty revert inherits from its last child if that child also failed.
 ///   Earlier failed siblings were superseded by whatever ran after them.
-fn frame_revert_payload(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
+fn frame_failure(traces: &[RawTrace], index: usize) -> Option<FrameFailure<'_>> {
     let mut current = index;
     loop {
         let frame = &traces[current];
-        if frame.outcome != Some(TraceOutcome::Revert) {
-            return None;
+        match frame.outcome {
+            Some(TraceOutcome::Success) | None => return None,
+            Some(TraceOutcome::Halt) => {
+                return frame.halt_reason.map(FrameFailure::Halt);
+            }
+            Some(TraceOutcome::Revert) => {}
         }
         match &frame.revert_output {
             Some(output)
                 if output.as_ref() == EXECUTION_FAILED_SELECTOR
                     && frame.selector == Some(EXECUTE_USER_OP_SELECTOR) =>
             {
-                return safe_execution_revert(traces, current).or(Some(output));
+                return safe_execution_failure(traces, current)
+                    .or(Some(FrameFailure::Revert(output)));
             }
-            Some(output) => return Some(output),
+            Some(output) => return Some(FrameFailure::Revert(output)),
             None => current = last_direct_child(traces, current)?,
         }
     }
 }
 
-/// Revert caught by a successful Safe `execTransactionFromModule` call below
+/// Failure caught by a successful Safe `execTransactionFromModule` call below
 /// the `executeUserOp` frame. Proxy and delegatecall layers may produce more
 /// than one matching frame; the first contains the others and the target.
-fn safe_execution_revert(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
+fn safe_execution_failure(traces: &[RawTrace], index: usize) -> Option<FrameFailure<'_>> {
     let frame_depth = traces[index].depth;
     for (descendant, trace) in traces.iter().enumerate().skip(index + 1) {
         if trace.depth <= frame_depth {
@@ -461,20 +484,20 @@ fn safe_execution_revert(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
         if trace.outcome == Some(TraceOutcome::Success)
             && trace.selector == Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR)
         {
-            return safe_transaction_revert(traces, descendant);
+            return safe_transaction_failure(traces, descendant);
         }
     }
     None
 }
 
-/// Payload of the failed target call made by `execTransactionFromModule`.
+/// Failure of the target call made by `execTransactionFromModule`.
 ///
 /// Proxy and delegatecall layers preserve the selector, so cross only those
 /// successful wrapper frames. At the implementation frame, the failed direct
 /// child is the target call that made Safe return `false`. Other successful
 /// children may be module-guard callbacks; their internally caught reverts do
 /// not explain `ExecutionFailed()`.
-fn safe_transaction_revert(traces: &[RawTrace], index: usize) -> Option<&Bytes> {
+fn safe_transaction_failure(traces: &[RawTrace], index: usize) -> Option<FrameFailure<'_>> {
     let parent_depth = traces[index].depth;
     for (child, trace) in traces.iter().enumerate().skip(index + 1) {
         if trace.depth <= parent_depth {
@@ -484,11 +507,14 @@ fn safe_transaction_revert(traces: &[RawTrace], index: usize) -> Option<&Bytes> 
             if trace.outcome == Some(TraceOutcome::Success)
                 && trace.selector == Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR)
             {
-                if let Some(candidate) = safe_transaction_revert(traces, child) {
+                if let Some(candidate) = safe_transaction_failure(traces, child) {
                     return Some(candidate);
                 }
-            } else if trace.outcome == Some(TraceOutcome::Revert) {
-                return frame_revert_payload(traces, child);
+            } else if matches!(
+                trace.outcome,
+                Some(TraceOutcome::Revert | TraceOutcome::Halt)
+            ) {
+                return frame_failure(traces, child);
             }
         }
     }
@@ -554,6 +580,7 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
             depth,
             outcome: None,
             revert_output: None,
+            halt_reason: None,
         });
 
         // Open a new frame. If this call reverts, `call_end` will drop the
@@ -611,6 +638,7 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
             depth: self.pending_frames.len(),
             outcome: None,
             revert_output: None,
+            halt_reason: None,
         });
         self.pending_frames.push(PendingFrame::new(trace_index));
         None
@@ -1803,7 +1831,7 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    /// Completed trace entry for hand-built `terminal_revert_payload` trees.
+    /// Completed trace entry for hand-built terminal-failure trees.
     fn completed_trace(
         depth: usize,
         outcome: TraceOutcome,
@@ -1820,6 +1848,11 @@ mod tests {
         selector: Option<[u8; 4]>,
         revert_output: Option<&'static [u8]>,
     ) -> RawTrace {
+        assert_ne!(outcome, TraceOutcome::Halt, "use completed_halt_trace");
+        assert!(
+            outcome == TraceOutcome::Revert || revert_output.is_none(),
+            "only reverted traces may have revert output"
+        );
         RawTrace {
             kind,
             from: Address::ZERO,
@@ -1829,19 +1862,32 @@ mod tests {
             depth,
             outcome: Some(outcome),
             revert_output: revert_output.map(Bytes::from_static),
+            halt_reason: None,
+        }
+    }
+
+    fn completed_halt_trace(
+        depth: usize,
+        selector: Option<[u8; 4]>,
+        reason: InstructionResult,
+    ) -> RawTrace {
+        RawTrace {
+            outcome: Some(TraceOutcome::Halt),
+            halt_reason: Some(reason),
+            ..completed_trace(depth, TraceOutcome::Success, selector, None)
         }
     }
 
     #[test]
     fn terminal_selection_handles_trivial_shapes() {
-        assert_eq!(terminal_revert_payload(&[]), None);
+        assert_eq!(terminal_failure(&[]), None);
         assert_eq!(
-            terminal_revert_payload(&[completed_trace(0, TraceOutcome::Success, None, None)]),
+            terminal_failure(&[completed_trace(0, TraceOutcome::Success, None, None)]),
             None
         );
         assert_eq!(
-            terminal_revert_payload(&[completed_trace(0, TraceOutcome::Halt, None, None)]),
-            None
+            terminal_failure(&[completed_halt_trace(0, None, InstructionResult::OutOfGas,)]),
+            Some(FrameFailure::Halt(InstructionResult::OutOfGas))
         );
     }
 
@@ -1853,7 +1899,7 @@ mod tests {
             completed_trace(1, TraceOutcome::Revert, None, Some(b"\xaa")),
             completed_trace(1, TraceOutcome::Success, None, None),
         ];
-        assert_eq!(terminal_revert_payload(&superseded), None);
+        assert_eq!(terminal_failure(&superseded), None);
 
         // Successful child then failed sibling: the last child explains it.
         let inherited = [
@@ -1862,16 +1908,19 @@ mod tests {
             completed_trace(1, TraceOutcome::Revert, None, Some(b"\xbb")),
         ];
         assert_eq!(
-            terminal_revert_payload(&inherited),
-            Some(&Bytes::from_static(b"\xbb"))
+            terminal_failure(&inherited),
+            Some(FrameFailure::Revert(&Bytes::from_static(b"\xbb")))
         );
 
-        // A halted last child has no payload to inherit.
+        // A halted last child contributes its EVM failure reason.
         let halted = [
             completed_trace(0, TraceOutcome::Revert, None, None),
-            completed_trace(1, TraceOutcome::Halt, None, None),
+            completed_halt_trace(1, None, InstructionResult::OutOfGas),
         ];
-        assert_eq!(terminal_revert_payload(&halted), None);
+        assert_eq!(
+            terminal_failure(&halted),
+            Some(FrameFailure::Halt(InstructionResult::OutOfGas))
+        );
     }
 
     #[test]
@@ -1886,8 +1935,8 @@ mod tests {
             completed_trace(1, TraceOutcome::Revert, None, Some(b"\xbb")),
         ];
         assert_eq!(
-            terminal_revert_payload(&traces),
-            Some(&Bytes::from_static(b"\xbb"))
+            terminal_failure(&traces),
+            Some(FrameFailure::Revert(&Bytes::from_static(b"\xbb")))
         );
     }
 
@@ -1922,8 +1971,8 @@ mod tests {
             completed_trace(3, TraceOutcome::Revert, None, Some(b"\xaa")),
         ];
         assert_eq!(
-            terminal_revert_payload(&traces),
-            Some(&Bytes::from_static(b"\xaa"))
+            terminal_failure(&traces),
+            Some(FrameFailure::Revert(&Bytes::from_static(b"\xaa")))
         );
     }
 
@@ -1949,9 +1998,54 @@ mod tests {
             completed_trace(2, TraceOutcome::Success, None, None),
         ];
         assert_eq!(
-            terminal_revert_payload(&traces),
-            Some(&Bytes::from_static(b"\xbb"))
+            terminal_failure(&traces),
+            Some(FrameFailure::Revert(&Bytes::from_static(b"\xbb")))
         );
+    }
+
+    #[test]
+    fn safe_execution_failed_recovers_halt_from_successful_subtree() {
+        let execution_failed: &'static [u8] = &EXECUTION_FAILED_SELECTOR;
+        let traces = vec![
+            completed_trace(
+                0,
+                TraceOutcome::Revert,
+                Some(EXECUTE_USER_OP_SELECTOR),
+                Some(execution_failed),
+            ),
+            completed_trace(
+                1,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            completed_trace_with_kind(
+                TraceKind::DelegateCall,
+                2,
+                TraceOutcome::Success,
+                Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+                None,
+            ),
+            completed_halt_trace(3, None, InstructionResult::OutOfGas),
+        ];
+
+        assert_eq!(
+            terminal_failure(&traces),
+            Some(FrameFailure::Halt(InstructionResult::OutOfGas))
+        );
+
+        let inspector = SimulationInspector {
+            traces,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            inspector.terminal_revert_reason().as_deref(),
+            Some("OutOfGas")
+        );
+        let entries = inspector.trace_entries().expect("complete trace");
+        assert_eq!(entries[3].outcome, TraceOutcome::Halt);
+        assert_eq!(entries[3].revert_reason.as_deref(), Some("OutOfGas"));
     }
 
     #[test]
@@ -1979,8 +2073,8 @@ mod tests {
             completed_trace(3, TraceOutcome::Revert, None, Some(b"\xbb")),
         ];
         assert_eq!(
-            terminal_revert_payload(&traces),
-            Some(&Bytes::from_static(b"\xaa"))
+            terminal_failure(&traces),
+            Some(FrameFailure::Revert(&Bytes::from_static(b"\xaa")))
         );
     }
 
@@ -1998,8 +2092,8 @@ mod tests {
             completed_trace(2, TraceOutcome::Revert, None, Some(b"\xaa")),
         ];
         assert_eq!(
-            terminal_revert_payload(&traces),
-            Some(&Bytes::from_static(execution_failed))
+            terminal_failure(&traces),
+            Some(FrameFailure::Revert(&Bytes::from_static(execution_failed)))
         );
     }
 
@@ -2014,8 +2108,8 @@ mod tests {
             Some(execution_failed),
         )];
         assert_eq!(
-            terminal_revert_payload(&traces),
-            Some(&Bytes::from_static(execution_failed))
+            terminal_failure(&traces),
+            Some(FrameFailure::Revert(&Bytes::from_static(execution_failed)))
         );
     }
 
@@ -2040,8 +2134,8 @@ mod tests {
             completed_trace(2, TraceOutcome::Revert, None, Some(b"\xaa")),
         ];
         assert_eq!(
-            terminal_revert_payload(&wrong_selector),
-            Some(&Bytes::from_static(execution_failed))
+            terminal_failure(&wrong_selector),
+            Some(FrameFailure::Revert(&Bytes::from_static(execution_failed)))
         );
 
         // ...and on an exact payload: ExecutionFailed with appended data is
@@ -2063,8 +2157,8 @@ mod tests {
             completed_trace(2, TraceOutcome::Revert, None, Some(b"\xaa")),
         ];
         assert_eq!(
-            terminal_revert_payload(&inexact_payload),
-            Some(&Bytes::from_static(inexact))
+            terminal_failure(&inexact_payload),
+            Some(FrameFailure::Revert(&Bytes::from_static(inexact)))
         );
     }
 
@@ -2109,6 +2203,7 @@ mod tests {
             depth: 0,
             outcome: None,
             revert_output: None,
+            halt_reason: None,
         });
 
         assert!(matches!(
