@@ -802,11 +802,11 @@ async fn test_terminal_revert_reason_decodes_payload() {
     );
 }
 
-/// Halt frames (OOG, invalid opcode, etc.) carry no decodable payload, so
-/// the inspector returns `None` and the handler falls back to the
-/// `HaltReason` debug name for `revertReason`.
+/// Halt frames carry no ABI revert payload, but the inspector still reports
+/// their instruction-level halt reason. For a top-level halt, the handler may
+/// prefer the richer `HaltReason` from [`ExecutionResult`].
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_terminal_revert_reason_skips_halts() {
+async fn test_terminal_revert_reason_reports_halts() {
     let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
@@ -854,7 +854,10 @@ async fn test_terminal_revert_reason_skips_halts() {
     );
 
     let (_, inspector, _) = evm.components_mut();
-    assert!(inspector.terminal_revert_reason().is_none());
+    assert_eq!(
+        inspector.terminal_revert_reason().as_deref(),
+        Some("OutOfGas"),
+    );
 }
 
 /// Trace captures top-level calls from a simulated execution.
