@@ -118,7 +118,13 @@ async fn main() -> Result<()> {
         Duration::from_secs(cli.l1_rpc_timeout_seconds),
     )
     .context("failed to build the L1 RPC client")?;
+    // Recommended fillers include CachedNonceManager, rebuild with SimpleNonceManager instead.
     let provider = ProviderBuilder::new()
+        .disable_recommended_fillers()
+        .with_gas_estimation()
+        .with_blob_gas_estimation()
+        .with_simple_nonce_management()
+        .fetch_chain_id()
         .wallet(wallet)
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, proposer_address).await;

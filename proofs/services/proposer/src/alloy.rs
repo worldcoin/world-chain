@@ -3,7 +3,8 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
 use world_chain_proof_protocol::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, MULTI_PROOF_GAME_TYPE,
@@ -29,6 +30,7 @@ pub struct AlloyProofSystemClient<P> {
     /// Number of confirmations to require after sending a tx onchain.
     confirmations: u64,
     receipt_timeout: Duration,
+    semaphore: Arc<Semaphore>,
     provider: P,
 }
 
@@ -56,6 +58,7 @@ where
             registered.anchor_registry,
             provider.clone(),
         );
+        let semaphore = Arc::new(Semaphore::new(1));
 
         Ok(Self {
             factory,
@@ -64,6 +67,7 @@ where
             confirmations,
             receipt_timeout,
             provider,
+            semaphore,
         })
     }
 
@@ -102,6 +106,7 @@ where
     }
 
     async fn send_resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
+        let _permit = self.semaphore.acquire().await?;
         let pending = self.game(game).resolve().send().await?;
 
         let tx_hash = *pending.tx_hash();
@@ -164,6 +169,7 @@ where
         game: Address,
         recipient: Address,
     ) -> Result<ClaimSubmission, ProposerError> {
+        let _permit = self.semaphore.acquire().await?;
         // Read both phases up front so the submission can report what the call moved; the
         // receipt carries no amount of its own.
         let credit = self.read_credit(game, recipient).await?;
@@ -304,6 +310,7 @@ where
     }
 
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
+        let _permit = self.semaphore.acquire().await?;
         let pending = self.game(game).closeGame().send().await?;
 
         let tx_hash = *pending.tx_hash();
@@ -324,6 +331,7 @@ where
         &self,
         proposal: &Proposal,
     ) -> Result<ProposalSubmission, ProposerError> {
+        let _permit = self.semaphore.acquire().await?;
         // `DisputeGameFactory.create` reverts unless `msg.value` matches the configured init
         // bond exactly, so it is read per submission rather than cached in configuration.
         let init_bond = self.factory.initBonds(MULTI_PROOF_GAME_TYPE).call().await?;
