@@ -194,6 +194,11 @@ pub struct WorkerArgs {
 }
 
 pub async fn run(cli: WorkerArgs) -> Result<()> {
+    // The worker enables both rustls crypto backends transitively: AWS clients select AWS-LC,
+    // while SP1 and other HTTP clients select Ring. Rustls cannot infer a default when both are
+    // present, so install one before SP1 constructs its tonic TLS client.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let spec = cli.network.chain_spec();
     let schedule = hardfork_config_from_chain_spec(spec.as_ref());
     let host = build_online_config(

@@ -41,6 +41,7 @@ async-trait.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde_cbor = "0.11"
 serde_json.workspace = true
 thiserror.workspace = true
