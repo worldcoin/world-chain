@@ -369,7 +369,7 @@ fn safe_execution_failed_retains_revert_across_successful_catching_frame() {
         .trace_entries()
         .expect("completed simulation should produce a complete trace");
     assert_eq!(trace[0].selector.as_deref(), Some("0x7bb37428"));
-    assert_eq!(trace[0].revert_reason.as_deref(), Some("0xacfdb444"));
+    assert_eq!(trace[0].revert_reason.as_deref(), Some("ExecutionFailed()"));
     assert_eq!(trace[1].outcome, TraceOutcome::Success);
     assert_eq!(trace[1].selector.as_deref(), Some("0x468721a7"));
     assert_eq!(trace[2].revert_reason.as_deref(), Some("0xaaaaaaaa"));
