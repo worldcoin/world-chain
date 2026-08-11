@@ -26,6 +26,7 @@ const CHAIN_ID: u64 = 480;
 const CALLER: Address = address!("00000000000000000000000000000000DeaDBeef");
 const TRAMPOLINE: Address = address!("000000000000000000000000000000000000c0de");
 const REVERTING_CHILD: Address = address!("000000000000000000000000000000000000cafe");
+const HALTING_CHILD: Address = address!("000000000000000000000000000000000000baad");
 const CATCHING_CHILD: Address = address!("000000000000000000000000000000000000beef");
 const MODULE_GUARD: Address = address!("000000000000000000000000000000000000feed");
 
@@ -36,6 +37,13 @@ const CHILD_REVERT: &[u8] = &[
     0x60, 0x04, // PUSH1 4 (revert-data length)
     0x60, 0x1c, // PUSH1 28 (revert-data offset)
     0xfd, // REVERT
+];
+
+/// Infinite loop that consumes all gas forwarded to the child call.
+const CHILD_OUT_OF_GAS: &[u8] = &[
+    0x5b, // JUMPDEST
+    0x5f, // PUSH0
+    0x56, // JUMP
 ];
 
 /// Runtime code that executes CREATE with a 12-byte constructor, then hides
@@ -373,6 +381,38 @@ fn safe_execution_failed_retains_revert_across_successful_catching_frame() {
     assert_eq!(trace[1].outcome, TraceOutcome::Success);
     assert_eq!(trace[1].selector.as_deref(), Some("0x468721a7"));
     assert_eq!(trace[2].revert_reason.as_deref(), Some("0xaaaaaaaa"));
+}
+
+#[test]
+fn safe_execution_failed_reports_out_of_gas_from_caught_target() {
+    let catching_child = call_then_stop(HALTING_CHILD);
+    let trampoline = call_then_revert(
+        CATCHING_CHILD,
+        Some(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+        EXECUTION_FAILED_SELECTOR,
+    );
+    let (result, inspector) = run_trampoline_with_input(
+        &trampoline,
+        &[
+            (CATCHING_CHILD, &catching_child),
+            (HALTING_CHILD, CHILD_OUT_OF_GAS),
+        ],
+        Bytes::copy_from_slice(&EXECUTE_USER_OP_SELECTOR),
+    );
+
+    assert!(matches!(result, ExecutionResult::Revert { .. }));
+    assert_eq!(
+        inspector.terminal_revert_reason().as_deref(),
+        Some("OutOfGas")
+    );
+
+    let trace = inspector
+        .trace_entries()
+        .expect("completed simulation should produce a complete trace");
+    assert_eq!(trace[0].revert_reason.as_deref(), Some("ExecutionFailed()"));
+    assert_eq!(trace[1].outcome, TraceOutcome::Success);
+    assert_eq!(trace[2].outcome, TraceOutcome::Halt);
+    assert_eq!(trace[2].revert_reason.as_deref(), Some("OutOfGas"));
 }
 
 #[test]
