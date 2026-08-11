@@ -4,7 +4,7 @@ pragma solidity ^0.8.23;
 import {Script, console2} from "forge-std/Script.sol";
 import {WLDPaymaster} from "../src/WLDPaymaster.sol";
 import {ChainlinkWldEthOracle} from "../src/oracle/ChainlinkWldEthOracle.sol";
-import {UniswapV3TwapOracle} from "../src/oracle/UniswapV3TwapOracle.sol";
+import {IUniswapV3PoolMinimal} from "../src/interfaces/IUniswapV3PoolMinimal.sol";
 import {IEntryPoint} from "@account-abstraction/interfaces/IEntryPoint.sol";
 import {IStakeManager} from "@account-abstraction/interfaces/IStakeManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -59,9 +59,12 @@ import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.s
  * Addresses (default to live World Chain mainnet, chain id 480):
  *   ENTRYPOINT, WLD, WETH, SWAP_ROUTER, POOL_FEE
  *
- * Pricing:
- *   ORACLE_KIND=chainlink (default) - WLD_USD_FEED, ETH_USD_FEED, MAX_STALENESS
- *   ORACLE_KIND=twap                - WLD_WETH_POOL, TWAP_WINDOW
+ * Pricing (Chainlink):
+ *   WLD_USD_FEED, ETH_USD_FEED, MAX_STALENESS
+ *
+ * Swap deviation guard (on by default; set MAX_POOL_DEVIATION_BPS=0 to disable):
+ *   WLD_WETH_POOL            - V3 pool whose spot price is sanity-checked
+ *   MAX_POOL_DEVIATION_BPS   - max |pool spot - oracle| / oracle (default 500 = 5%)
  *
  * Paymaster policy (all optional; contract defaults used when unset):
  *   PREMIUM_BPS, BLOCKS_PER_BATCH, MAX_SWAP_SLIPPAGE_BPS, MAX_WLD_PER_BATCH,
@@ -89,6 +92,9 @@ contract Deploy is Script {
     /// @dev Chainlink-compatible feeds, both 18 decimals.
     address constant DEFAULT_WLD_USD_FEED = 0x8Bb2943AB030E3eE05a58d9832525B4f60A97FA0;
     address constant DEFAULT_ETH_USD_FEED = 0xe1d72a719171DceAB9499757EB9d5AEb9e8D64A6;
+    /// @dev The WLD/WETH 0.3% pool — the same venue the batch swap trades on.
+    address constant DEFAULT_WLD_WETH_POOL = 0x494D68e3cAb640fa50F4c1B3E2499698D1a173A0;
+    uint256 constant DEFAULT_MAX_POOL_DEVIATION_BPS = 500; // 5%
 
     /// @dev ERC-4337 canonical-mempool minimum unstake delay. Bundlers reject less.
     uint32 constant MIN_UNSTAKE_DELAY = 1 days;
@@ -126,7 +132,7 @@ contract Deploy is Script {
 
         vm.startBroadcast();
 
-        oracle = _deployOracle(c.wld, c.weth);
+        oracle = _deployOracle();
         _requireLiveOracle(oracle);
 
         // Implementation, then proxy. `initialize` runs inside the proxy's
@@ -216,25 +222,23 @@ contract Deploy is Script {
 
         v = vm.envOr("KEEPER_REWARD_BPS", type(uint256).max);
         if (v != type(uint256).max) paymaster.setKeeperRewardBps(v);
+
+        // Swap deviation guard: on by default against the live WLD/WETH pool.
+        // MAX_POOL_DEVIATION_BPS=0 explicitly disables it.
+        uint256 devBps = vm.envOr("MAX_POOL_DEVIATION_BPS", DEFAULT_MAX_POOL_DEVIATION_BPS);
+        address devPool = vm.envOr("WLD_WETH_POOL", DEFAULT_WLD_WETH_POOL);
+        if (devBps > 0) {
+            _requireCode(devPool, "WLD_WETH_POOL");
+            paymaster.setDeviationGuard(IUniswapV3PoolMinimal(devPool), devBps);
+        }
     }
 
-    function _deployOracle(address wld, address weth) internal returns (IWldEthOracle) {
-        string memory kind = vm.envOr("ORACLE_KIND", string("chainlink"));
-        bytes32 k = keccak256(bytes(kind));
-
-        if (k == keccak256("chainlink")) {
-            return new ChainlinkWldEthOracle(
-                IAggregatorV3(vm.envOr("WLD_USD_FEED", DEFAULT_WLD_USD_FEED)),
-                IAggregatorV3(vm.envOr("ETH_USD_FEED", DEFAULT_ETH_USD_FEED)),
-                vm.envOr("MAX_STALENESS", uint256(1 hours))
-            );
-        }
-        if (k == keccak256("twap")) {
-            return new UniswapV3TwapOracle(
-                vm.envAddress("WLD_WETH_POOL"), wld, weth, uint32(vm.envOr("TWAP_WINDOW", uint256(600)))
-            );
-        }
-        revert("ORACLE_KIND must be 'chainlink' or 'twap'");
+    function _deployOracle() internal returns (IWldEthOracle) {
+        return new ChainlinkWldEthOracle(
+            IAggregatorV3(vm.envOr("WLD_USD_FEED", DEFAULT_WLD_USD_FEED)),
+            IAggregatorV3(vm.envOr("ETH_USD_FEED", DEFAULT_ETH_USD_FEED)),
+            vm.envOr("MAX_STALENESS", uint256(1 hours))
+        );
     }
 
     // =========================================================================
@@ -333,6 +337,8 @@ contract Deploy is Script {
         console2.log("premium bps:          ", paymaster.premiumBps());
         console2.log("blocks per batch:     ", paymaster.blocksPerBatch());
         console2.log("max swap slippage bps:", paymaster.maxSwapSlippageBps());
+        console2.log("deviation guard pool: ", address(paymaster.deviationGuardPool()));
+        console2.log("max pool deviation bps:", paymaster.maxPoolDeviationBps());
         console2.log("max WLD per batch:    ", paymaster.maxWldPerBatch());
         console2.log("postOp gas overhead:  ", paymaster.postOpGasOverhead());
         console2.log("WLD per 1 ETH (+prem):", paymaster.quoteWldCharge(1 ether));

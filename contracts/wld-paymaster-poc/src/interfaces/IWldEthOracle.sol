@@ -6,18 +6,17 @@ pragma solidity ^0.8.23;
  * @notice Minimal price-oracle abstraction used by the WLD paymaster.
  *
  * The interface is intentionally implementation-agnostic: the MVP ships a
- * Uniswap V3 TWAP-backed implementation ({UniswapV3TwapOracle}), but the
- * paymaster only depends on this interface so the oracle can later be swapped
- * for a Chainlink feed (see design doc) without touching the paymaster.
+ * Chainlink-backed implementation ({ChainlinkWldEthOracle}), but the paymaster
+ * only depends on this interface so the oracle can be swapped without touching
+ * the paymaster.
  *
  * Conventions:
  *  - "WLD" amounts are denominated in the WLD token's smallest unit (1e18).
  *  - "ETH"/gas amounts are denominated in wei.
  *
- * Implementations MUST revert if a reliable price cannot be produced (e.g. the
- * TWAP window is longer than the pool's observation history). Reverting here
- * causes `validatePaymasterUserOp` to reject the UserOperation, which is the
- * safe default.
+ * Implementations MUST revert if a reliable price cannot be produced (e.g. a
+ * stale Chainlink round). Reverting here causes `validatePaymasterUserOp` to
+ * reject the UserOperation, which is the safe default.
  */
 interface IWldEthOracle {
     /// @notice Amount of WLD (1e18) required to be worth `ethWei` of ETH.

@@ -11,15 +11,15 @@ ETH on **World Chain**.
 ## What it does
 
 - Prices each UserOp's gas in WLD via **Chainlink** feeds (WLD/USD × ETH/USD
-  cross), abstracted behind `IWldEthOracle`. The Uniswap V3 TWAP oracle is kept
-  as a swappable fallback implementation.
+  cross), abstracted behind `IWldEthOracle`.
 - Charges the user a **+20% premium** over the oracle price to absorb price
   drift, swap fees/slippage, and provide a buffer.
 - **No per-op swap** and **no backend server.** It accumulates WLD and, via a
   **permissionless** `triggerBatchSwap()` callable every `X` blocks, swaps up to
   `maxWldPerBatch` WLD→ETH on Uniswap **SwapRouter02** (with oracle-bounded
-  slippage protection) and **re-deposits the ETH into the EntryPoint** —
-  self-sustaining after a one-time funding.
+  slippage protection and a configurable pool-vs-oracle **deviation guard**) and
+  **re-deposits the ETH into the EntryPoint** — self-sustaining after a one-time
+  funding.
 
 Full write-up: [**DESIGN.md**](./DESIGN.md).
 
@@ -29,14 +29,13 @@ Full write-up: [**DESIGN.md**](./DESIGN.md).
 src/
   WLDPaymaster.sol                 # main paymaster (BasePaymaster / IPaymaster, EntryPoint v0.7)
   interfaces/
-    IWldEthOracle.sol              # price-oracle abstraction (Chainlink default, TWAP fallback)
+    IWldEthOracle.sol              # price-oracle abstraction (Chainlink implementation)
     IAggregatorV3.sol              # Chainlink AggregatorV3 read surface (from the live feed's ABI)
     ISwapRouter.sol                # minimal Uniswap V3 SwapRouter + WETH9
-    IUniswapV3PoolMinimal.sol      # pool.observe() subset for TWAP
+    IUniswapV3PoolMinimal.sol      # pool slot0() subset for the swap deviation guard
   oracle/
-    ChainlinkWldEthOracle.sol      # DEFAULT: WLD/USD x ETH/USD Chainlink cross
-    UniswapV3TwapOracle.sol        # fallback: IWldEthOracle backed by a WLD/WETH V3 pool TWAP
-  vendor/                          # TickMath / FullMath / OracleLibrary ported to solc ^0.8
+    ChainlinkWldEthOracle.sol      # WLD/USD x ETH/USD Chainlink cross
+  vendor/                          # FullMath ported to solc ^0.8
 test/
   WLDPaymaster.t.sol               # validate/postOp, premium math, batching, edge cases
   Upgradeability.t.sol             # proxy init, upgrade authorization, state survives upgrade
@@ -46,7 +45,6 @@ test/
   E2E.fork.t.sol                   # optional: full loop vs live EntryPoint/WLD/router/pool
   Deploy.fork.t.sol                # optional: runs the deploy script, asserts it can sponsor
   Unwind.fork.t.sol                # optional: asserts teardown recovers every wei and token
-  UniswapV3TwapOracle.t.sol        # TWAP conversion via a mock V3 pool
   mocks/Mocks.sol                  # ERC20 / WETH / oracle / aggregator / router / pool mocks
 script/
   Deploy.s.sol                     # deploy impl + proxy, configure, fund, assert ready

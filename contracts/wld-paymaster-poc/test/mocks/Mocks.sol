@@ -107,40 +107,26 @@ contract MockSwapRouter is ISwapRouter {
     }
 }
 
-/// @notice Mock Uniswap V3 pool that reports a constant tick for TWAP tests.
+/// @notice Mock Uniswap V3 pool with a settable spot price, for the paymaster's
+///         swap deviation guard.
 contract MockUniswapV3Pool {
     address public immutable token0;
     address public immutable token1;
     uint24 public constant fee = 3000;
-    int24 public tick;
-    bool public tooOld;
+    uint160 public sqrtPriceX96;
 
-    constructor(address _token0, address _token1, int24 _tick) {
+    constructor(address _token0, address _token1, uint160 _sqrtPriceX96) {
         // Uniswap orders token0 < token1
         (token0, token1) = _token0 < _token1 ? (_token0, _token1) : (_token1, _token0);
-        tick = _tick;
+        sqrtPriceX96 = _sqrtPriceX96;
     }
 
-    function setTick(int24 _tick) external {
-        tick = _tick;
+    function setSqrtPriceX96(uint160 _sqrtPriceX96) external {
+        sqrtPriceX96 = _sqrtPriceX96;
     }
 
-    function setTooOld(bool _v) external {
-        tooOld = _v;
-    }
-
-    function observe(uint32[] calldata secondsAgos)
-        external
-        view
-        returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s)
-    {
-        require(!tooOld, "OLD");
-        tickCumulatives = new int56[](2);
-        secondsPerLiquidityCumulativeX128s = new uint160[](2);
-        uint32 window = secondsAgos[0];
-        // cumulative(now) - cumulative(window ago) = tick * window
-        tickCumulatives[0] = 0;
-        tickCumulatives[1] = int56(tick) * int56(uint56(window));
+    function slot0() external view returns (uint160, int24, uint16, uint16, uint16, uint8, bool) {
+        return (sqrtPriceX96, 0, 0, 1, 1, 0, true);
     }
 }
 

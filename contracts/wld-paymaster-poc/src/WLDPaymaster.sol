@@ -12,6 +12,8 @@ import {BasePaymasterUpgradeable} from "./BasePaymasterUpgradeable.sol";
 
 import {IWldEthOracle} from "./interfaces/IWldEthOracle.sol";
 import {ISwapRouter, IWETH9} from "./interfaces/ISwapRouter.sol";
+import {IUniswapV3PoolMinimal} from "./interfaces/IUniswapV3PoolMinimal.sol";
+import {FullMath} from "./vendor/FullMath.sol";
 
 /**
  * @title WLDPaymaster
@@ -86,7 +88,7 @@ contract WLDPaymaster is BasePaymasterUpgradeable, ReentrancyGuardUpgradeable, U
     ISwapRouter public swapRouter;
 
     // --- owner-configurable config ---
-    /// @notice Price oracle (WLD/ETH). Swappable: Chainlink default, TWAP fallback.
+    /// @notice Price oracle (WLD/ETH). Swappable behind {IWldEthOracle}; Chainlink by default.
     IWldEthOracle public oracle;
     /// @notice Premium charged over oracle price, in bps (2000 = +20%).
     uint256 public premiumBps;
@@ -104,6 +106,10 @@ contract WLDPaymaster is BasePaymasterUpgradeable, ReentrancyGuardUpgradeable, U
     uint256 public keeperRewardBps;
     /// @notice Max WLD swapped per batch (0 = unlimited). Bounds price impact.
     uint256 public maxWldPerBatch;
+    /// @notice WLD/WETH pool checked by the swap deviation guard (0 = guard off).
+    IUniswapV3PoolMinimal public deviationGuardPool;
+    /// @notice Max allowed |pool spot - oracle| / oracle on batch swaps, in bps.
+    uint256 public maxPoolDeviationBps;
 
     // --- batch accounting ---
     /// @notice WLD collected from users, awaiting the next batch swap.
@@ -126,6 +132,7 @@ contract WLDPaymaster is BasePaymasterUpgradeable, ReentrancyGuardUpgradeable, U
     error BatchTooEarly();
     error NothingToSwap();
     error SlippageTooHigh();
+    error PoolPriceDeviated(uint256 poolEth, uint256 oracleEth);
     error InvalidConfig();
     /// @param length Byte length of the supplied `paymasterData` (must be 0 or 32).
     error InvalidPaymasterData(uint256 length);
@@ -379,6 +386,17 @@ contract WLDPaymaster is BasePaymasterUpgradeable, ReentrancyGuardUpgradeable, U
 
         // Oracle-bounded minimum out (slippage protection).
         uint256 oracleEth = oracle.ethForWld(amountIn);
+
+        // Deviation guard: refuse to swap while the pool's spot price disagrees
+        // with the oracle by more than `maxPoolDeviationBps` (in either
+        // direction). A manipulated or thin pool then stalls settlement for a
+        // batch instead of executing at a bad price; WLD stays accumulated and
+        // the swap can be retried once the pool re-converges.
+        if (address(deviationGuardPool) != address(0)) {
+            uint256 poolEth = _poolEthForWld(amountIn);
+            uint256 diff = poolEth > oracleEth ? poolEth - oracleEth : oracleEth - poolEth;
+            if (diff * BPS > oracleEth * maxPoolDeviationBps) revert PoolPriceDeviated(poolEth, oracleEth);
+        }
         uint256 oracleFloor = (oracleEth * (BPS - maxSwapSlippageBps)) / BPS;
         uint256 floor = minEthOut > oracleFloor ? minEthOut : oracleFloor;
 
@@ -415,6 +433,27 @@ contract WLDPaymaster is BasePaymasterUpgradeable, ReentrancyGuardUpgradeable, U
         entryPoint().depositTo{value: redeposit}(address(this));
 
         emit BatchSwapExecuted(msg.sender, amountIn, ethOut, keeperReward, redeposit);
+    }
+
+    /// @dev WETH the pool's *spot* price quotes for `wldAmount`, from `slot0`.
+    ///      sqrtPriceX96 encodes sqrt(token1/token0) in Q64.96; squaring gives the
+    ///      price ratio, inverted when WLD is token1. Mirrors Uniswap's
+    ///      `OracleLibrary.getQuoteAtTick` precision strategy.
+    function _poolEthForWld(uint256 wldAmount) internal view returns (uint256 ethWei) {
+        (uint160 sqrtPriceX96,,,,,,) = deviationGuardPool.slot0();
+        bool wldIsToken0 = deviationGuardPool.token0() == address(wld);
+
+        if (sqrtPriceX96 <= type(uint128).max) {
+            uint256 ratioX192 = uint256(sqrtPriceX96) * sqrtPriceX96;
+            ethWei = wldIsToken0
+                ? FullMath.mulDiv(ratioX192, wldAmount, 1 << 192)
+                : FullMath.mulDiv(1 << 192, wldAmount, ratioX192);
+        } else {
+            uint256 ratioX128 = FullMath.mulDiv(sqrtPriceX96, sqrtPriceX96, 1 << 64);
+            ethWei = wldIsToken0
+                ? FullMath.mulDiv(ratioX128, wldAmount, 1 << 128)
+                : FullMath.mulDiv(1 << 128, wldAmount, ratioX128);
+        }
     }
 
     // =========================================================================
@@ -463,6 +502,25 @@ contract WLDPaymaster is BasePaymasterUpgradeable, ReentrancyGuardUpgradeable, U
     /// @param _max Max WLD per batch swap; 0 disables the cap (not recommended).
     function setMaxWldPerBatch(uint256 _max) external onlyOwner {
         maxWldPerBatch = _max;
+        emit ConfigUpdated();
+    }
+
+    /// @notice Configure the batch-swap deviation guard.
+    /// @param _pool WLD/WETH V3 pool whose spot price is checked against the
+    ///        oracle before each batch swap. address(0) disables the guard.
+    /// @param _bps Max allowed deviation in bps (must be non-zero and < 100%
+    ///        when a pool is set). Ignored when the guard is disabled.
+    function setDeviationGuard(IUniswapV3PoolMinimal _pool, uint256 _bps) external onlyOwner {
+        if (address(_pool) != address(0)) {
+            if (_bps == 0 || _bps >= BPS) revert InvalidConfig();
+            // The pool must actually contain WLD, or the spot quote is garbage.
+            address t0 = _pool.token0();
+            address t1 = _pool.token1();
+            if (t0 != address(wld) && t1 != address(wld)) revert InvalidConfig();
+            if (t0 != address(weth) && t1 != address(weth)) revert InvalidConfig();
+        }
+        deviationGuardPool = _pool;
+        maxPoolDeviationBps = _bps;
         emit ConfigUpdated();
     }
 

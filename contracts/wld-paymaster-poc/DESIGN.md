@@ -17,9 +17,10 @@ off-chain backend**. Concretely, per leadership's design:
    **batched** swap of up to `maxWldPerBatch` every `X` blocks, then re-deposits
    the resulting ETH into the EntryPoint — self-sustaining after the initial
    funding.
-4. It reads WLD/ETH from **Chainlink** (WLD/USD × ETH/USD cross) behind an
-   `IWldEthOracle` interface; a Uniswap V3 TWAP implementation is retained as a
-   swappable fallback.
+4. It reads WLD/ETH from **Chainlink** (WLD/USD × ETH/USD cross) behind a
+   swappable `IWldEthOracle` interface. Before each batch swap, a configurable
+   **deviation guard** additionally requires the Uniswap pool's spot price to be
+   within `maxPoolDeviationBps` of the oracle price.
 
 This document describes the "backend-less / fully on-chain" variant. It is an
 alternative to the ERC-7677 off-chain paymaster-service approach (where a server
@@ -129,25 +130,25 @@ refuse to swap without a trustworthy min-out bound. `maxStaleness` must sit
 comfortably above the feeds' push heartbeat, or ops get rejected whenever the
 feed is merely quiet — this is the main new operational knob.
 
-**Fallback implementation — `UniswapV3TwapOracle`:** reads a time-weighted average
-tick over `twapWindow` seconds from the WLD/WETH V3 pool via `pool.observe()`,
-and converts amounts with the standard `OracleLibrary.getQuoteAtTick`
-(vendored to solc ^0.8 in `src/vendor/`). Using a TWAP (not spot) is the primary
-manipulation mitigation: a spot spike must be *sustained across the whole
-window* to move the reported price.
-
 **Premium.** `premiumBps` (default `2000` = +20%) is applied on top of the oracle
 price in `validate`. Because the up-front charge already includes the premium
 and `postOp` scales it linearly, the effective charge is always
 `1.2 × (WLD-equivalent of actual gas)`.
 
-**Choosing between them.** Chainlink is the default: it removes in-protocol
-(pool) manipulation surface and decouples the price source from the swap venue.
-Its cost is a liveness/trust dependency on the feeds' push cadence, bounded by
-`maxStaleness`. The TWAP has no external liveness dependency but is manipulable
-by moving the pool — and the pool is also where the batch swap executes. Either
-can be installed via `setOracle(...)` with zero paymaster changes; the swap is
-oracle-bounded in both cases.
+**Why Chainlink.** It removes in-protocol (pool) manipulation surface and
+decouples the price source from the swap venue. Its cost is a liveness/trust
+dependency on the feeds' push cadence, bounded by `maxStaleness`. A replacement
+oracle can be installed via `setOracle(...)` with zero paymaster changes; the
+swap is oracle-bounded either way.
+
+**Swap deviation guard.** `triggerBatchSwap` optionally cross-checks the swap
+venue against the oracle: if `deviationGuardPool` is set, the pool's `slot0`
+spot quote for the batch must be within `maxPoolDeviationBps` (default 5% via
+the deploy script) of the oracle quote, in either direction, or the swap reverts
+with `PoolPriceDeviated` and the WLD stays accumulated for a later retry. This
+keeps a manipulated or dislocated pool from filling the batch near the worst
+edge of the slippage band, at the cost of stalling settlement while the two
+prices disagree.
 
 ## 3. Collecting WLD from the user
 
@@ -228,7 +229,9 @@ griefing/MEV surface. Chainlink Automation remains available as a drop-in later
 | `postOpGasOverhead` | 40000 | Gas assumed for postOp, folded into the charge |
 | `keeperRewardBps` | 0 | Optional reward to the batch-swap caller |
 | `maxWldPerBatch` | 500e18 | Max WLD sold per batch swap (0 = unlimited) |
-| `oracle` | ctor arg | Swappable `IWldEthOracle` (Chainlink default, TWAP fallback) |
+| `oracle` | ctor arg | Swappable `IWldEthOracle` (Chainlink cross) |
+| `deviationGuardPool` | unset (off) | Pool spot-checked against the oracle before batch swaps |
+| `maxPoolDeviationBps` | 500 (5%) via deploy script | Max pool-vs-oracle deviation allowed on swaps |
 | `maxStaleness` | 1 hour | Oracle ctor: max Chainlink answer age before ops are rejected |
 
 ## 7. Risks & edge cases
@@ -248,13 +251,8 @@ griefing/MEV surface. Chainlink Automation remains available as a drop-in later
   until it recovers — un-sponsored ops, not mispriced ones, but a full outage of
   the WLD-gas path. Set `maxStaleness` above the feeds' heartbeat with headroom,
   alert on feed `updatedAt` age, and keep `setOracle(...)` as the break-glass
-  (swap to the TWAP oracle) path. The two-feed cross also means either feed can
-  take the path down.
-- **TWAP manipulation (fallback oracle).** Short windows are cheaper to manipulate. Mitigations:
-  use a sufficiently long `twapWindow`, prefer a deep-liquidity fee tier, keep
-  the +20% premium as a buffer, and cap per-op exposure via `minEntryPointDeposit`.
-  A determined attacker who sustains an off-market price for the whole window
-  could under-pay for gas; the premium and batch slippage bound limit the bleed.
+  path for installing a replacement oracle. The two-feed cross also means either
+  feed can take the path down.
 - **Batch-swap slippage / thin liquidity.** `amountOutMinimum` is set from the
   oracle price minus `maxSwapSlippageBps`; if the pool can't fill at that price
   the swap reverts (WLD stays accumulated, retried next window). **Measured
@@ -290,10 +288,13 @@ griefing/MEV surface. Chainlink Automation remains available as a drop-in later
   the max charge, and a `postOp` revert rolls back only the `accumulatedWld` write
   (v0.7 still charges the paymaster for gas). The stranded WLD is recoverable via
   `sweepExcessWld`, but the user is not auto-refunded.
-- **Oracle == swap venue (fallback oracle only).** With the TWAP oracle, both
-  the price and the swap use Uniswap, so an attacker who moves the pool moves
-  both. The default Chainlink oracle is independent of the swap venue and
-  decorrelates these.
+- **Deviation guard stalls settlement while prices disagree.** A genuine, fast
+  market move (or a lagging feed) can hold pool and oracle apart for a while;
+  batches revert with `PoolPriceDeviated` until they re-converge. That is the
+  intended fail-closed behaviour — WLD keeps accumulating and nothing is lost —
+  but alert on repeated `PoolPriceDeviated` reverts so a persistent dislocation
+  (or a mis-set `maxPoolDeviationBps`) is noticed rather than silently pausing
+  replenishment until the deposit floor halts sponsorship.
 - **Deposit runs low.** The floor check rejects new ops before the deposit is
   exhausted; ops are simply un-sponsored until a batch (or the owner) replenishes.
 - **EntryPoint deducts the prefund *before* validation.** `getDeposit()` inside

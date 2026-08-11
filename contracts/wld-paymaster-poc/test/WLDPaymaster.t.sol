@@ -12,7 +12,8 @@ import {DeployProxy} from "./utils/DeployProxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IWETH9, ISwapRouter} from "../src/interfaces/ISwapRouter.sol";
 import {IWldEthOracle} from "../src/interfaces/IWldEthOracle.sol";
-import {MockERC20, MockWETH, MockOracle, MockSwapRouter} from "./mocks/Mocks.sol";
+import {IUniswapV3PoolMinimal} from "../src/interfaces/IUniswapV3PoolMinimal.sol";
+import {MockERC20, MockWETH, MockOracle, MockSwapRouter, MockUniswapV3Pool} from "./mocks/Mocks.sol";
 
 contract WLDPaymasterTest is Test {
     // 1 ETH = 1000 WLD
@@ -445,6 +446,110 @@ contract WLDPaymasterTest is Test {
 
         uint256 sold = balBefore - wld.balanceOf(address(paymaster));
         assertEq(sold + paymaster.accumulatedWld(), charged, "no WLD unaccounted for");
+    }
+
+    // =====================================================================
+    //                       Swap deviation guard
+    // =====================================================================
+
+    /// @dev sqrtPriceX96 for a pool where `num` WLD = `den` ETH, respecting the
+    ///      pool's token0/token1 ordering (slot0 price is token1 per token0).
+    function _sqrtPriceFor(MockUniswapV3Pool pool, uint256 num, uint256 den) internal view returns (uint160) {
+        bool wldIsToken0 = pool.token0() == address(wld);
+        // price(token1 per token0): ETH-per-WLD = den/num when WLD is token0.
+        uint256 ratioX192 = wldIsToken0 ? (den << 192) / num : (num << 192) / den;
+        return uint160(_sqrt(ratioX192));
+    }
+
+    function _sqrt(uint256 x) internal pure returns (uint256 y) {
+        uint256 z = (x + 1) / 2;
+        y = x;
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
+        }
+    }
+
+    function _guardPoolAt(uint256 num, uint256 den) internal returns (MockUniswapV3Pool pool) {
+        pool = new MockUniswapV3Pool(address(wld), address(weth), 0);
+        pool.setSqrtPriceX96(_sqrtPriceFor(pool, num, den));
+        paymaster.setDeviationGuard(IUniswapV3PoolMinimal(address(pool)), 500); // 5%
+    }
+
+    function test_DeviationGuard_AllowsWhenPoolMatchesOracle() public {
+        _guardPoolAt(NUM, DEN); // pool spot == oracle price
+        uint256 charged = _accumulate();
+
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        uint256 ethOut = paymaster.triggerBatchSwap(0);
+        assertEq(ethOut, charged * DEN / NUM, "swap proceeds inside the band");
+    }
+
+    function test_DeviationGuard_BlocksWhenPoolDeviates() public {
+        // Pool says 1 ETH = 1100 WLD: WLD spot is ~9.1% below oracle -> outside 5%.
+        _guardPoolAt(NUM * 110 / 100, DEN);
+        _accumulate();
+
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        vm.expectPartialRevert(WLDPaymaster.PoolPriceDeviated.selector);
+        paymaster.triggerBatchSwap(0);
+    }
+
+    function test_DeviationGuard_BlocksBothDirections() public {
+        // Pool says 1 ETH = 900 WLD: WLD spot ~11% above oracle -> also blocked.
+        _guardPoolAt(NUM * 90 / 100, DEN);
+        _accumulate();
+
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        vm.expectRevert();
+        paymaster.triggerBatchSwap(0);
+    }
+
+    function test_DeviationGuard_KeepsWldAccumulatedOnBlock() public {
+        _guardPoolAt(NUM * 110 / 100, DEN);
+        uint256 charged = _accumulate();
+
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        vm.expectRevert();
+        paymaster.triggerBatchSwap(0);
+        assertEq(paymaster.accumulatedWld(), charged, "nothing lost; retryable next batch");
+    }
+
+    function test_DeviationGuard_RecoversAfterPoolConverges() public {
+        MockUniswapV3Pool pool = _guardPoolAt(NUM * 110 / 100, DEN);
+        _accumulate();
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        vm.expectRevert();
+        paymaster.triggerBatchSwap(0);
+
+        pool.setSqrtPriceX96(_sqrtPriceFor(pool, NUM, DEN));
+        uint256 ethOut = paymaster.triggerBatchSwap(0);
+        assertGt(ethOut, 0, "swap succeeds once pool re-converges");
+    }
+
+    function test_DeviationGuard_DisabledByZeroPool() public {
+        _guardPoolAt(NUM * 2, DEN); // wildly off
+        paymaster.setDeviationGuard(IUniswapV3PoolMinimal(address(0)), 0);
+
+        uint256 charged = _accumulate();
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        uint256 ethOut = paymaster.triggerBatchSwap(0);
+        assertEq(ethOut, charged * DEN / NUM, "guard off: pool price ignored");
+    }
+
+    function test_RevertWhen_DeviationGuardMisconfigured() public {
+        MockUniswapV3Pool pool = new MockUniswapV3Pool(address(wld), address(weth), 1 << 96);
+
+        vm.expectRevert(WLDPaymaster.InvalidConfig.selector);
+        paymaster.setDeviationGuard(IUniswapV3PoolMinimal(address(pool)), 0);
+
+        vm.expectRevert(WLDPaymaster.InvalidConfig.selector);
+        paymaster.setDeviationGuard(IUniswapV3PoolMinimal(address(pool)), 10_000);
+
+        // Pool that doesn't contain WLD+WETH is rejected.
+        MockUniswapV3Pool wrong = new MockUniswapV3Pool(address(weth), address(this), 1 << 96);
+        vm.expectRevert(WLDPaymaster.InvalidConfig.selector);
+        paymaster.setDeviationGuard(IUniswapV3PoolMinimal(address(wrong)), 500);
     }
 
     receive() external payable {}

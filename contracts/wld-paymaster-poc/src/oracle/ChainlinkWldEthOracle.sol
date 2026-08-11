@@ -7,8 +7,8 @@ import {IAggregatorV3} from "../interfaces/IAggregatorV3.sol";
 /**
  * @title ChainlinkWldEthOracle
  * @notice {IWldEthOracle} implementation backed by two Chainlink feeds on World
- *         Chain: WLD/USD and ETH/USD. This is the default pricing source for the
- *         paymaster; {UniswapV3TwapOracle} is kept as a fallback implementation.
+ *         Chain: WLD/USD and ETH/USD. This is the pricing source for the
+ *         paymaster, swappable behind {IWldEthOracle}.
  *
  * @dev Live World Chain feeds (both `ChainlinkPriceFeed`, 18 decimals):
  *        WLD/USD  0x8Bb2943AB030E3eE05a58d9832525B4f60A97FA0
@@ -26,8 +26,8 @@ import {IAggregatorV3} from "../interfaces/IAggregatorV3.sol";
  *      makes `triggerBatchSwap` refuse to swap without a trustworthy min-out
  *      bound. Stateless and immutable, so it is swappable via `setOracle(...)`.
  *
- *      Trade-off vs the TWAP: removes in-protocol (pool) manipulation surface
- *      and decouples the price source from the swap venue, but adds a liveness
+ *      Trade-off vs pool-derived pricing: removes in-protocol (pool) manipulation
+ *      surface and decouples the price source from the swap venue, but adds a liveness
  *      dependency on the feed's push cadence — hence `maxStaleness`, which must
  *      be set comfortably above the feeds' heartbeat or ops will be rejected
  *      whenever the feed is merely quiet.
