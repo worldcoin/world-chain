@@ -2,6 +2,7 @@ use alloy_primitives::{Address, TxHash};
 use alloy_provider::{PendingTransactionError, transport::RpcError};
 use alloy_transport::TransportErrorKind;
 use thiserror::Error;
+use tokio::sync::AcquireError;
 use world_chain_proof_protocol::{
     ConsensusError, GameStatusError, InvalidationReasonError, ProposalStatusError,
 };
@@ -54,6 +55,8 @@ pub enum ChallengerError {
         /// Block number included in the game.
         given_block: u64,
     },
+    #[error(transparent)]
+    Permit(#[from] AcquireError),
 }
 
 impl From<alloy_contract::Error> for ChallengerError {

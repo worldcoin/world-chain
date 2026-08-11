@@ -151,6 +151,11 @@ async fn main() -> Result<()> {
     )
     .context("failed to build the L1 RPC client")?;
     let provider = ProviderBuilder::new()
+        .disable_recommended_fillers()
+        .with_gas_estimation()
+        .with_blob_gas_estimation()
+        .with_simple_nonce_management()
+        .fetch_chain_id()
         .wallet(wallet)
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, challenger_address).await;
