@@ -19,21 +19,23 @@
 
 use std::time::Duration;
 
-use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, Bytes, TxHash, keccak256};
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_signer::Signer;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::sol;
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha384};
 use tracing::{info, warn};
 use url::Url;
+use world_chain_proof_tx_signer::{TransactionSigner, build_transaction_signer};
 
 use crate::prewarm::{ColdCert, build_prewarm_plan, packed_cert_not_after};
 
 /// Max attempts for the `registerKey` submission. Retries let the flow survive transient
 /// RPC errors and funding-account nonce contention when several worker replicas share the
-/// same `REGISTER_PRIVATE_KEY`/`PRIVATE_KEY` and self-register simultaneously.
+/// same `REGISTER_PRIVATE_KEY`, `REGISTER_KMS_KEY_ID`, or `PRIVATE_KEY` and self-register
+/// simultaneously.
 const REGISTER_MAX_ATTEMPTS: u32 = 5;
 /// Base backoff between `registerKey` attempts (scaled by the attempt number).
 const REGISTER_RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
@@ -312,9 +314,20 @@ pub struct RegisterParams {
     pub l1_rpc_url: String,
     /// `NitroEnclaveKeyRegistry` contract address on L1 (hex, `0x`-prefixed).
     pub registry: String,
-    /// Hex-encoded private key used to sign (and pay gas for) the `registerKey` tx.
-    /// `registerKey` is **not** owner-gated, so any funded key works.
-    pub private_key: String,
+    /// Local private key or AWS KMS key ID used to sign (and pay gas for) the
+    /// `registerKey` tx. `registerKey` is **not** owner-gated, so any funded key works.
+    pub signer_secret: String,
+    /// Registration transaction signer implementation.
+    pub signer_type: SignerType,
+}
+
+/// Signer type used to submit enclave registration transactions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignerType {
+    /// Hex-encoded local secp256k1 private key.
+    Local,
+    /// AWS KMS key ID or alias.
+    AwsKms,
 }
 
 /// Result of a registration attempt.
@@ -351,7 +364,11 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
     //    precise error instead of a generic "invalid address/URL/key".
     let l1_rpc_url = non_empty(&params.l1_rpc_url, "L1 RPC URL")?;
     let registry = non_empty(&params.registry, "NitroEnclaveKeyRegistry address")?;
-    let private_key = non_empty(&params.private_key, "registration private key")?;
+    let signer_field = match params.signer_type {
+        SignerType::Local => "registration private key",
+        SignerType::AwsKms => "registration AWS KMS key ID",
+    };
+    let signer_secret = non_empty(&params.signer_secret, signer_field)?;
 
     // 1. Fetch a public-key-embedding attestation from the running enclave.
     let endpoint = EnclaveEndpoint::with_port(params.enclave_cid, params.enclave_port);
@@ -376,12 +393,24 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
     let registry_address: Address = registry
         .parse()
         .context("invalid NitroEnclaveKeyRegistry address")?;
-    let signer: PrivateKeySigner = private_key
-        .parse()
-        .context("invalid registration private key")?;
-    let signer_address = signer.address();
+    let signer = match params.signer_type {
+        SignerType::Local => {
+            let private_key = signer_secret
+                .parse::<PrivateKeySigner>()
+                .context("invalid registration private key")?;
+            build_transaction_signer(Some(private_key), None, &url).await
+        }
+        SignerType::AwsKms => {
+            build_transaction_signer(None, Some(signer_secret.to_owned()), &url).await
+        }
+    }
+    .context("initializing registration transaction signer")?;
+    let signer_address = match &signer {
+        TransactionSigner::Local(signer) => signer.address(),
+        TransactionSigner::Aws(signer) => signer.address(),
+    };
     let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(signer))
+        .wallet(signer.wallet())
         .connect_http(url);
     let registry = NitroEnclaveKeyRegistry::new(registry_address, provider.clone());
 
@@ -420,9 +449,9 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
 
     // 4-6. Submit registerKey with bounded retries. Each enclave registers its OWN distinct
     //      signer, so retries exist to survive transient RPC failures and funding-account
-    //      nonce contention when several worker replicas share REGISTER_PRIVATE_KEY and
-    //      register at the same time. Every attempt first re-checks isSignerRegistered so we
-    //      never resubmit once the signer is Active (by us or a peer).
+    //      nonce contention when several worker replicas share REGISTER_PRIVATE_KEY or
+    //      REGISTER_KMS_KEY_ID and register at the same time. Every attempt first re-checks
+    //      isSignerRegistered so we never resubmit once the signer is Active (by us or a peer).
     let calldata = build_registration_calldata(&attestation_doc)?;
     let mut last_err: Option<anyhow::Error> = None;
 

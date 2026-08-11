@@ -642,7 +642,8 @@ proof-verify-pcrs env="alphanet":
 #            it to NitroEnclaveKeyRegistry. Idempotent: a no-op if already registered.
 #            `registerKey` is NOT owner-gated, so any funded key works.
 #
-# Required: L1_RPC_URL, and a funding key via REGISTER_PRIVATE_KEY or PRIVATE_KEY.
+# Required: L1_RPC_URL, and a funding signer via REGISTER_PRIVATE_KEY,
+#           REGISTER_KMS_KEY_ID, or the legacy PRIVATE_KEY fallback.
 # Optional: NITRO_ENCLAVE_KEY_REGISTRY (else read from the {{env}}-nitro.json deployment),
 #           PCR0/PCR1/PCR2 (else host-side attestation checks are skipped; the on-chain
 #           verifier still enforces the approved PCR allowlist).
@@ -666,8 +667,18 @@ proof-register-key env="alphanet":
     fi
     : "${NITRO_ENCLAVE_KEY_REGISTRY:?NITRO_ENCLAVE_KEY_REGISTRY is required (set it or run proof-deploy-nitro first)}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
-    REGISTER_KEY="${REGISTER_PRIVATE_KEY:-${PRIVATE_KEY:-}}"
-    : "${REGISTER_KEY:?set REGISTER_PRIVATE_KEY or PRIVATE_KEY (any funded key — registerKey is not owner-gated)}"
+    if [ -n "${REGISTER_PRIVATE_KEY:-}" ] && [ -n "${REGISTER_KMS_KEY_ID:-}" ]; then
+        echo "Error: set exactly one of REGISTER_PRIVATE_KEY or REGISTER_KMS_KEY_ID" >&2
+        exit 1
+    fi
+    REGISTER_KEY="${REGISTER_PRIVATE_KEY:-}"
+    if [ -z "$REGISTER_KEY" ] && [ -z "${REGISTER_KMS_KEY_ID:-}" ]; then
+        REGISTER_KEY="${PRIVATE_KEY:-}"
+    fi
+    if [ -z "$REGISTER_KEY" ] && [ -z "${REGISTER_KMS_KEY_ID:-}" ]; then
+        echo "Error: set REGISTER_PRIVATE_KEY, REGISTER_KMS_KEY_ID, or PRIVATE_KEY (any funded key — registerKey is not owner-gated)" >&2
+        exit 1
+    fi
     NITRO_POD=$(kubectl --context="$KUBECONTEXT" get pod \
         -n "$PROOF_NAMESPACE" \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
@@ -678,7 +689,7 @@ proof-register-key env="alphanet":
     CONTAINER=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
         -n "$PROOF_NAMESPACE" \
         -o jsonpath='{.spec.containers[0].name}')
-    # Check the container is actually Running before we exec (and pipe the funding key) in.
+    # Check the container is actually Running before we exec and pass the signer config in.
     CONTAINER_STATE=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
         -n "$PROOF_NAMESPACE" \
         -o jsonpath="{.status.containerStatuses[?(@.name==\"$CONTAINER\")].state.running}")
@@ -691,7 +702,7 @@ proof-register-key env="alphanet":
         -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
         -- cat /run/nitro-shared/enclave-cid 2>/dev/null || echo "16")
     echo "Pod: $NITRO_POD  Container: $CONTAINER  CID: $ENCLAVE_CID  Registry: $NITRO_ENCLAVE_KEY_REGISTRY" >&2
-    # Pass everything (including the funding key) over STDIN rather than as `sh -c`
+    # Pass everything (including any local funding key) over STDIN rather than as `sh -c`
     # arguments, so secrets never appear in the container argv / kubectl audit logs, and
     # shell metacharacters in any value can't break out. Each value is single-quoted with
     # embedded single quotes escaped.
@@ -700,7 +711,15 @@ proof-register-key env="alphanet":
         printf 'export ENCLAVE_CID=%s\n' "$(shq "$ENCLAVE_CID")"
         printf 'export NITRO_ENCLAVE_KEY_REGISTRY=%s\n' "$(shq "$NITRO_ENCLAVE_KEY_REGISTRY")"
         printf 'export L1_RPC_URL=%s\n' "$(shq "$L1_RPC_URL")"
-        printf 'export REGISTER_PRIVATE_KEY=%s\n' "$(shq "$REGISTER_KEY")"
+        # `kubectl exec` inherits the container environment. Clear both dedicated signer
+        # variables before setting the selected one so an auto-register configuration on
+        # the Deployment cannot make this one-shot command see two signer sources.
+        printf 'unset REGISTER_PRIVATE_KEY REGISTER_KMS_KEY_ID\n'
+        if [ -n "${REGISTER_KMS_KEY_ID:-}" ]; then
+            printf 'export REGISTER_KMS_KEY_ID=%s\n' "$(shq "$REGISTER_KMS_KEY_ID")"
+        else
+            printf 'export REGISTER_PRIVATE_KEY=%s\n' "$(shq "$REGISTER_KEY")"
+        fi
         if [ -n "${PCR0:-}" ]; then printf 'export PCR0=%s\n' "$(shq "$PCR0")"; fi
         if [ -n "${PCR1:-}" ]; then printf 'export PCR1=%s\n' "$(shq "$PCR1")"; fi
         if [ -n "${PCR2:-}" ]; then printf 'export PCR2=%s\n' "$(shq "$PCR2")"; fi

@@ -18,6 +18,8 @@ use world_chain_proof_worker::{
 };
 use world_chain_prover_service::RpcProverServiceClient;
 
+use super::select_registration_signer;
+
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: usize = 10;
 const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
@@ -251,10 +253,15 @@ pub struct WorkerArgs {
     registry: Option<String>,
 
     /// Hex-encoded private key used to sign and pay for the `registerKey` transaction when
-    /// `--auto-register` is set. Falls back to `PRIVATE_KEY` when unset. `registerKey` is
-    /// not owner-gated, so any funded key works.
+    /// `--auto-register` is set. Falls back to `PRIVATE_KEY` when neither registration signer
+    /// is set. `registerKey` is not owner-gated, so any funded key works.
     #[arg(long, env = "REGISTER_PRIVATE_KEY", hide_env_values = true)]
     register_private_key: Option<String>,
+
+    /// AWS KMS key ID or alias used to sign and pay for the `registerKey` transaction when
+    /// `--auto-register` is set. Mutually exclusive with `register_private_key`.
+    #[arg(long, env = "REGISTER_KMS_KEY_ID", hide_env_values = true)]
+    register_kms_key_id: Option<String>,
 }
 
 pub async fn run(args: WorkerArgs) -> Result<()> {
@@ -288,14 +295,15 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
             .context("--auto-register requires --registry / NITRO_ENCLAVE_KEY_REGISTRY")?;
         // Registration reuses the same L1 endpoint as witness building (`--l1-rpc`).
         let l1_rpc_url = args.l1_rpc.clone();
-        let private_key = args
-            .register_private_key
-            .clone()
-            .or_else(|| std::env::var("PRIVATE_KEY").ok())
-            .context(
-                "--auto-register requires a key: set --register-private-key, \
-                 REGISTER_PRIVATE_KEY, or PRIVATE_KEY",
-            )?;
+        let fallback_private_key = std::env::var("PRIVATE_KEY").ok();
+        let (signer_secret, signer_type) = select_registration_signer(
+            args.register_private_key.as_deref(),
+            args.register_kms_key_id.as_deref(),
+            fallback_private_key.as_deref(),
+        )
+        .context(
+            "--auto-register requires REGISTER_PRIVATE_KEY, REGISTER_KMS_KEY_ID, or PRIVATE_KEY",
+        )?;
 
         // Publish the gauge before the first attempt so "never registered" is a visible zero
         // rather than an absent series a threshold monitor would silently ignore.
@@ -312,7 +320,8 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
             expected_pcrs,
             l1_rpc_url,
             registry,
-            private_key,
+            signer_secret: signer_secret.to_owned(),
+            signer_type,
         })
         .await;
         if !registered {
