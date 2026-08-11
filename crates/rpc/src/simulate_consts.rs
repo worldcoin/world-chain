@@ -137,6 +137,9 @@ pub const EXEC_TRANSACTION_FROM_MODULE_SELECTOR: [u8; 4] = [0x46, 0x87, 0x21, 0x
 /// Safe4337Module `ExecutionFailed()` selector.
 pub const EXECUTION_FAILED_SELECTOR: [u8; 4] = [0xac, 0xfd, 0xb4, 0x44];
 
+/// Safe4337Module `UnsupportedEntryPoint()` selector.
+pub(crate) const UNSUPPORTED_ENTRY_POINT_SELECTOR: [u8; 4] = [0x85, 0xdb, 0x24, 0x7d];
+
 /// Minimum payload length for a well-formed `Error(string)` revert:
 /// selector(4) + string-offset(32) + string-length(32).
 pub(crate) const MIN_ERROR_STRING_LEN: usize = 4 + 32 + 32;

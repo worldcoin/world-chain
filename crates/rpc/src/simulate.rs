@@ -1467,11 +1467,19 @@ mod panic_code {
 }
 
 /// Decode revert data into a human-readable string.
-/// Handles `Error(string)` and `Panic(uint256)`; falls back to hex for
-/// custom errors and other unknown payloads.
+/// Handles `Error(string)`, `Panic(uint256)`, and known no-argument Safe
+/// errors; falls back to hex for other custom errors and unknown payloads.
 pub fn decode_revert_reason(output: &Bytes) -> String {
     if output.len() < 4 {
         return format!("0x{}", hex::encode(output.as_ref()));
+    }
+
+    if output.as_ref() == EXECUTION_FAILED_SELECTOR {
+        return "ExecutionFailed()".to_string();
+    }
+
+    if output.as_ref() == UNSUPPORTED_ENTRY_POINT_SELECTOR {
+        return "UnsupportedEntryPoint()".to_string();
     }
 
     let selector = &output[..4];
@@ -1541,6 +1549,9 @@ pub fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
         [0xb6, 0x1d, 0x27, 0xf6] => Some("execute"),
         [0x51, 0x94, 0x54, 0x47] => Some("executeBatch"),
         [0x8d, 0x80, 0xff, 0x0a] => Some("multiSend"),
+        // Safe ERC-4337 execution
+        EXECUTE_USER_OP_SELECTOR => Some("executeUserOp"),
+        EXEC_TRANSACTION_FROM_MODULE_SELECTOR => Some("execTransactionFromModule"),
         // Safe admin methods (flagged by backend as forbidden)
         [0x0d, 0x58, 0x2f, 0x13] => Some("addOwnerWithThreshold"),
         [0xf8, 0xdc, 0x5d, 0xd9] => Some("removeOwner"),
@@ -2229,6 +2240,40 @@ mod tests {
         assert_eq!(
             decode_revert_reason(&output),
             format!("0x{}", hex::encode(&payload))
+        );
+    }
+
+    #[test]
+    fn decodes_known_safe_custom_errors_only_for_exact_payloads() {
+        let cases = [
+            (EXECUTION_FAILED_SELECTOR, "ExecutionFailed()"),
+            (UNSUPPORTED_ENTRY_POINT_SELECTOR, "UnsupportedEntryPoint()"),
+        ];
+
+        for (selector, expected) in cases {
+            assert_eq!(
+                decode_revert_reason(&Bytes::copy_from_slice(&selector)),
+                expected
+            );
+
+            let mut extended = selector.to_vec();
+            extended.push(0xaa);
+            assert_eq!(
+                decode_revert_reason(&Bytes::from(extended.clone())),
+                format!("0x{}", hex::encode(extended))
+            );
+        }
+    }
+
+    #[test]
+    fn decodes_safe_execution_method_selectors() {
+        assert_eq!(
+            selector_to_name(EXECUTE_USER_OP_SELECTOR),
+            Some("executeUserOp")
+        );
+        assert_eq!(
+            selector_to_name(EXEC_TRANSACTION_FROM_MODULE_SELECTOR),
+            Some("execTransactionFromModule")
         );
     }
 
