@@ -1467,8 +1467,9 @@ mod panic_code {
 }
 
 /// Decode revert data into a human-readable string.
-/// Handles `Error(string)`, `Panic(uint256)`, and known no-argument Safe
-/// errors; falls back to hex for other custom errors and unknown payloads.
+/// Handles `Error(string)`, `Panic(uint256)`, and Safe's no-argument
+/// `ExecutionFailed()` wrapper; falls back to hex for other custom errors and
+/// unknown payloads.
 pub fn decode_revert_reason(output: &Bytes) -> String {
     if output.len() < 4 {
         return format!("0x{}", hex::encode(output.as_ref()));
@@ -1476,10 +1477,6 @@ pub fn decode_revert_reason(output: &Bytes) -> String {
 
     if output.as_ref() == EXECUTION_FAILED_SELECTOR {
         return "ExecutionFailed()".to_string();
-    }
-
-    if output.as_ref() == UNSUPPORTED_ENTRY_POINT_SELECTOR {
-        return "UnsupportedEntryPoint()".to_string();
     }
 
     let selector = &output[..4];
@@ -2244,25 +2241,18 @@ mod tests {
     }
 
     #[test]
-    fn decodes_known_safe_custom_errors_only_for_exact_payloads() {
-        let cases = [
-            (EXECUTION_FAILED_SELECTOR, "ExecutionFailed()"),
-            (UNSUPPORTED_ENTRY_POINT_SELECTOR, "UnsupportedEntryPoint()"),
-        ];
+    fn decodes_execution_failed_only_for_exact_payload() {
+        assert_eq!(
+            decode_revert_reason(&Bytes::copy_from_slice(&EXECUTION_FAILED_SELECTOR)),
+            "ExecutionFailed()"
+        );
 
-        for (selector, expected) in cases {
-            assert_eq!(
-                decode_revert_reason(&Bytes::copy_from_slice(&selector)),
-                expected
-            );
-
-            let mut extended = selector.to_vec();
-            extended.push(0xaa);
-            assert_eq!(
-                decode_revert_reason(&Bytes::from(extended.clone())),
-                format!("0x{}", hex::encode(extended))
-            );
-        }
+        let mut extended = EXECUTION_FAILED_SELECTOR.to_vec();
+        extended.push(0xaa);
+        assert_eq!(
+            decode_revert_reason(&Bytes::from(extended.clone())),
+            format!("0x{}", hex::encode(extended))
+        );
     }
 
     #[test]
