@@ -29,7 +29,6 @@ on:
       - "Dockerfile.prover"
       - "scripts/build-eif.sh"
       - "scripts/build-sp1-guest-elfs.sh"
-      - "scripts/verify-sp1-elf-hashes.sh"
       - ".github/workflows/docker-proof.yml"
       - ".github/actions/docker-build-push-digest/**"
       - ".github/actions/docker-merge-manifest/**"

@@ -45,10 +45,6 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     scripts/build-sp1-guest-elfs.sh
 
-RUN scripts/verify-sp1-elf-hashes.sh \
-    proofs/backends/sp1/elfs/vkeys.json \
-    proofs/backends/sp1/programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release
-
 FROM base AS planner
 WORKDIR /app
 
@@ -139,10 +135,6 @@ FROM sp1-builder-deps AS sp1-builder
 ARG VERGEN_GIT_SHA
 COPY . .
 
-RUN scripts/verify-sp1-elf-hashes.sh \
-    proofs/backends/sp1/elfs/vkeys.json \
-    proofs/backends/sp1/programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release
-
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
@@ -152,8 +144,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     if [ -z "$SCCACHE_BUCKET" ]; then unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; fi && \
     cargo build --locked --profile ${PROFILE} -p ${PROVER_PACKAGE} ${FEATURES:+--features ${FEATURES}} --bin ${PROVER_BIN}
 
+# Cargo's built-in `dev` and `release` profiles use directory names that differ
+# from the profile flag. Stage the binary at a profile-independent path.
+RUN profile_dir="${PROFILE}" && \
+    if [ "${PROFILE}" = "dev" ]; then profile_dir="debug"; fi && \
+    if [ "${PROFILE}" = "release" ]; then profile_dir="release"; fi && \
+    install -D "/app/target/${profile_dir}/${PROVER_BIN}" "/app/bin/${PROVER_BIN}"
+
 # Validate the bytes actually linked into the worker, not only the intermediate files.
-RUN /app/target/${PROFILE}/${PROVER_BIN} vkeys \
+RUN /app/bin/${PROVER_BIN} vkeys \
     --check /app/proofs/backends/sp1/elfs/vkeys.json
 
 FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime
@@ -172,7 +171,7 @@ ARG PROVER_BIN
 RUN test "${PROVER_BIN}" = "world-chain-proof-sp1-worker" || \
     (echo "ERROR: the sp1-worker target only packages world-chain-proof-sp1-worker" && exit 1)
 ARG PROFILE="maxperf"
-COPY --from=sp1-builder /app/target/${PROFILE}/${PROVER_BIN} /usr/local/bin/${PROVER_BIN}
+COPY --from=sp1-builder /app/bin/${PROVER_BIN} /usr/local/bin/${PROVER_BIN}
 RUN ln -s /usr/local/bin/${PROVER_BIN} /usr/local/bin/entrypoint
 
 ENTRYPOINT ["/usr/local/bin/entrypoint"]

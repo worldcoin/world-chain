@@ -46,8 +46,8 @@ guest sections and rotate the vkeys even when the Rust source and SP1 version ar
 The production `sp1-worker` target in `Dockerfile.prover` builds the guests in the same pinned
 SP1 image and `/root/program` layout as the default local build. It then copies those exact ELFs
 into the host builder and sets `SP1_SKIP_PROGRAM_BUILD=true`, so the worker embeds them without a
-second compilation. The image build fails unless both the intermediate ELF hashes and the vkeys
-computed from the final worker binary match `vkeys.json`.
+second compilation. The image build fails unless the ELF hashes and vkeys computed from the final
+worker binary match `vkeys.json`.
 
 ## Local development
 
@@ -108,9 +108,8 @@ The workflow is just normal source-control:
 ## CI
 
 The `vkeys.yml` workflow recomputes the manifest through the canonical Docker path. The
-`docker-proof.yml` SP1 worker job uses the dedicated `sp1-worker` target and independently checks
-the canonical ELF hashes before linking, then runs `world-chain-proof-sp1-worker vkeys --check`
-against the linked binary before publishing it.
+`docker-proof.yml` SP1 worker job uses the dedicated `sp1-worker` target and runs
+`world-chain-proof-sp1-worker vkeys --check` against the linked binary before publishing it.
 
 ## Comparison with op-succinct
 
