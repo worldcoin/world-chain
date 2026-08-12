@@ -44,10 +44,13 @@ non-production development mode: absolute workspace and Cargo registry paths can
 guest sections and rotate the vkeys even when the Rust source and SP1 version are unchanged.
 
 The production `sp1-worker` target in `Dockerfile.prover` builds the guests in the same pinned
-SP1 image and `/root/program` layout as the default local build. It then copies those exact ELFs
-into the host builder and sets `SP1_SKIP_PROGRAM_BUILD=true`, so the worker embeds them without a
-second compilation. The image build fails unless the ELF hashes and vkeys computed from the final
-worker binary match `vkeys.json`.
+SP1 image and `/root/program` layout as the default local build. The
+`world-chain-proof-sp1-guest-builder` binary calls the pinned `sp1-build` library, so the Docker
+build and local build share Succinct's compiler flags instead of maintaining a second compilation
+recipe. The image then copies those exact ELFs into the host builder and sets
+`SP1_SKIP_PROGRAM_BUILD=true`, so the worker embeds them without a second compilation. The image
+build fails unless the ELF hashes and vkeys computed from the final worker binary match
+`vkeys.json`.
 
 ## Local development
 
@@ -99,7 +102,8 @@ implementation must be deployed and activated before the new prover is used.
 
 The workflow is just normal source-control:
 
-1. Edit the guest source or bump the SP1 toolchain `tag` in `proofs/backends/sp1/elfs/build.rs`.
+1. Edit the guest source or bump the matching SP1 image reference in
+   `proofs/backends/sp1/elfs/build.rs` and `Dockerfile.prover`.
 2. `cargo build -p world-chain-prover-sp1` to confirm the new ELFs build.
 3. `just proof-vkeys` to print the new vkey commitments.
 4. Mention the rotated vkeys in the PR description and link the matching game-implementation
@@ -139,6 +143,7 @@ avoids carrying any ELF artifacts (committed bytes or committed SHA-256s) in sou
 | Path | Role |
 |:---|:---|
 | `proofs/backends/sp1/elfs/build.rs` | Invokes `sp1_build::build_program_with_args` for each guest crate |
+| `proofs/backends/sp1/guest-builder` | Invokes the same pinned `sp1-build` compiler recipe inside the production guest-builder image |
 | `proofs/backends/sp1/elfs/src/lib.rs` | `range_elf()` / `aggregation_elf()` via `include_elf!()` |
 | `proofs/backends/sp1/elfs/vkeys.json` | Derived SP1 vkeys and ELF SHA-256s |
 | `proofs/backends/sp1/host/src/*_prover.rs` | CPU, mock, and network provers over the embedded ELFs |

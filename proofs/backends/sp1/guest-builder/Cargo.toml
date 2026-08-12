@@ -1,0 +1,13 @@
+[package]
+name = "world-chain-proof-sp1-guest-builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+sp1-build = "=6.2.3"

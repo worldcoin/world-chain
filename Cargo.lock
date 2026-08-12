@@ -19217,6 +19217,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-proof-sp1-guest-builder"
+version = "2.4.1"
+dependencies = [
+ "anyhow",
+ "sp1-build",
+]
+
+[[package]]
 name = "world-chain-proof-sp1-host"
 version = "2.4.1"
 dependencies = [

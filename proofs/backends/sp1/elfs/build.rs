@@ -99,6 +99,7 @@ fn main() {
                     "v6.1.0@sha256:c90d0a816ca40357346e8ad5b53178bc8f4b3fc2b8dd6bfc061f60d92cb61953"
                         .to_string(),
                 ignore_rust_version: true,
+                locked: true,
                 workspace_directory: Some(workspace_root.clone()),
                 ..Default::default()
             },

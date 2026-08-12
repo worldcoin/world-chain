@@ -28,7 +28,6 @@ on:
       - ".cargo/config.toml"
       - "Dockerfile.prover"
       - "scripts/build-eif.sh"
-      - "scripts/build-sp1-guest-elfs.sh"
       - ".github/workflows/docker-proof.yml"
       - ".github/actions/docker-build-push-digest/**"
       - ".github/actions/docker-merge-manifest/**"

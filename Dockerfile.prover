@@ -19,15 +19,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # (gRPC) client — libprotobuf-dev provides the well-known type .proto files
 # (google/protobuf/*.proto) under /usr/include that protoc resolves imports against.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends clang libclang-dev gcc curl protobuf-compiler libprotobuf-dev git \
+  && apt-get install -y --no-install-recommends clang libclang-dev gcc protobuf-compiler libprotobuf-dev git \
   && rm -rf /var/lib/apt/lists/*
-
-# Keep the local SP1 toolchain available for non-production debug binaries built
-# through the generic target. The production SP1 worker never uses this toolchain;
-# its guests come from the pinned `sp1-guests` stage below.
-ENV PATH=/root/.sp1/bin:$PATH
-RUN curl -L https://sp1.succinct.xyz | bash \
-  && /root/.sp1/bin/sp1up --version v6.1.0
 
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTC_WRAPPER=sccache \
@@ -43,7 +36,10 @@ COPY . .
 
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
-    scripts/build-sp1-guest-elfs.sh
+    CFLAGS_riscv32im_succinct_zkvm_elf=-D__ILP32__ \
+    RUSTUP_TOOLCHAIN=succinct \
+    cargo run --locked --release --ignore-rust-version \
+      -p world-chain-proof-sp1-guest-builder
 
 FROM base AS planner
 WORKDIR /app

@@ -18,7 +18,7 @@ and keeps measurement changes reviewable on their own.
 | Artifact                                                 | Notes |
 |:---------------------------------------------------------|:---|
 | `manifest.json`                                          | Single source of truth binding git SHA, ELF sha256s, vkeys, PCRs, and image digests |
-| `vkeys.json`                                             | Range vkey commitment + aggregation vkey, computed from the committed ELFs |
+| `vkeys.json`                                             | Range vkey commitment + aggregation vkey, plus hashes of the reproducibly built ELFs |
 | `pcrs.json`                                              | PCR0/PCR1/PCR2 of the enclave EIF |
 | `world-chain-proof-nitro-enclave.eif`                    | Enclave image, built reproducibly (see below) |
 | `world-chain-range-ethereum`, `world-chain-aggregation`  | SP1 guest ELFs, rebuilt from source in CI via `sp1_build` (no committed binaries, no hash manifest — see [elf-management.md](./elf-management.md)) |
