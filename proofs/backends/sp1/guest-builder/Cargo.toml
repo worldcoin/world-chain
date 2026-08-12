@@ -10,4 +10,4 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
-sp1-build = "=6.2.3"
+sp1-build = "=6.1.0"
