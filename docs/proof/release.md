@@ -45,11 +45,11 @@ release for human review. Review the measurements section, then publish.
 
 ## Reproducibility requirements
 
-- **SP1 ELFs** are built with `sp1_build::build_program_with_args` at a pinned SP1 toolchain
-  tag from `proofs/backends/sp1/host/build.rs`, then embedded into the host binary at compile
-  time via `sp1_sdk::include_elf!()`. There are no committed ELF binaries or hash manifests —
-  reproducibility is enforced by the pinned `cargo-prove` toolchain (`docker: true` by default,
-  or a pinned `sp1up --version v6.1.0` install inside `Dockerfile.proof`). See
+- **SP1 ELFs** are built in the digest-pinned SP1 image and canonical `/root/program` layout,
+  then embedded into the host binary at compile time via `sp1_sdk::include_elf!()`. There are no
+  committed ELF binaries; their hashes and derived vkeys are committed in `vkeys.json`. The
+  production worker image consumes the same canonical ELFs and verifies its linked measurements
+  before publication. See
   [elf-management.md](./elf-management.md).
 - **The enclave EIF** must be bit-for-bit reproducible so anyone can re-derive the game-pinned
   PCRs from source: `proofs/backends/nitro/Dockerfile` pins base images by digest and apt packages to a

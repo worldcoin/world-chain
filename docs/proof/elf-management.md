@@ -35,15 +35,19 @@ embedded bytes (`just proof-vkeys`), which is pinned in the `MultiProofGame` imp
 
 ## Reproducibility
 
-`sp1_build::build_program_with_args` is called with `docker: true` and `tag: "v6.1.0"` by
-default, so a `cargo build -p world-chain-prover-sp1` from a clean checkout produces bit-for-bit
-identical ELFs (and therefore identical vkeys) regardless of host toolchain — `cargo-prove`
-runs inside the pinned `succinctlabs/sp1:v6.1.0` image.
+`sp1_build::build_program_with_args` uses Docker by default with the SP1 v6.1.0 linux/amd64
+image pinned by digest. A `cargo build -p world-chain-prover-sp1` from a clean checkout therefore
+produces bit-for-bit identical ELFs and vkeys regardless of host toolchain.
 
 Set `SP1_BUILD_DOCKER=false` to switch to a locally-installed `cargo-prove` instead. This is the
-mode `Dockerfile.prover` uses internally, because the Docker daemon is not reachable from inside
-a `docker build`; the Dockerfile installs the same pinned `sp1up --version v6.1.0` so the
-resulting ELFs are still reproducible across hosts.
+non-production development mode: absolute workspace and Cargo registry paths can enter loadable
+guest sections and rotate the vkeys even when the Rust source and SP1 version are unchanged.
+
+The production `sp1-worker` target in `Dockerfile.prover` builds the guests in the same pinned
+SP1 image and `/root/program` layout as the default local build. It then copies those exact ELFs
+into the host builder and sets `SP1_SKIP_PROGRAM_BUILD=true`, so the worker embeds them without a
+second compilation. The image build fails unless both the intermediate ELF hashes and the vkeys
+computed from the final worker binary match `vkeys.json`.
 
 ## Local development
 
@@ -55,16 +59,25 @@ cargo build -p world-chain-proof-sp1-worker   # likewise
 just proof-vkeys                         # prints the on-chain vkey commitments
 ```
 
-The first build triggers `cargo prove build --docker --tag v6.1.0` for each guest crate (a few
-minutes). Subsequent builds reuse the cached ELFs unless the guest source or the SP1 toolchain
-tag changes — `sp1-build` calls `cargo:rerun-if-changed` on every dependency of the program
+The first build runs each guest build inside the digest-pinned SP1 v6.1.0 image (a few minutes).
+Subsequent builds reuse the cached ELFs unless the guest source or SP1 image reference changes —
+`sp1-build` calls `cargo:rerun-if-changed` on every dependency of the program
 crate, so any meaningful source edit invalidates the cache.
 
 Requirements:
 
-- Docker (default reproducibility mode pulls `succinctlabs/sp1:v6.1.0`), or
+- Docker (default reproducibility mode pulls the digest-pinned `succinctlabs/sp1:v6.1.0`), or
 - The SP1 toolchain on `PATH` (`curl -L https://sp1.succinct.xyz | bash && sp1up --version v6.1.0`)
-  with `SP1_BUILD_DOCKER=false`.
+  with `SP1_BUILD_DOCKER=false` for non-production iteration only.
+
+Build the production worker with its dedicated target:
+
+```bash
+docker build --target sp1-worker \
+  --build-arg PROVER_PACKAGE=world-chain-proof-sp1-worker \
+  --build-arg PROVER_BIN=world-chain-proof-sp1-worker \
+  -f Dockerfile.prover .
+```
 
 ## Fast iteration
 
@@ -94,15 +107,10 @@ The workflow is just normal source-control:
 
 ## CI
 
-There is no separate `elf.yml` workflow: the SP1 ELFs are compiled as part of every host
-`cargo build` that includes the ELF crate. Reproducibility is enforced implicitly — the
-`release-proof.yml` workflow rebuilds from source on every release tag and stamps the resulting
-vkeys into `manifest.json`. Any drift in the guest source or the toolchain tag shows up as a
-vkey diff in the release-notes "measurements" section.
-
-Workflow updates (`elf.yml` removal, `release-proof.yml` simplifications) are listed in the PR
-description for a maintainer with `workflows` scope to apply — the agent that opened this PR
-cannot write to `.github/workflows/**`.
+The `vkeys.yml` workflow recomputes the manifest through the canonical Docker path. The
+`docker-proof.yml` SP1 worker job uses the dedicated `sp1-worker` target and independently checks
+the canonical ELF hashes before linking, then runs `world-chain-proof-sp1-worker vkeys --check`
+against the linked binary before publishing it.
 
 ## Comparison with op-succinct
 
@@ -118,7 +126,7 @@ World Chain follows this pattern directly:
 | Layer | op-succinct | World Chain proof system |
 |:---|:---|:---|
 | Source-of-truth artifact | SP1 guest ELF | SP1 guest ELF |
-| Build reproducibility    | `build_program_with_args` + pinned SP1 toolchain tag | `build_program_with_args` + pinned `tag` in `build.rs` (`docker: true`) |
+| Build reproducibility    | `build_program_with_args` + pinned SP1 toolchain tag | Digest-pinned SP1 image and canonical workspace layout |
 | On-chain anchor          | SP1 vkey on `OPSuccinctL2OutputOracle` | SP1 vkeys pinned in `MultiProofGame` |
 | Where the artifact lives | **Embedded into the host binary via `include_elf!()`** | **Embedded into the host binary via `include_elf!()`** |
 | Committed ELF blob       | None | None |
@@ -137,6 +145,6 @@ avoids carrying any ELF artifacts (committed bytes or committed SHA-256s) in sou
 | `proofs/backends/sp1/host/src/*_prover.rs` | CPU, mock, and network provers over the embedded ELFs |
 | `proofs/backends/sp1/programs/range-ethereum/` | Range guest source |
 | `proofs/backends/sp1/programs/aggregation/`    | Aggregation guest source |
-| `Dockerfile.prover` | Builder image installs the SP1 toolchain and sets `SP1_BUILD_DOCKER=false` |
+| `Dockerfile.prover` | Builds canonical guests once and embeds them unchanged in the SP1 worker |
 | `Justfile` | `just proof-vkeys` prints the current vkey commitments |
 | `.github/workflows/release-proof.yml` | Release gate: rebuilds, snapshots vkeys into `manifest.json` |

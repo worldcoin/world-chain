@@ -8,7 +8,7 @@
 //! `fs::read` of an ELF file.
 //!
 //! Behaviour:
-//! - Uses `docker: true` by default with the pinned SP1 toolchain tag
+//! - Uses `docker: true` by default with the pinned SP1 toolchain image
 //!   (matches the `=6.1.0` version of `sp1-sdk` / `sp1-zkvm` the workspace
 //!   pins to) for bit-for-bit reproducible ELFs. This is the ecosystem
 //!   standard used by op-succinct, sp1-helios, and all other SP1 adopters.
@@ -92,7 +92,12 @@ fn main() {
             program_dir,
             sp1_build::BuildArgs {
                 docker,
-                tag: "v6.1.0".to_string(),
+                // Pin the linux/amd64 manifest that produced vkeys.json. The tag remains in the
+                // reference for readability, while the digest prevents a mutable tag from
+                // silently rotating the guest ELFs and their on-chain vkeys.
+                tag:
+                    "v6.1.0@sha256:c90d0a816ca40357346e8ad5b53178bc8f4b3fc2b8dd6bfc061f60d92cb61953"
+                        .to_string(),
                 ignore_rust_version: true,
                 workspace_directory: Some(workspace_root.clone()),
                 ..Default::default()
