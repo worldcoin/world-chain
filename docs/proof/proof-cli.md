@@ -266,8 +266,8 @@ world-chain-prover-sp1 prove \
 
 Computes the on-chain verification keys for the (embedded) range and aggregation ELFs: the
 range vkey commitment (`multiBlockVKey` committed by the aggregation guest) and the
-aggregation vkey registered with the SP1 verifier. Runs SP1 setup locally — no proving, no RPC,
-no arguments.
+aggregation vkey. Both are pinned by the `MultiProofGame` implementation. Runs SP1 setup locally —
+no proving, no RPC, no arguments.
 
 ```
 world-chain-prover-sp1 vkeys [--output <FILE>]
@@ -499,14 +499,16 @@ in-pod invocation.
 world-chain-prover-nitro register \
   --registry <NitroEnclaveKeyRegistry address> \
   --l1-rpc <L1 RPC URL> \
-  [--private-key <hex>] [--cid <N>] [--port <N>] [--pcr0/1/2 <HEX>]
+  [--private-key <hex> | --kms-key-id <ID>] \
+  [--cid <N>] [--port <N>] [--pcr0/1/2 <HEX>]
 ```
 
 | Flag | Env | Default | Description |
 |---|---|---|---|
 | `--registry <ADDR>` | `NITRO_ENCLAVE_KEY_REGISTRY` | required | `NitroEnclaveKeyRegistry` address on L1 |
 | `--l1-rpc <URL>` | `L1_RPC_URL` | required | L1 execution RPC to submit `registerKey` to |
-| `--private-key <HEX>` | `REGISTER_PRIVATE_KEY` | falls back to `PRIVATE_KEY` | Funding key for the tx (not owner-gated) |
+| `--private-key <HEX>` | `REGISTER_PRIVATE_KEY` | falls back to `PRIVATE_KEY` | Local funding key for the tx (not owner-gated) |
+| `--kms-key-id <ID>` | `REGISTER_KMS_KEY_ID` | — | AWS KMS key ID or alias for the funding account |
 | `--cid <N>` | `ENCLAVE_CID` | `16` | vsock CID of the Nitro enclave |
 | `--port <N>` | `ENCLAVE_PORT` | `5005` | vsock port the enclave listens on |
 | `--pcr0/1/2 <HEX>` | `PCR0`/`PCR1`/`PCR2` | — | Optional; when all three are set the attestation is verified host-side before submission |
@@ -520,6 +522,16 @@ world-chain-prover-nitro register \
   --private-key $REGISTER_PRIVATE_KEY
 # enclave key registered on-chain (tx 0x...)
 ```
+
+For AWS KMS, set `REGISTER_KMS_KEY_ID` instead of `REGISTER_PRIVATE_KEY`; the standard AWS
+SDK credential and region providers are used. The KMS key must be an asymmetric
+`ECC_SECG_P256K1` signing key, and the worker's AWS identity needs `kms:GetPublicKey` and
+`kms:Sign`. Configure exactly one dedicated signer. The legacy `PRIVATE_KEY` fallback is
+consulted only when neither dedicated signer is set, so a KMS key ID can be used in environments
+that still define `PRIVATE_KEY` for unrelated tooling.
+
+The worker exposes the same choice through `nitro-worker register --kms-key-id` and through
+`nitro-worker run --auto-register --register-kms-key-id`.
 
 ---
 

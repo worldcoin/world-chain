@@ -7,6 +7,8 @@ use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_sol_types::SolInterface;
 use async_trait::async_trait;
+use std::{sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
 use world_chain_proof_protocol::{
     ClaimData, IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, PROOF_LANE_COUNT, ProofLane,
@@ -24,8 +26,10 @@ pub struct AlloyDefenderClient<P> {
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     registered: RegisteredLineageConfig,
     confirmations: u64,
+    receipt_timeout: Duration,
     /// Credited this lane's share of a forfeited challenger bond when the game resolves.
     reward_recipient: Address,
+    semaphore: Arc<Semaphore>,
     provider: P,
 }
 
@@ -38,6 +42,7 @@ where
         provider: P,
         factory_address: Address,
         confirmations: u64,
+        receipt_timeout: Duration,
         reward_recipient: Address,
     ) -> Result<Self, DefenderError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
@@ -49,13 +54,16 @@ where
             registered.anchor_registry,
             provider.clone(),
         );
+        let semaphore = Arc::new(Semaphore::new(1));
 
         Ok(Self {
             factory,
             anchor,
             registered,
             confirmations,
+            receipt_timeout,
             reward_recipient,
+            semaphore,
             provider,
         })
     }
@@ -102,6 +110,9 @@ where
         let game = self.game(address);
         let (
             domain_hash,
+            aggregation_vkey,
+            range_vkey_commitment,
+            tee_image_id,
             parent_ref,
             root_claim,
             l2_block_number,
@@ -114,6 +125,9 @@ where
             .provider
             .multicall()
             .add(game.proposalDomainHash())
+            .add(game.aggregationVKey())
+            .add(game.rangeVKeyCommitment())
+            .add(game.teeImageId())
             .add(game.parentRef())
             .add(game.rootClaim())
             .add(game.l2SequenceNumber())
@@ -134,6 +148,9 @@ where
         Ok(GameMetadata {
             address,
             domain_hash,
+            aggregation_vkey,
+            range_vkey_commitment,
+            tee_image_id,
             parent_ref,
             root_claim,
             l2_block_number: u256_to_u64(l2_block_number)?,
@@ -162,6 +179,7 @@ where
         lane: ProofLane,
         proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
+        let _permit = self.semaphore.acquire().await?;
         let compact = encode_compact_proof(lane, self.reward_recipient, &proof);
         let pending = self
             .game(game)
@@ -178,6 +196,7 @@ where
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;

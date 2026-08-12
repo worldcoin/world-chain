@@ -34,7 +34,7 @@ import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 /// That is deliberate — a script that can mint its own verifiers can silently register a game
 /// type that accepts any proof. Supply real contracts:
 ///
-///   `VALIDITY_PROOF_VERIFIER`   — e.g. `SP1ValidityVerifier`
+///   `VALIDITY_PROOF_VERIFIER`   — reusable `SP1ValidityVerifier`; a vkey change does not rotate it
 ///   `TEE_VERIFIER`              — e.g. `NitroProofVerifier` (see `DeployNitro.s.sol`)
 ///   `SECURITY_COUNCIL_VERIFIER` — council-controlled attestation verifier
 /// For a local devnet, deploy the test doubles with `DeployProofMocks.s.sol` first and pass
@@ -65,6 +65,9 @@ contract DeployProofSystem is Script {
         uint256 challengerBond;
         uint8 proofThreshold;
         address protocolFeeRecipient;
+        bytes32 aggregationVKey;
+        bytes32 rangeVKeyCommitment;
+        bytes32 teeImageId;
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
@@ -153,7 +156,11 @@ contract DeployProofSystem is Script {
         config.proofThreshold = vm.envOr("PROOF_THRESHOLD", uint256(DEFAULT_PROOF_THRESHOLD)).toUint8();
         // Required: there is no sane default owner for proof-timeout forfeitures.
         config.protocolFeeRecipient = vm.envAddress("PROTOCOL_FEE_RECIPIENT");
-        // Proof lanes are required inputs, never deployed here.
+        config.aggregationVKey = vm.envBytes32("AGGREGATION_VKEY");
+        config.rangeVKeyCommitment = vm.envBytes32("RANGE_VKEY_COMMITMENT");
+        config.teeImageId = vm.envBytes32("TEE_IMAGE_ID");
+        // Proof lanes are required inputs, never deployed here. The SP1 address remains stable
+        // when a new game implementation pins different vkeys.
         config.validityProofVerifier = IWorldChainProofVerifier(vm.envAddress("VALIDITY_PROOF_VERIFIER"));
         config.teeVerifier = IWorldChainProofVerifier(vm.envAddress("TEE_VERIFIER"));
         config.securityCouncil = IWorldChainProofVerifier(vm.envAddress("SECURITY_COUNCIL_VERIFIER"));
@@ -208,6 +215,9 @@ contract DeployProofSystem is Script {
             "DeployProofSystem: ProxyAdmin owner key mismatch"
         );
         require(config.protocolFeeRecipient != address(0), "DeployProofSystem: protocol fee recipient required");
+        require(config.aggregationVKey != bytes32(0), "DeployProofSystem: aggregation vkey required");
+        require(config.rangeVKeyCommitment != bytes32(0), "DeployProofSystem: range vkey required");
+        require(config.teeImageId != bytes32(0), "DeployProofSystem: TEE image ID required");
         require(config.blockInterval > 0, "DeployProofSystem: block interval required");
         require(config.challengePeriod > 0, "DeployProofSystem: challenge period required");
         require(config.proofPeriod > config.challengePeriod, "DeployProofSystem: proof period must exceed challenge");
@@ -229,6 +239,9 @@ contract DeployProofSystem is Script {
             challengerBond: config.challengerBond,
             protocolFeeRecipient: config.protocolFeeRecipient,
             proofThreshold: config.proofThreshold,
+            aggregationVKey: config.aggregationVKey,
+            rangeVKeyCommitment: config.rangeVKeyCommitment,
+            teeImageId: config.teeImageId,
             validityProofVerifier: config.validityProofVerifier,
             teeVerifier: config.teeVerifier,
             securityCouncil: config.securityCouncil,
@@ -258,6 +271,9 @@ contract DeployProofSystem is Script {
         vm.serializeAddress(root, "delayedWethProxyAdmin", address(deployment.wethProxyAdmin));
         vm.serializeUint(root, "gameType", uint256(GameType.unwrap(GameTypes.MULTI_PROOF_GAME_TYPE)));
         vm.serializeBytes32(root, "rollupConfigHash", config.rollupConfigHash);
+        vm.serializeBytes32(root, "aggregationVKey", config.aggregationVKey);
+        vm.serializeBytes32(root, "rangeVKeyCommitment", config.rangeVKeyCommitment);
+        vm.serializeBytes32(root, "teeImageId", config.teeImageId);
         vm.serializeUint(root, "l2ChainId", config.l2ChainId);
         vm.serializeUint(root, "proofSystemVersion", LibProof.PROOF_SYSTEM_VERSION);
         vm.serializeUint(root, "blockInterval", config.blockInterval);

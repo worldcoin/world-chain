@@ -2,6 +2,7 @@ use alloy_primitives::{Address, TxHash};
 use alloy_provider::{MulticallError, PendingTransactionError, transport::RpcError};
 use alloy_transport::TransportErrorKind;
 use thiserror::Error;
+use tokio::sync::AcquireError;
 use world_chain_proof_protocol::{
     InvalidationReasonError, LineageError, ProofLane, ProposalStatusError,
 };
@@ -24,9 +25,6 @@ pub enum DefenderError {
     /// An Alloy JSON-RPC request failed.
     #[error(transparent)]
     AlloyJsonRpc(#[from] RpcError<TransportErrorKind>),
-    /// Prover response could not be encoded for its on-chain verifier.
-    #[error("invalid proof payload: {0}")]
-    ProofEncoding(String),
     #[error(transparent)]
     Lineage(#[from] LineageError),
     #[error(transparent)]
@@ -42,6 +40,8 @@ pub enum DefenderError {
     Overflow,
     #[error("Invalid proof threshold {proof_threshold} for game {game}")]
     InvalidProofThreshold { proof_threshold: u8, game: Address },
+    #[error(transparent)]
+    Permit(#[from] AcquireError),
 }
 
 impl DefenderError {

@@ -33,9 +33,10 @@ use revm_primitives::TxKind;
 use std::str::FromStr;
 
 use world_chain_rpc::simulate::{
-    AssetType, ContractManagementType, SimulationInspector, assemble_contract_management,
-    decode_revert_reason, parse_asset_changes, parse_contract_management_events,
-    parse_exposure_changes, relax_cfg_for_simulation, selector_to_name,
+    AssetType, ContractManagementType, SimulationInspector, TraceKind, TraceOutcome,
+    assemble_contract_management, decode_revert_reason, parse_asset_changes,
+    parse_contract_management_events, parse_exposure_changes, relax_cfg_for_simulation,
+    selector_to_name,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -750,12 +751,10 @@ async fn test_revert_with_reason() {
     }
 }
 
-/// The inspector exposes the deepest reverted frame's decoded payload —
-/// which the handler uses for `revertReason` so wrappers like EntryPoint's
-/// `FailedOp(...)` don't mask the root cause. Single-frame case: WLD reverts
-/// directly with no wrapper.
+/// The inspector exposes the terminal failure path's decoded payload. In this
+/// single-frame case, WLD reverts directly with no wrapper.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_deepest_revert_reason_decodes_payload() {
+async fn test_terminal_revert_reason_decodes_payload() {
     let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
@@ -798,16 +797,16 @@ async fn test_deepest_revert_reason_decodes_payload() {
 
     let (_, inspector, _) = evm.components_mut();
     assert_eq!(
-        inspector.take_deepest_revert_reason().as_deref(),
+        inspector.terminal_revert_reason().as_deref(),
         Some("ERC20: transfer amount exceeds balance"),
     );
 }
 
-/// Halt frames (OOG, invalid opcode, etc.) carry no decodable payload, so
-/// the inspector returns `None` and the handler falls back to the
-/// `HaltReason` debug name for `revertReason`.
+/// Halt frames carry no ABI revert payload, but the inspector still reports
+/// their instruction-level halt reason. For a top-level halt, the handler may
+/// prefer the richer `HaltReason` from [`ExecutionResult`].
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_deepest_revert_reason_skips_halts() {
+async fn test_terminal_revert_reason_reports_halts() {
     let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
@@ -855,7 +854,10 @@ async fn test_deepest_revert_reason_skips_halts() {
     );
 
     let (_, inspector, _) = evm.components_mut();
-    assert!(inspector.take_deepest_revert_reason().is_none());
+    assert_eq!(
+        inspector.terminal_revert_reason().as_deref(),
+        Some("OutOfGas"),
+    );
 }
 
 /// Trace captures top-level calls from a simulated execution.
@@ -901,9 +903,16 @@ async fn test_trace_captures_calls() {
     assert!(matches!(result.result, ExecutionResult::Success { .. }));
 
     let (_, inspector, _) = evm.components_mut();
-    let trace = inspector.take_trace_entries();
+    let trace = inspector
+        .trace_entries()
+        .expect("completed simulation should produce a complete trace");
     for entry in &trace {
-        assert!(entry.selector.starts_with("0x"));
+        assert!(
+            entry
+                .selector
+                .as_deref()
+                .is_some_and(|selector| selector.starts_with("0x"))
+        );
     }
 }
 
@@ -1044,11 +1053,13 @@ async fn test_trace_detects_malicious_safe_call() {
     ];
 
     let (_, inspector, _) = evm.components_mut();
-    let trace = inspector.take_trace_entries();
+    let trace = inspector
+        .trace_entries()
+        .expect("completed simulation should produce a complete trace");
     // Log what the trace captured (informational)
     for entry in &trace {
         println!(
-            "trace: to={} method={:?} selector={}",
+            "trace: to={:?} method={:?} selector={:?}",
             entry.to, entry.method, entry.selector
         );
         // If any trace entry matches a forbidden method, flag it
@@ -1546,6 +1557,18 @@ async fn test_inspector_captures_create_via_call_frame() {
     let (deployer, deployed) = creations[0];
     assert_eq!(deployer, trampoline, "deployer is the trampoline contract");
     assert_ne!(deployed, Address::ZERO, "deployed address populated");
+
+    let trace = inspector
+        .trace_entries()
+        .expect("completed simulation should produce a complete trace");
+    let create = trace
+        .iter()
+        .find(|entry| entry.kind == TraceKind::Create)
+        .expect("CREATE should appear in trace");
+    assert_eq!(create.depth, 1);
+    assert_eq!(create.outcome, TraceOutcome::Success);
+    assert_eq!(create.to, Some(deployed));
+    assert_eq!(create.revert_reason, None);
 }
 
 /// CREATE inside a frame that subsequently REVERTs is rolled back: the

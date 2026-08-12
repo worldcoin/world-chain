@@ -56,6 +56,9 @@ contract NitroEnclaveKeyRegistry is Ownable {
     /// @notice Enclave signer address to lifecycle status.
     mapping(address signer => SignerStatus status) private _signerStatus;
 
+    /// @notice Enclave signer address to the PCR0 image ID proven at registration.
+    mapping(address signer => bytes32 imageId) public signerImageId;
+
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
@@ -100,6 +103,7 @@ contract NitroEnclaveKeyRegistry is Ownable {
         SignerStatus status = _signerStatus[signer];
         if (status == SignerStatus.Revoked) revert SignerRevokedPermanently();
         if (status == SignerStatus.Active) revert SignerAlreadyRegistered();
+        signerImageId[signer] = pcr0;
         _signerStatus[signer] = SignerStatus.Active;
 
         emit SignerRegistered(signer, pcr0, pcr1, pcr2);
@@ -110,43 +114,12 @@ contract NitroEnclaveKeyRegistry is Ownable {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Revoke a previously registered enclave signer.
-    /// @dev Only callable by the owner. Revocation is permanent — see
-    ///      `isSignerRevoked` — so a compromised signer cannot be silently restored
-    ///      by replaying its attestation document.
-    ///
-    ///      ## Relationship to `NitroAttestationVerifier.revokePCRSet`
-    ///      Revoking a PCR set on the verifier (i.e. retiring an enclave
-    ///      image) does **not** automatically transition signers registered
-    ///      under that image to `SignerStatus.Revoked` here. Each signer
-    ///      remains `SignerStatus.Active` until `revokeSigner` is called
-    ///      individually.
-    ///
-    ///      This is intentional. Nitro enclave signing keys are ephemeral:
-    ///      they are generated in-memory at startup, never persisted to
-    ///      disk, and destroyed the moment the enclave process exits. The
-    ///      designed incident-response flow for a compromised image is:
-    ///        1. Stop the running enclave instances (the AWS Nitro hardware
-    ///           isolation guarantees the key is destroyed with the process).
-    ///        2. Call `NitroAttestationVerifier.revokePCRSet` so no fresh
-    ///           enclave from the same image can re-register.
-    ///      The two steps together eliminate the threat without per-key
-    ///      cascading on-chain.
-    ///
-    ///      Belt-and-suspenders operators can still observe
-    ///      `NitroAttestationVerifier.PCRSetRevoked` events off-chain and
-    ///      call `revokeSigner` for every affected signer. The `SignerRegistered`
-    ///      event carries the bound PCR triple specifically to make this
-    ///      easy.
-    ///
-    ///      ## Why no on-chain cascade?
-    ///      An automatic on-chain cascade was considered and rejected:
-    ///        - Storing `pcrSetHash → signer[]` to enumerate affected signers
-    ///          requires an unbounded array per image, with O(N) gas on
-    ///          `registerKey` and on the cascade itself.
-    ///        - Doing the lookup lazily in `isSignerRegistered` would add an
-    ///          extra SLOAD on every proof-verification call (the hot path),
-    ///          for no security gain given Nitro's hardware key-destruction
-    ///          guarantee.
+    /// @dev Revocation is permanent because registration is permissionless: while an
+    ///      attestation is still fresh, deleting the signer would allow the same document to
+    ///      register it again. Normal enclave shutdown does not require revocation because the
+    ///      ephemeral key is destroyed. Use this function when the signer key may be compromised.
+    ///      PCR-set revocation separately prevents future registrations for an image and does
+    ///      not enumerate or revoke its existing signers.
     function revokeSigner(address signer) external onlyOwner {
         if (_signerStatus[signer] != SignerStatus.Active) revert SignerNotRegistered();
         _signerStatus[signer] = SignerStatus.Revoked;
@@ -165,6 +138,11 @@ contract NitroEnclaveKeyRegistry is Ownable {
     /// @notice Returns whether `signer` is currently registered and not revoked.
     function isSignerRegistered(address signer) external view returns (bool) {
         return _signerStatus[signer] == SignerStatus.Active;
+    }
+
+    /// @notice Returns whether `signer` is active and was attested for `imageId`.
+    function isSignerRegisteredForImage(address signer, bytes32 imageId) external view returns (bool) {
+        return _signerStatus[signer] == SignerStatus.Active && signerImageId[signer] == imageId;
     }
 
     /// @notice Returns whether `signer` has been permanently revoked.

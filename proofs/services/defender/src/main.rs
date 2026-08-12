@@ -7,24 +7,28 @@
 
 use std::time::Duration;
 
-use alloy_network::EthereumWallet;
 use alloy_primitives::Address;
 use alloy_provider::ProviderBuilder;
 use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use tracing::info;
 use url::Url;
 use world_chain_defender::{
     AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig, WorldChainDefender,
 };
 use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
+use world_chain_proof_tx_signer::build_transaction_signer;
 use world_chain_prover_service::RpcProverServiceClient;
 
 #[derive(Debug, Parser)]
 #[command(
     name = "world-chain-defender",
-    about = "World Chain proof-system defender: proves the lineage selected from the anchor"
+    about = "World Chain proof-system defender: proves the lineage selected from the anchor",
+    group = ArgGroup::new("transaction_signer")
+        .required(true)
+        .multiple(false)
+        .args(["defender_key", "defender_kms_key_id"])
 )]
 struct Cli {
     /// Ethereum L1 execution RPC URL.
@@ -49,7 +53,11 @@ struct Cli {
 
     /// Hex-encoded private key the defender signs L1 transactions with.
     #[arg(long, env = "DEFENDER_KEY", hide_env_values = true)]
-    defender_key: PrivateKeySigner,
+    defender_key: Option<PrivateKeySigner>,
+
+    /// AWS KMS key ID or alias the defender signs L1 transactions with.
+    #[arg(long, env = "DEFENDER_KMS_KEY_ID", hide_env_values = true)]
+    defender_kms_key_id: Option<String>,
 
     /// Address credited each submitted lane's share of a forfeited challenger bond.
     /// Defaults to the defender signer.
@@ -73,6 +81,15 @@ struct Cli {
     )]
     l1_tx_confirmations: u64,
 
+    /// Maximum seconds to wait for an L1 transaction receipt and required confirmations.
+    #[arg(
+        long,
+        env = "L1_TX_RECEIPT_TIMEOUT_SECONDS",
+        default_value_t = world_chain_proof_protocol::DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    l1_tx_receipt_timeout_seconds: u64,
+
     /// Per-request timeout applied to every L1 RPC call, in seconds.
     #[arg(
         long,
@@ -92,9 +109,13 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let defender_address = cli.defender_key.address();
-    let reward_recipient = cli.proof_reward_recipient.unwrap_or(defender_address);
     let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
+    let wallet = build_transaction_signer(cli.defender_key, cli.defender_kms_key_id, &l1_rpc_url)
+        .await
+        .context("failed to initialize defender signer")?
+        .wallet();
+    let defender_address = wallet.default_signer().address();
+    let reward_recipient = cli.proof_reward_recipient.unwrap_or(defender_address);
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,
         world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
@@ -102,7 +123,12 @@ async fn main() -> Result<()> {
     )
     .context("failed to build the L1 RPC client")?;
     let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(cli.defender_key))
+        .disable_recommended_fillers()
+        .with_gas_estimation()
+        .with_blob_gas_estimation()
+        .with_simple_nonce_management()
+        .fetch_chain_id()
+        .wallet(wallet)
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, defender_address).await;
 
@@ -110,6 +136,7 @@ async fn main() -> Result<()> {
         provider,
         cli.factory_address,
         cli.l1_tx_confirmations,
+        Duration::from_secs(cli.l1_tx_receipt_timeout_seconds),
         reward_recipient,
     )
     .await
@@ -137,6 +164,7 @@ async fn main() -> Result<()> {
         defender = %defender_address,
         reward_recipient = %reward_recipient,
         l1_tx_confirmations = cli.l1_tx_confirmations,
+        l1_tx_receipt_timeout_seconds = cli.l1_tx_receipt_timeout_seconds,
         l1_rpc_timeout_seconds = cli.l1_rpc_timeout_seconds,
         "starting World Chain proof-system defender"
     );

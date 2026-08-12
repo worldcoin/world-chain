@@ -65,10 +65,15 @@ struct RegisterArgs {
     l1_rpc: String,
 
     /// Hex-encoded private key used to sign and pay for the `registerKey` transaction.
-    /// Falls back to `PRIVATE_KEY` when `--private-key` / `REGISTER_PRIVATE_KEY` is unset.
-    /// `registerKey` is not owner-gated, so any funded key works.
+    /// Falls back to `PRIVATE_KEY` when neither registration signer is set. `registerKey`
+    /// is not owner-gated, so any funded key works.
     #[arg(long, env = "REGISTER_PRIVATE_KEY", hide_env_values = true)]
     private_key: Option<String>,
+
+    /// AWS KMS key ID or alias used to sign and pay for the `registerKey` transaction.
+    /// Mutually exclusive with `private_key`.
+    #[arg(long, env = "REGISTER_KMS_KEY_ID", hide_env_values = true)]
+    kms_key_id: Option<String>,
 
     /// PCR0 hex (48 bytes). Optional: when all three PCRs are set the attestation is
     /// verified host-side before submission; otherwise host-side checks are skipped (the
@@ -265,7 +270,7 @@ fn hex_to_pcr(hex: &str) -> Result<[u8; 48]> {
 async fn register(args: RegisterArgs) -> Result<()> {
     use world_chain_proof_nitro_enclave::{
         ExpectedPcrs,
-        register::{RegisterParams, RegistrationOutcome, register_enclave_key},
+        register::{RegisterParams, RegistrationOutcome, SignerType, register_enclave_key},
     };
 
     // Initialise logging so the registration flow's progress logs are visible. `info` by
@@ -293,8 +298,26 @@ async fn register(args: RegisterArgs) -> Result<()> {
 
     let private_key = args
         .private_key
-        .or_else(|| std::env::var("PRIVATE_KEY").ok())
-        .context("no registration key: set --private-key, REGISTER_PRIVATE_KEY, or PRIVATE_KEY")?;
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    let kms_key_id = args
+        .kms_key_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    let fallback_private_key = std::env::var("PRIVATE_KEY").ok();
+    let fallback_private_key = fallback_private_key
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    let private_key = if private_key.is_none() && kms_key_id.is_none() {
+        fallback_private_key
+    } else {
+        private_key
+    };
+    let (signer_secret, signer_type) = match (private_key, kms_key_id) {
+        (Some(private_key), None) => (private_key, SignerType::Local),
+        (None, Some(key_id)) => (key_id, SignerType::AwsKms),
+        _ => bail!("configure exactly one registration private key or AWS KMS key ID"),
+    };
 
     let outcome = register_enclave_key(RegisterParams {
         enclave_cid: args.cid,
@@ -302,7 +325,8 @@ async fn register(args: RegisterArgs) -> Result<()> {
         expected_pcrs,
         l1_rpc_url: args.l1_rpc,
         registry: args.registry,
-        private_key,
+        signer_secret: signer_secret.to_owned(),
+        signer_type,
     })
     .await?;
 

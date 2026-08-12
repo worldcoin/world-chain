@@ -1017,7 +1017,9 @@ version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6913d06ccc0d9c6ab67e2f82e2fbe292706da1f91442f30cded2d04b56bf0d58"
 dependencies = [
+ "alloy-dyn-abi",
  "alloy-primitives",
+ "alloy-sol-types",
  "async-trait",
  "auto_impl",
  "either",
@@ -1036,6 +1038,25 @@ dependencies = [
  "alloy-network 1.8.3",
  "alloy-primitives",
  "alloy-signer 1.8.3",
+ "async-trait",
+ "aws-config",
+ "aws-sdk-kms",
+ "k256",
+ "spki",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
+name = "alloy-signer-aws"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ddacf5492810b4bc33e341dd3213a30cf1f0cc0c526028368ce618f3f07258c"
+dependencies = [
+ "alloy-consensus 2.1.1",
+ "alloy-network 2.1.1",
+ "alloy-primitives",
+ "alloy-signer 2.1.1",
  "async-trait",
  "aws-config",
  "aws-sdk-kms",
@@ -15741,7 +15762,7 @@ checksum = "349ca86c7a88456c9f0fa1c8869e0d35bb63d6c811dc9ad8337c90909ce532ec"
 dependencies = [
  "alloy-primitives",
  "alloy-signer 1.8.3",
- "alloy-signer-aws",
+ "alloy-signer-aws 1.8.3",
  "alloy-signer-local 1.8.3",
  "anyhow",
  "async-trait",
@@ -18588,6 +18609,7 @@ dependencies = [
  "url",
  "world-chain-proof-metrics",
  "world-chain-proof-protocol",
+ "world-chain-proof-tx-signer",
 ]
 
 [[package]]
@@ -18667,6 +18689,7 @@ dependencies = [
  "world-chain-proof-core",
  "world-chain-proof-metrics",
  "world-chain-proof-protocol",
+ "world-chain-proof-tx-signer",
  "world-chain-prover-service",
 ]
 
@@ -19110,9 +19133,9 @@ name = "world-chain-proof-nitro-enclave"
 version = "2.4.1"
 dependencies = [
  "alloy-contract",
- "alloy-network 2.1.1",
  "alloy-primitives",
  "alloy-provider",
+ "alloy-signer 2.1.1",
  "alloy-signer-local 2.1.1",
  "alloy-sol-types",
  "anyhow",
@@ -19140,6 +19163,7 @@ dependencies = [
  "url",
  "world-chain-proof-core",
  "world-chain-proof-kona-client",
+ "world-chain-proof-tx-signer",
  "x509-parser",
 ]
 
@@ -19230,13 +19254,19 @@ dependencies = [
 name = "world-chain-proof-sp1-worker"
 version = "2.4.1"
 dependencies = [
+ "alloy-contract",
+ "alloy-network 2.1.1",
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer 2.1.1",
+ "alloy-signer-local 2.1.1",
  "alloy-sol-types",
  "anyhow",
  "async-trait",
  "clap",
  "dotenvy",
  "reqwest 0.12.28",
+ "rustls 0.23.43",
  "serde_cbor",
  "serde_json",
  "telemetry-batteries",
@@ -19245,6 +19275,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tracing",
+ "url",
  "world-chain-chainspec",
  "world-chain-proof-core",
  "world-chain-proof-kona-host",
@@ -19252,8 +19283,26 @@ dependencies = [
  "world-chain-proof-protocol",
  "world-chain-proof-sp1-host",
  "world-chain-proof-sp1-types",
+ "world-chain-proof-tx-signer",
  "world-chain-proof-worker",
  "world-chain-prover-service",
+]
+
+[[package]]
+name = "world-chain-proof-tx-signer"
+version = "2.4.1"
+dependencies = [
+ "alloy-network 2.1.1",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer-aws 2.1.1",
+ "alloy-signer-local 2.1.1",
+ "alloy-transport",
+ "aws-config",
+ "aws-sdk-kms",
+ "thiserror 2.0.19",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -19297,6 +19346,7 @@ dependencies = [
  "url",
  "world-chain-proof-metrics",
  "world-chain-proof-protocol",
+ "world-chain-proof-tx-signer",
 ]
 
 [[package]]

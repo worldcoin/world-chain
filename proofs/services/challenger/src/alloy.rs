@@ -11,6 +11,8 @@ use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
+use std::{sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
 use world_chain_proof_protocol::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
     MULTI_PROOF_GAME_TYPE, ProposalStatus, ResolutionStatus,
@@ -24,6 +26,8 @@ use world_chain_proof_protocol::{
 pub struct AlloyChallengerClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     confirmations: u64,
+    receipt_timeout: Duration,
+    semaphore: Arc<Semaphore>,
     provider: P,
 }
 
@@ -32,15 +36,22 @@ where
     P: Provider + Clone,
 {
     /// Creates an Alloy-backed contract client.
-    pub fn new(provider: P, factory_address: Address, confirmations: u64) -> Self {
+    pub fn new(
+        provider: P,
+        factory_address: Address,
+        confirmations: u64,
+        receipt_timeout: Duration,
+    ) -> Self {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
-
+        let semaphore = Arc::new(Semaphore::new(1));
         Self {
             factory,
             confirmations,
+            receipt_timeout,
+            semaphore,
             provider,
         }
     }
@@ -159,6 +170,7 @@ where
         &self,
         address: Address,
     ) -> Result<ChallengeSubmission, ChallengerError> {
+        let _permit = self.semaphore.acquire().await?;
         // The bond is an immutable of whichever implementation this clone was created from, so
         // it is read per game: a re-registered implementation would otherwise make every
         // challenge revert with `IncorrectBondAmount`.
@@ -169,6 +181,7 @@ where
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
@@ -193,10 +206,12 @@ where
     }
 
     async fn resolve(&self, address: Address) -> Result<ResolveSubmission, ChallengerError> {
+        let _permit = self.semaphore.acquire().await?;
         let pending = self.game(address).resolve().send().await?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
@@ -259,6 +274,7 @@ where
     }
 
     async fn claim_credit(&self, address: Address) -> Result<ClaimSubmission, ChallengerError> {
+        let _permit = self.semaphore.acquire().await?;
         let recipient = self.challenger_address();
         // Read both phases up front so the submission can report what the call moved; the
         // receipt carries no amount of its own.
@@ -273,6 +289,7 @@ where
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;

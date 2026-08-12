@@ -52,6 +52,13 @@ targets — they are intentionally **not** stored in config files:
 | `L1_RPC_URL` | `proof-deploy-nitro`, `proof-deploy-system`, `proof-certmanager-prewarm`, `proof-approve-pcrs` |
 | `WORLD_CHAIN_L2_CHAIN_ID` | `proof-deploy-system` |
 | `ROLLUP_CONFIG_HASH` | `proof-deploy-system` |
+| `AGGREGATION_VKEY` | `proof-deploy-system` |
+| `RANGE_VKEY_COMMITMENT` | `proof-deploy-system` |
+| `TEE_IMAGE_ID` | `proof-deploy-system` |
 | `CERT_MANAGER_ADDRESS` | `proof-certmanager-prewarm` |
 | `NITRO_ATTESTATION_VERIFIER` | `proof-approve-pcrs` |
 | `PCR0`, `PCR1`, `PCR2` | `proof-approve-pcrs` |
+
+`proof-setup` and standalone `proof-deploy-system` calls require all three verifier identities
+explicitly. During setup, the measured `keccak256(rawPCR0)` must match `TEE_IMAGE_ID` before the
+PCR set is approved.

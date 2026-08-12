@@ -4,6 +4,9 @@
 //! codebase needs directly: proof-domain hashing, root commitments, lane
 //! bitmaps, and lightweight ABI bindings for the local proof contracts.
 
+/// Default timeout for confirming an L1 transaction receipt.
+pub const DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS: u64 = 5 * 60;
+
 mod bindings;
 mod consensus_provider;
 mod lineage;

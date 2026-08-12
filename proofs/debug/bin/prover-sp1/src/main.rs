@@ -150,7 +150,7 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use world_chain_proof_sp1_host::{
         cpu_prover::CpuSuccinctProver,
         mock_prover::MockSuccinctProver,
-        network_prover::NetworkSuccinctProver,
+        network_prover::{NetworkSuccinctProver, SignerType},
         validity::{ValidityProofRequest, prove_validity},
     };
 
@@ -194,7 +194,7 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
                 .sp1_private_key
                 .clone()
                 .context("SP1_PRIVATE_KEY is required when --prover network")?;
-            let prover = NetworkSuccinctProver::new(mode, &private_key).await?;
+            let prover = NetworkSuccinctProver::new(mode, &private_key, SignerType::Local).await?;
             prove_validity(&host, &prover, proof_request).await?
         }
     };

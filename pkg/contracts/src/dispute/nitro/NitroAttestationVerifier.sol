@@ -158,19 +158,13 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///      remain `NitroEnclaveKeyRegistry.SignerStatus.Active` until they are
     ///      individually revoked via `NitroEnclaveKeyRegistry.revokeSigner`.
     ///
-    ///      This is intentional. Nitro enclave signing keys are ephemeral:
-    ///      they are generated in-memory at enclave startup, never persisted,
-    ///      and destroyed when the enclave process stops. The intended
-    ///      incident-response flow for a compromised image is therefore:
-    ///        1. Stop the running enclave instances (kills their keys).
-    ///        2. Call `revokePCRSet` so no fresh enclave from the same image
-    ///           can re-register.
-    ///      Operators who want belt-and-suspenders may listen for
-    ///      `PCRSetRevoked` events off-chain and call
-    ///      `NitroEnclaveKeyRegistry.revokeSigner` for each affected signer (the
-    ///      `SignerRegistered` event carries the bound PCR triple). See
-    ///      `NitroEnclaveKeyRegistry` for the full rationale on why an
-    ///      on-chain cascade is deliberately not implemented.
+    ///      This is admission control, not a routine upgrade requirement or a
+    ///      complete response to a compromised image. Games pin PCR0 and reject
+    ///      signers from other images. Revocation is useful when no new signers
+    ///      from this PCR triple should be admitted, but already-registered
+    ///      signers can still prove for games pinned to it. Those games must be
+    ///      paused or blacklisted if the image itself is no longer trusted;
+    ///      individual signer revocation is only a key-specific kill switch.
     function revokePCRSet(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) external onlyOwner {
         _revokePCRSet(pcr0, pcr1, pcr2);
     }

@@ -81,8 +81,12 @@ contract NitroProofVerifierTest is Test {
         return keccak256(abi.encode(_transition()));
     }
 
+    function _imageId() internal pure returns (bytes32) {
+        return PCR0;
+    }
+
     function _verify(bytes memory sig) internal view returns (bool) {
-        return proofVerifier.verify(ROOT_ID, _transition(), sig);
+        return proofVerifier.verify(sig, _imageId(), abi.encode(_transition()));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -98,7 +102,7 @@ contract NitroProofVerifierTest is Test {
         transition.l2PostBlockNumber = 0;
         bytes memory sig = _sign(keccak256(abi.encode(transition)));
 
-        assertTrue(proofVerifier.verify(ROOT_ID, transition, sig));
+        assertTrue(proofVerifier.verify(sig, _imageId(), abi.encode(transition)));
     }
 
     function test_Verify_PerCallIdempotent() public {
@@ -126,6 +130,14 @@ contract NitroProofVerifierTest is Test {
         bytes memory sig = _sign(keccak256(abi.encode(proven)));
 
         assertFalse(_verify(sig));
+    }
+
+    function test_Verify_FalseForDifferentGameImage() public {
+        assertFalse(proofVerifier.verify(_sign(_commitment()), keccak256("new-image"), abi.encode(_transition())));
+    }
+
+    function test_Verify_FalseForMalformedPublicValues() public {
+        assertFalse(proofVerifier.verify(_sign(_commitment()), _imageId(), abi.encode(bytes32(0))));
     }
 
     /*//////////////////////////////////////////////////////////////

@@ -85,6 +85,9 @@ contract ActivateProofSystem is Script {
         require(address(gameImpl.teeVerifier()).code.length > 0, "ActivateProofSystem: TEE verifier missing");
         require(address(gameImpl.securityCouncil()).code.length > 0, "ActivateProofSystem: council verifier missing");
         require(address(gameImpl.weth()).code.length > 0, "ActivateProofSystem: DelayedWETH missing");
+        require(gameImpl.aggregationVKey() != bytes32(0), "ActivateProofSystem: aggregation vkey missing");
+        require(gameImpl.rangeVKeyCommitment() != bytes32(0), "ActivateProofSystem: range vkey missing");
+        require(gameImpl.teeImageId() != bytes32(0), "ActivateProofSystem: TEE image ID missing");
 
         IDisputeGame anchorGame = config.anchorStateRegistry.anchorGame();
         if (config.requireFreshAnchor) {

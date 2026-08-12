@@ -35,6 +35,9 @@ const BLOCK_INTERVAL: u64 = 10;
 const L2_BLOCK: u64 = 100;
 const L1_ORIGIN_HASH: B256 = B256::repeat_byte(0x42);
 const DOMAIN_HASH: B256 = B256::repeat_byte(0x43);
+const AGGREGATION_VKEY: B256 = B256::repeat_byte(0x44);
+const RANGE_VKEY_COMMITMENT: B256 = B256::repeat_byte(0x45);
+const TEE_IMAGE_ID: B256 = B256::repeat_byte(0x46);
 
 /// Fake game lifecycle. The contract splits this across `ProposalStatus` (challenged or not)
 /// and `GameStatus` (the terminal outcome); the fake keeps one field and derives both.
@@ -79,7 +82,7 @@ struct MockState {
     anchor: LineageAnchor,
     games_by_uuid: HashMap<B256, Address>,
     games: HashMap<Address, GameRecord>,
-    submissions: Vec<(Address, ProofLane)>,
+    submissions: Vec<(Address, ProofLane, Bytes)>,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +117,9 @@ impl MockClient {
         let metadata = GameMetadata {
             address,
             domain_hash: DOMAIN_HASH,
+            aggregation_vkey: AGGREGATION_VKEY,
+            range_vkey_commitment: RANGE_VKEY_COMMITMENT,
+            tee_image_id: TEE_IMAGE_ID,
             parent_ref,
             root_claim,
             l2_block_number,
@@ -176,7 +182,7 @@ impl MockClient {
         metadata.proof_deadline = proof_deadline;
     }
 
-    fn submissions(&self) -> Vec<(Address, ProofLane)> {
+    fn submissions(&self) -> Vec<(Address, ProofLane, Bytes)> {
         self.state.lock().expect("not poisoned").submissions.clone()
     }
 }
@@ -270,7 +276,7 @@ impl DefenderClient for MockClient {
         &self,
         game: Address,
         lane: ProofLane,
-        _proof: Bytes,
+        proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
         let mut guard = self.state.lock().expect("not poisoned");
         guard
@@ -278,7 +284,7 @@ impl DefenderClient for MockClient {
             .get_mut(&game)
             .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))?
             .proof_bitmap |= lane.mask();
-        guard.submissions.push((game, lane));
+        guard.submissions.push((game, lane, proof));
         Ok(DefenderSubmission {
             tx_hash: B256::repeat_byte(0xaa),
         })
@@ -444,7 +450,11 @@ async fn selected_proposed_game_gets_initial_tee_proof() {
     defender.tick().await.unwrap();
     assert_eq!(
         client.submissions(),
-        vec![(GAME_1, ProofLane::TeeAttestation)]
+        vec![(
+            GAME_1,
+            ProofLane::TeeAttestation,
+            Bytes::from_static(b"signature")
+        )]
     );
 }
 
@@ -495,7 +505,18 @@ async fn selected_challenged_game_gets_threshold_lanes() {
     );
 
     defender.tick().await.unwrap();
-    assert_eq!(client.submissions().len(), 2);
+    let submissions = client.submissions();
+    assert_eq!(submissions.len(), 2);
+    assert!(submissions.contains(&(
+        GAME_1,
+        ProofLane::TeeAttestation,
+        Bytes::from_static(b"signature")
+    )));
+    assert!(submissions.contains(&(
+        GAME_1,
+        ProofLane::ValidityProof,
+        Bytes::from_static(b"proof")
+    )));
     assert!(defender.active_defenses().is_empty());
 }
 
@@ -520,7 +541,11 @@ async fn selected_challenged_game_with_council_support_only_requests_tee() {
     defender.tick().await.unwrap();
     assert_eq!(
         client.submissions(),
-        vec![(GAME_1, ProofLane::TeeAttestation)]
+        vec![(
+            GAME_1,
+            ProofLane::TeeAttestation,
+            Bytes::from_static(b"signature")
+        )]
     );
 
     defender.tick().await.unwrap();
@@ -614,7 +639,12 @@ async fn retry_replaces_active_old_attempt() {
     defender.tick().await.unwrap();
 
     assert_eq!(defender.active_defenses(), [GAME_2]);
-    assert!(client.submissions().iter().all(|(game, _)| *game != GAME_1));
+    assert!(
+        client
+            .submissions()
+            .iter()
+            .all(|(game, _, _)| *game != GAME_1)
+    );
 }
 
 #[tokio::test]

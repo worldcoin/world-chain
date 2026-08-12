@@ -3,6 +3,8 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
+use std::{sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
 use world_chain_proof_protocol::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, MULTI_PROOF_GAME_TYPE,
@@ -27,6 +29,8 @@ pub struct AlloyProofSystemClient<P> {
     registered: RegisteredLineageConfig,
     /// Number of confirmations to require after sending a tx onchain.
     confirmations: u64,
+    receipt_timeout: Duration,
+    semaphore: Arc<Semaphore>,
     provider: P,
 }
 
@@ -43,6 +47,7 @@ where
         provider: P,
         factory_address: Address,
         confirmations: u64,
+        receipt_timeout: Duration,
     ) -> Result<Self, ProposerError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
@@ -53,13 +58,16 @@ where
             registered.anchor_registry,
             provider.clone(),
         );
+        let semaphore = Arc::new(Semaphore::new(1));
 
         Ok(Self {
             factory,
             anchor,
             registered,
             confirmations,
+            receipt_timeout,
             provider,
+            semaphore,
         })
     }
 
@@ -98,11 +106,13 @@ where
     }
 
     async fn send_resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
+        let _permit = self.semaphore.acquire().await?;
         let pending = self.game(game).resolve().send().await?;
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
@@ -159,6 +169,7 @@ where
         game: Address,
         recipient: Address,
     ) -> Result<ClaimSubmission, ProposerError> {
+        let _permit = self.semaphore.acquire().await?;
         // Read both phases up front so the submission can report what the call moved; the
         // receipt carries no amount of its own.
         let credit = self.read_credit(game, recipient).await?;
@@ -172,6 +183,7 @@ where
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
@@ -298,11 +310,13 @@ where
     }
 
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
+        let _permit = self.semaphore.acquire().await?;
         let pending = self.game(game).closeGame().send().await?;
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
@@ -317,6 +331,7 @@ where
         &self,
         proposal: &Proposal,
     ) -> Result<ProposalSubmission, ProposerError> {
+        let _permit = self.semaphore.acquire().await?;
         // `DisputeGameFactory.create` reverts unless `msg.value` matches the configured init
         // bond exactly, so it is read per submission rather than cached in configuration.
         let init_bond = self.factory.initBonds(MULTI_PROOF_GAME_TYPE).call().await?;
@@ -334,6 +349,7 @@ where
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
+            .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
             .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;

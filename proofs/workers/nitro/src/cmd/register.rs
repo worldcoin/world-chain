@@ -1,12 +1,12 @@
 #![cfg(target_os = "linux")]
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use world_chain_proof_nitro_enclave::register::{
     RegisterParams, RegistrationOutcome, register_enclave_key,
 };
 use world_chain_proof_nitro_worker::build_expected_pcrs;
 
-use crate::cmd::common::CommonArgs;
+use crate::cmd::{common::CommonArgs, select_registration_signer};
 
 /// Register the enclave's generated signing key on-chain.
 ///
@@ -31,9 +31,14 @@ pub struct RegisterArgs {
     pub l1_rpc: String,
 
     /// Hex-encoded private key used to sign and pay for the `registerKey` transaction.
-    /// Falls back to `PRIVATE_KEY` when unset.
+    /// Falls back to `PRIVATE_KEY` when neither registration signer is set.
     #[arg(long, env = "REGISTER_PRIVATE_KEY", hide_env_values = true)]
     pub private_key: Option<String>,
+
+    /// AWS KMS key ID or alias used to sign and pay for the `registerKey` transaction.
+    /// Mutually exclusive with `private_key`.
+    #[arg(long, env = "REGISTER_KMS_KEY_ID", hide_env_values = true)]
+    pub kms_key_id: Option<String>,
 
     /// PCR0 hex (48 bytes). When all three PCRs are set the attestation is verified
     /// host-side before submission; otherwise host-side checks are skipped (the on-chain
@@ -57,10 +62,12 @@ pub async fn register(args: RegisterArgs) -> Result<()> {
         args.pcr2.as_deref(),
     )?;
 
-    let private_key = args
-        .private_key
-        .or_else(|| std::env::var("PRIVATE_KEY").ok())
-        .context("no registration key: set --private-key, REGISTER_PRIVATE_KEY, or PRIVATE_KEY")?;
+    let fallback_private_key = std::env::var("PRIVATE_KEY").ok();
+    let (signer_secret, signer_type) = select_registration_signer(
+        args.private_key.as_deref(),
+        args.kms_key_id.as_deref(),
+        fallback_private_key.as_deref(),
+    )?;
 
     let outcome = register_enclave_key(RegisterParams {
         enclave_cid: args.common.enclave_cid,
@@ -68,7 +75,8 @@ pub async fn register(args: RegisterArgs) -> Result<()> {
         expected_pcrs,
         l1_rpc_url: args.l1_rpc,
         registry: args.registry,
-        private_key,
+        signer_secret: signer_secret.to_owned(),
+        signer_type,
     })
     .await?;
 

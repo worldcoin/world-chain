@@ -18,6 +18,7 @@ remappings = [
   "@BokkyPooBahsDateTimeLibrary/=lib/BokkyPooBahsDateTimeLibrary/contracts/",
   "@pbh-lib/=src/lib/",
   "openzeppelin-contracts/=lib/world-id-contracts/lib/openzeppelin-contracts/contracts/",
+  "contracts-upgradeable/=lib/world-id-contracts/lib/openzeppelin-contracts-upgradeable/contracts/",
   "@4337=lib/safe-modules/modules/4337/contracts/",
   "@safe-global/safe-contracts/contracts/=lib/safe-contracts/contracts/",
   "@base-contracts/=vendor/base-contracts/",

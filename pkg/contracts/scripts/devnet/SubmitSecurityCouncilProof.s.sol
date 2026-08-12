@@ -5,7 +5,7 @@ import {Script} from "forge-std/Script.sol";
 
 import {SecurityCouncilVerifier} from "../../src/dispute/council/SecurityCouncilVerifier.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
-import {LibProof, ProofLane, TransitionPublicValues} from "../../src/dispute/lib/LibProof.sol";
+import {LibProof, ProofLane} from "../../src/dispute/lib/LibProof.sol";
 
 interface ICouncilSafe {
     function getMessageHash(bytes calldata message) external view returns (bytes32);
@@ -34,9 +34,7 @@ contract SubmitSecurityCouncilProof is Script {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, safeMessageHash);
         bytes memory proof = abi.encodePacked(r, s, v);
 
-        // The council lane attests over `rootId` alone; the transition is ignored by this verifier.
-        TransitionPublicValues memory transition;
-        require(verifier.verify(rootId, transition, proof), "Council proof verification failed");
+        require(verifier.verify(proof, bytes32(0), abi.encode(rootId)), "Council proof verification failed");
 
         uint256 transactionKey = vm.envOr("PRIVATE_KEY", signerKey);
         vm.startBroadcast(transactionKey);
