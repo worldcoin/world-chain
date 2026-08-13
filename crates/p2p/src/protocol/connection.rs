@@ -11,7 +11,8 @@ use reth_ethereum::network::{api::PeerId, eth_wire::multiplex::ProtocolConnectio
 use reth_network::types::ReputationChangeKind;
 use world_chain_primitives::{
     p2p::{
-        Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg, StartPublish, StopPublish,
+        Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg, FlashblocksP2PMsgParts,
+        StartPublish, StopPublish,
     },
     primitives::FlashblocksPayloadV1,
 };
@@ -172,7 +173,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                 return Poll::Ready(None);
             };
 
-            let msg = match FlashblocksP2PMsg::decode(&mut &buf[..]) {
+            let msg = match FlashblocksP2PMsg::parse(&buf[..]) {
                 Ok(msg) => msg,
                 Err(error) => {
                     tracing::warn!(
@@ -189,8 +190,8 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
             };
 
             match msg {
-                FlashblocksP2PMsg::Authorized(authorized) => {
-                    if Ok(authorized.authorization.builder_vk)
+                FlashblocksP2PMsgParts::Authorized(parts) => {
+                    if Ok(parts.authorization.builder_vk)
                         == this.protocol.handle.builder_sk().map(|s| s.verifying_key())
                     {
                         tracing::trace!(
@@ -201,7 +202,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                         continue;
                     }
 
-                    if let Err(error) = authorized.verify(this.protocol.handle.ctx.authorizer_vk) {
+                    if let Err(error) = parts.verify(this.protocol.handle.ctx.authorizer_vk) {
                         tracing::warn!(
                             target: "flashblocks::p2p",
                             peer_id = %this.peer_id,
@@ -213,6 +214,23 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                             .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
                         continue;
                     }
+
+                    // Sender is authenticated; only now is it safe to decode the message body.
+                    let authorized = match parts.into_authorized() {
+                        Ok(authorized) => authorized,
+                        Err(error) => {
+                            tracing::warn!(
+                                target: "flashblocks::p2p",
+                                peer_id = %this.peer_id,
+                                %error,
+                                "failed to decode authorized flashblocks message from peer",
+                            );
+                            this.protocol
+                                .network
+                                .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                            continue;
+                        }
+                    };
 
                     match &authorized.msg {
                         AuthorizedMsg::FlashblocksPayloadV1(_) => {
@@ -229,7 +247,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                         }
                     }
                 }
-                FlashblocksP2PMsg::RequestFlashblocks => {
+                FlashblocksP2PMsgParts::RequestFlashblocks => {
                     tracing::trace!(
                         target: "flashblocks::p2p",
                         peer_id = %this.peer_id,
@@ -246,7 +264,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                             .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
                     }
                 }
-                FlashblocksP2PMsg::AcceptFlashblocks => {
+                FlashblocksP2PMsgParts::AcceptFlashblocks => {
                     tracing::trace!(
                         target: "flashblocks::p2p",
                         peer_id = %this.peer_id,
@@ -263,7 +281,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                             .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
                     }
                 }
-                FlashblocksP2PMsg::RejectFlashblocks => {
+                FlashblocksP2PMsgParts::RejectFlashblocks => {
                     tracing::trace!(
                         target: "flashblocks::p2p",
                         peer_id = %this.peer_id,
@@ -280,7 +298,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                             .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
                     }
                 }
-                FlashblocksP2PMsg::CancelFlashblocks => {
+                FlashblocksP2PMsgParts::CancelFlashblocks => {
                     tracing::trace!(
                         target: "flashblocks::p2p",
                         peer_id = %this.peer_id,
