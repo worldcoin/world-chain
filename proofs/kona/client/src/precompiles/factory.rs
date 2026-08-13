@@ -1,18 +1,18 @@
-use alloy_evm::{precompiles::PrecompilesMap, Database, EvmEnv, EvmFactory};
+use alloy_evm::{Database, EvmEnv, EvmFactory, precompiles::PrecompilesMap};
 use alloy_op_evm::{
+    OpEvm, OpEvmContext, OpTx, OpTxError,
     post_exec::{
         NullRefundPolicy, PostExecEvmFactoryHooks, PostExecExecutedTx, PostExecRefundInspector,
         PostExecTxContext,
     },
-    OpEvm, OpEvmContext, OpTx, OpTxError,
 };
 use op_revm::{
-    precompiles::OpPrecompiles, L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransaction,
+    L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransaction, precompiles::OpPrecompiles,
 };
 use revm::{
-    context::{result::EVMError, BlockEnv, CfgEnv, DBErrorMarker},
-    inspector::NoOpInspector,
     Context, Inspector, MainContext,
+    context::{BlockEnv, CfgEnv, DBErrorMarker, result::EVMError},
+    inspector::NoOpInspector,
 };
 
 use world_chain_proof_core::range::{WorldRangeHardfork, WorldRangeHardforkConfig};
