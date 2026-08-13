@@ -1,0 +1,134 @@
+name: Fuzz
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "proofs/backends/nitro/enclave/**"
+      - "proofs/backends/nitro/fuzz/**"
+      - ".github/workflows/fuzz.yml"
+  merge_group:
+  pull_request:
+    paths:
+      - "proofs/backends/nitro/enclave/**"
+      - "proofs/backends/nitro/fuzz/**"
+      - ".github/workflows/fuzz.yml"
+  workflow_dispatch:
+    inputs:
+      max_total_time:
+        description: Seconds to fuzz each target
+        required: false
+        default: "300"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  FUZZ_DIR: proofs/backends/nitro/fuzz
+  # libFuzzer's AddressSanitizer cannot link against a statically linked musl libc, and the
+  # self-hosted ARC runners are musl-based. Pin a glibc triple instead of taking the host.
+  FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+
+jobs:
+  # On PRs this is the whole point: prove the targets still compile against the crate.
+  fuzz-build:
+    name: build targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-07-01
+          targets: x86_64-unknown-linux-gnu
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-fuzz-${{ hashFiles('proofs/backends/nitro/fuzz/Cargo.lock') }}
+          restore-keys: cargo-fuzz-
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: cargo-fuzz
+      - name: Build fuzz targets
+        run: cargo fuzz build --fuzz-dir "$FUZZ_DIR" --target "$FUZZ_TARGET_TRIPLE"
+
+  # Short run on PRs, longer on the nightly schedule. Seeded from seeds/ so a fresh corpus
+  # starts from a real attestation instead of rediscovering CBOR framing.
+  fuzz-run:
+    name: run ${{ matrix.target }}
+    needs: fuzz-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [attestation_parse, attestation_verify]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-07-01
+          targets: x86_64-unknown-linux-gnu
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-fuzz-${{ hashFiles('proofs/backends/nitro/fuzz/Cargo.lock') }}
+          restore-keys: cargo-fuzz-
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: cargo-fuzz
+      # Restore the corpus grown by previous runs, keyed per target and per run so each run
+      # reads the newest available and writes its own. Without this every run starts cold.
+      - name: Restore corpus
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.FUZZ_DIR }}/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Seed corpus
+        run: |
+          mkdir -p "$FUZZ_DIR/corpus/${{ matrix.target }}"
+          cp -n "$FUZZ_DIR"/seeds/* "$FUZZ_DIR/corpus/${{ matrix.target }}/" || true
+          echo "corpus: $(find "$FUZZ_DIR/corpus/${{ matrix.target }}" -type f | wc -l) inputs"
+      - name: Fuzz
+        env:
+          # 5 min per target on the nightly schedule, 60s on PRs to keep them fast.
+          MAX_TOTAL_TIME: >-
+            ${{ github.event.inputs.max_total_time
+                || (github.event_name == 'schedule' && '300')
+                || '60' }}
+        run: |
+          cargo fuzz run --fuzz-dir "$FUZZ_DIR" --target "$FUZZ_TARGET_TRIPLE" \
+            "${{ matrix.target }}" -- \
+            -max_total_time="$MAX_TOTAL_TIME" \
+            -print_final_stats=1
+      # A crash writes a reproducer into artifacts/; keep it so the failure is actionable
+      # rather than just a red X.
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: ${{ env.FUZZ_DIR }}/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore

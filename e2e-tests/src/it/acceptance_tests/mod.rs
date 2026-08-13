@@ -3,7 +3,9 @@
 mod checks;
 mod config;
 mod erc4337;
+mod karst;
 mod rpc;
+mod utils;
 
 use rpc::RpcEnv;
 
@@ -15,10 +17,11 @@ async fn run_acceptance_tests() -> eyre::Result<()> {
     checks::chain_id_matches(&env).await?;
     checks::latest_block_exists(&env).await?;
     checks::block_number_advances(&env).await?;
+    karst::l2_execution_checks(&env).await?;
     erc4337::sponsored_user_operations(&env).await
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_network() -> eyre::Result<()> {
     run_acceptance_tests().await
 }

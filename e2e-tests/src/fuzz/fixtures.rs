@@ -82,3 +82,50 @@ pub fn arb_execution_payload_sequence(
         },
     )
 }
+
+/// Strategy for generating a transaction sequence where each transaction's `gas_limit` field is
+/// fuzzed by over-provisioning the operation's estimate by a random amount.
+///
+/// The estimate is a lower bound (transactions never run out of gas), while the extra headroom
+/// drives the EVM's gas-refund accounting that the builder must track across chained flashblocks.
+pub fn arb_transaction_sequence_with_fuzzed_gas(
+    max_ops: usize,
+) -> impl Strategy<Value = Vec<(TxOp, u64, u64)>> {
+    arb_transaction_sequence(max_ops).prop_flat_map(|sequence| {
+        // One extra-gas value per transaction, up to ~5M gas of headroom.
+        let extras = prop::collection::vec(0u64..5_000_000u64, sequence.len());
+        extras.prop_map(move |extras| {
+            sequence
+                .iter()
+                .cloned()
+                .zip(extras)
+                .map(|((op, nonce), extra)| {
+                    let gas_limit = op.gas_limit().saturating_add(extra);
+                    (op, nonce, gas_limit)
+                })
+                .collect()
+        })
+    })
+}
+
+/// Strategy for generating a chained payload sequence whose transactions carry fuzzed gas limits.
+pub fn arb_execution_payload_sequence_with_fuzzed_gas(
+    transactions: usize,
+    max_flashblocks: usize,
+) -> impl Strategy<
+    Value = Vec<(
+        world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
+        Option<
+            world_chain_evm::execution::bal::CommittedState<
+                reth_optimism_evm::OpRethReceiptBuilder,
+            >,
+        >,
+    )>,
+> {
+    arb_transaction_sequence_with_fuzzed_gas(transactions).prop_filter_map(
+        "execution must succeed",
+        move |sequence: Vec<(TxOp, u64, u64)>| {
+            build_chained_payloads_with_gas_limits(sequence, max_flashblocks, true).ok()
+        },
+    )
+}

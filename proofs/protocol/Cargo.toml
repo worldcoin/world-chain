@@ -11,13 +11,25 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alloy-primitives = { workspace = true, features = ["serde"] }
-op-revm.workspace = true
-reth-chainspec.workspace = true
-reth-optimism-forks.workspace = true
-revm-primitives.workspace = true
+# workspace
+world-chain-proof-metrics.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-contract.workspace = true
+alloy-provider.workspace = true
+alloy-sol-types.workspace = true
+
+# misc
+async-trait.workspace = true
+futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 thiserror.workspace = true
-world-chain-chainspec = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+tokio.workspace = true
+
+[features]
+default = []

@@ -19,6 +19,18 @@ on:
         default: nightly
   push:
     branches: [main]
+    paths:
+      - "proofs/**"
+      - "crates/chainspec/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/config.toml"
+      - "Dockerfile.prover"
+      - "scripts/build-eif.sh"
+      - ".github/workflows/docker-proof.yml"
+      - ".github/actions/docker-build-push-digest/**"
+      - ".github/actions/docker-merge-manifest/**"
 
 env:
   REPO_NAME: ${{ github.event.repository.name }}
@@ -34,132 +46,32 @@ permissions:
   id-token: write
 
 jobs:
-  build-elfs:
-    name: build ELFs
-    runs-on: arc-public-8xlarge-amd64-runner
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ inputs.ref }}
-      - uses: taiki-e/install-action@just
-      - name: Install SP1 toolchain
-        run: |
-          curl -L https://sp1.succinct.xyz | bash
-          ~/.sp1/bin/sp1up --version v6.1.0
-          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
-      - name: Build ELFs
-        run: just build-proof-elfs
-      - name: Upload ELFs
-        uses: actions/upload-artifact@v4
-        with:
-          name: proof-elfs
-          path: |
-            proofs/succinct/elf/world-chain-range-ethereum
-            proofs/succinct/elf/world-chain-aggregation
-          if-no-files-found: error
-
-  build-sp1-prover-image:
-    name: build world-chain-prover-sp1 image
-    environment: dev
-    needs: [build-elfs]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: arc-public-8xlarge-amd64-runner
-            platform: linux/amd64
-          - runner: ubuntu-24.04-arm
-            platform: linux/arm64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ inputs.ref }}
-      - name: Download ELFs
-        uses: actions/download-artifact@v4
-        with:
-          name: proof-elfs
-          path: proofs/succinct/elf
-      - name: Build and push digest
-        uses: ./.github/actions/docker-build-push-digest
-        with:
-          platform: ${{ matrix.platform }}
-          registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}-sp1
-          aws_region: ${{ env.AWS_REGION }}
-          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          dockerfile: Dockerfile.prover
-          build_args: |
-            PROVER_BACKEND=sp1
-          digest_artifact_prefix: digests-prover-sp1
-
-  build-nitro-prover-image:
-    name: build world-chain-prover-nitro image
-    environment: dev
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: arc-public-8xlarge-amd64-runner
-            platform: linux/amd64
-          - runner: ubuntu-24.04-arm
-            platform: linux/arm64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ inputs.ref }}
-      - name: Build and push digest
-        uses: ./.github/actions/docker-build-push-digest
-        with:
-          platform: ${{ matrix.platform }}
-          registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}-nitro
-          aws_region: ${{ env.AWS_REGION }}
-          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          dockerfile: Dockerfile.prover
-          build_args: |
-            PROVER_BACKEND=nitro
-          digest_artifact_prefix: digests-prover-nitro
-
-  merge-prover-images:
-    name: merge ${{ matrix.prover.suffix }} prover image manifest
-    needs: [build-sp1-prover-image, build-nitro-prover-image]
+  resolve-sha:
+    name: resolve build SHA
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        prover:
-          - { suffix: sp1, prefix: digests-prover-sp1 }
-          - { suffix: nitro, prefix: digests-prover-nitro }
+    outputs:
+      short: ${{ steps.sha.outputs.short }}
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
-      - name: Merge multi-arch manifest
-        uses: ./.github/actions/docker-merge-manifest
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}-${{ matrix.prover.suffix }}
-          digest_artifact_prefix: ${{ matrix.prover.prefix }}
-          tags: |
-            type=raw,value=${{ inputs.image_tag || 'nightly' }}
-            type=sha
+          ref: ${{ inputs.ref }}
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
   # Service deployable images, built from the same Dockerfile.proof via
   # PROVER_PACKAGE/PROVER_BIN/FEATURES build-args. Each pushes to its own
   # `<repo>-<service>` image so tags do not collide with the `proof` image.
   build-service-images:
     name: build ${{ matrix.service.bin }} image
+    needs: [resolve-sha]
     environment: dev
-    needs: [build-elfs]
     strategy:
       fail-fast: false
       matrix:
         service:
-          - { suffix: -sp1-worker, package: world-chain-sp1-worker, bin: sp1-worker, prefix: digests-sp1-worker }
+          - { suffix: -sp1-worker, package: world-chain-proof-sp1-worker, bin: world-chain-proof-sp1-worker, prefix: digests-sp1-worker }
           - { suffix: -proposer, package: world-chain-proposer, bin: world-chain-proposer, prefix: digests-proposer }
           - { suffix: -challenger, package: world-chain-challenger, bin: world-chain-challenger, prefix: digests-challenger }
           - { suffix: -defender, package: world-chain-defender, bin: world-chain-defender, prefix: digests-defender }
@@ -170,21 +82,15 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.ref }}
-      - name: Download ELFs
-        if: matrix.service.bin == 'sp1-worker'
-        uses: actions/download-artifact@v4
-        with:
-          name: proof-elfs
-          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
           platform: ${{ matrix.platform.platform }}
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ github.repository }}${{ matrix.service.suffix }}
+          image_name: ${{ env.IMAGE_NAME }}${{ matrix.service.suffix }}
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
@@ -195,7 +101,7 @@ jobs:
 
   merge-service-images:
     name: merge ${{ matrix.service.bin }} image manifest
-    needs: [build-service-images]
+    needs: [resolve-sha, build-service-images]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -208,13 +114,205 @@ jobs:
           - { suffix: -prover-service, prefix: digests-prover-service }
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref }}
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ github.repository }}${{ matrix.service.suffix }}
+          image_name: ${{ env.IMAGE_NAME }}${{ matrix.service.suffix }}
           digest_artifact_prefix: ${{ matrix.service.prefix }}
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
-            type=sha
+            type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
+
+  # nitro-worker is Linux x86_64 only (requires AF_VSOCK), so it cannot be
+  # built in the multi-arch service matrix above.
+  build-nitro-worker-image:
+    name: build nitro-worker image
+    needs: [resolve-sha]
+    environment: dev
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: linux/amd64
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}-nitro-worker
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_PACKAGE=world-chain-proof-nitro-worker
+            PROVER_BIN=world-chain-proof-nitro-worker
+          digest_artifact_prefix: digests-nitro-worker
+
+  merge-nitro-worker-image:
+    name: merge nitro-worker image manifest
+    needs: [resolve-sha, build-nitro-worker-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}-nitro-worker
+          digest_artifact_prefix: digests-nitro-worker
+          digest_artifact_pattern: digests-nitro-worker-linux-*
+          tags: |
+            type=raw,value=${{ inputs.image_tag || 'nightly' }}
+            type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
+
+  # nitro-enclave uses its own Dockerfile (proofs/backends/nitro/enclave/Dockerfile) and
+  # is x86_64 only (Nitro Enclaves are x86_64).
+  build-nitro-enclave-image:
+    name: build nitro-enclave image
+    needs: [resolve-sha]
+    environment: dev
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: linux/amd64
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}-nitro-enclave
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: proofs/backends/nitro/enclave/Dockerfile
+          digest_artifact_prefix: digests-nitro-enclave
+
+  merge-nitro-enclave-image:
+    name: merge nitro-worker-enclave image manifest
+    needs: [resolve-sha, build-nitro-enclave-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}-nitro-enclave
+          digest_artifact_prefix: digests-nitro-enclave
+          tags: |
+            type=raw,value=${{ inputs.image_tag || 'nightly' }}
+            type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
+
+  # Build the Nitro Enclave Image Format (EIF) file from the enclave Docker image,
+  # then package it into a minimal OCI carrier image pushed to GHCR so Kubernetes
+  # pods can pull it via an init container (AWS Nitro Enclaves K8s device plugin pattern).
+  build-nitro-enclave-eif-image:
+    name: build nitro-worker-enclave EIF carrier image
+    needs: [resolve-sha, build-nitro-enclave-image]
+    runs-on: arc-public-8xlarge-amd64-runner
+    outputs:
+      pcr0: ${{ steps.pcrs.outputs.pcr0 }}
+      pcr1: ${{ steps.pcrs.outputs.pcr1 }}
+      pcr2: ${{ steps.pcrs.outputs.pcr2 }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - name: Build EIF
+        run: scripts/build-eif.sh target/eif
+      - name: Extract PCRs
+        id: pcrs
+        run: |
+          jq -r '"pcr0=\(.PCR0)", "pcr1=\(.PCR1)", "pcr2=\(.PCR2)"' \
+            target/eif/pcrs.json >> "$GITHUB_OUTPUT"
+      - name: Upload PCR measurements
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nitro-enclave-pcrs
+          path: target/eif/pcrs.json
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build and push EIF carrier image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: proofs/backends/nitro/enclave/Dockerfile.eif
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nitro-enclave-eif:${{ inputs.image_tag || 'nightly' }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nitro-enclave-eif:sha-${{ needs.resolve-sha.outputs.short }}
+
+  summary:
+    name: Image tags summary
+    if: always()
+    needs:
+      - resolve-sha
+      - merge-nitro-worker-image
+      - merge-nitro-enclave-image
+      - build-nitro-enclave-eif-image
+      - merge-service-images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write summary
+        env:
+          TAG:                 ${{ inputs.image_tag || 'nightly' }}
+          SHORT:               ${{ needs.resolve-sha.outputs.short }}
+          NITRO_WORKER_RESULT: ${{ needs.merge-nitro-worker-image.result }}
+          NITRO_ENCLAVE_RESULT:      ${{ needs.merge-nitro-enclave-image.result }}
+          EIF_RESULT:          ${{ needs.build-nitro-enclave-eif-image.result }}
+          SERVICES_RESULT:     ${{ needs.merge-service-images.result }}
+          PCR0:                ${{ needs.build-nitro-enclave-eif-image.outputs.pcr0 }}
+          PCR1:                ${{ needs.build-nitro-enclave-eif-image.outputs.pcr1 }}
+          PCR2:                ${{ needs.build-nitro-enclave-eif-image.outputs.pcr2 }}
+        run: |
+          REPO="ghcr.io/${{ github.repository }}"
+          status() { [ "$1" = "success" ] && echo "✅" || echo "❌ ($1)"; }
+          {
+            echo "## 🐳 Image build results"
+            echo ""
+            echo "| Image | Tags | Status |"
+            echo "|-------|------|--------|"
+            echo "| \`$IMAGE_NAME-nitro-worker\` | \`$TAG\` \`sha-$SHORT\` | $(status $NITRO_WORKER_RESULT) |"
+            echo "| \`$IMAGE_NAME-nitro-enclave\` | \`$TAG\` \`sha-$SHORT\` | $(status $NITRO_ENCLAVE_RESULT) |"
+            echo "| \`$IMAGE_NAME-nitro-enclave-eif\` | \`$TAG\` \`sha-$SHORT\` | $(status $EIF_RESULT) |"
+            echo "| \`$IMAGE_NAME-sp1-worker\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$IMAGE_NAME-proposer\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$IMAGE_NAME-challenger\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$IMAGE_NAME-defender\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$IMAGE_NAME-prover-service\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+
+            if [ -n "${PCR0:-}" ]; then
+              echo ""
+              echo "## 🔒 Enclave PCR measurements"
+              echo ""
+              echo "| PCR | Value |"
+              echo "|-----|-------|"
+              echo "| PCR0 | \`$PCR0\` |"
+              echo "| PCR1 | \`$PCR1\` |"
+              echo "| PCR2 | \`$PCR2\` |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

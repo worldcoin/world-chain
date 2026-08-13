@@ -16,15 +16,12 @@ use reth_node_core::{
     version::version_metadata,
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
-use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
+use reth_rpc_server_types::{DefaultRpcModuleValidator, RethRpcModule, RpcModuleValidator};
 use reth_tracing::{Layers, TracingGuards};
 use tracing::{info, warn};
 use world_chain_chainspec::WorldChainSpec;
 
-use crate::{WorldChainArgs, chainspec::WorldChainSpecParser};
-
-/// Optimism CLI commands, parameterized with the World Chain chain spec parser.
-pub use reth_optimism_cli::commands::Commands;
+use crate::{WorldChainArgs, chainspec::WorldChainSpecParser, commands::Commands};
 
 /// The main World Chain cli interface.
 #[derive(Debug, Parser)]
@@ -210,16 +207,10 @@ where
                 let runtime = runner.runtime();
                 runner.run_until_ctrl_c(command.execute::<N>(components, runtime))
             }
-            Commands::InitState(_)
-            | Commands::ImportOp(_)
-            | Commands::ImportReceiptsOp(_)
-            | Commands::OpProofs(_) => Err(eyre!(
-                "this OP-specific command is not yet supported with WorldChainSpec"
-            )),
-            #[cfg(feature = "dev")]
-            Commands::TestVectors(_) => Err(eyre!(
-                "test-vectors is not yet supported with WorldChainSpec"
-            )),
+            Commands::OpProofs(command) => {
+                let runtime = runner.runtime();
+                runner.run_blocking_until_ctrl_c(command.execute::<N>(runtime))
+            }
         }
     }
 
@@ -231,8 +222,41 @@ where
             let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
             let otlp_logs_status = runner.block_on(self.cli.traces.init_otlp_logs(&mut layers))?;
 
-            self.guard = Some(self.cli.logs.init_tracing_with_layers(layers, false)?);
+            let enable_reload = match &self.cli.command {
+                Commands::Node(cmd) => {
+                    let admin = &RethRpcModule::Admin;
+                    (cmd.rpc.http
+                        && cmd
+                            .rpc
+                            .http_api
+                            .as_ref()
+                            .is_some_and(|api| api.contains(admin)))
+                        || (cmd.rpc.ws
+                            && cmd
+                                .rpc
+                                .ws_api
+                                .as_ref()
+                                .is_some_and(|api| api.contains(admin)))
+                }
+                _ => false,
+            };
+
+            self.guard = Some(
+                self.cli
+                    .logs
+                    .init_tracing_with_layers(layers, enable_reload)?,
+            );
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
+
+            if enable_reload {
+                let directive = self.cli.logs.verbosity.directive().to_string();
+                let baseline = if self.cli.logs.log_stdout_filter.is_empty() {
+                    directive
+                } else {
+                    format!("{directive},{}", self.cli.logs.log_stdout_filter)
+                };
+                world_chain_primitives::tracing::set_startup_tracing_directives(baseline);
+            }
 
             match otlp_status {
                 OtlpInitStatus::Started(endpoint) => {

@@ -1,0 +1,37 @@
+[package]
+name = "world-chain-proof-sp1-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+# SP1 zkVM proving via the sp1-sdk environment provers.
+sp1 = [
+    "dep:sp1-sdk",
+    "dep:bincode",
+    "dep:alloy-sol-types",
+    "dep:world-chain-proof-sp1-elfs",
+]
+
+[dependencies]
+alloy-primitives = { workspace = true, features = ["serde"] }
+anyhow.workspace = true
+reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
+serde.workspace = true
+serde_cbor = "0.11"
+thiserror.workspace = true
+strum.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+world-chain-proof-core.workspace = true
+world-chain-proof-kona-host.workspace = true
+world-chain-proof-sp1-elfs = { workspace = true, optional = true }
+world-chain-proof-sp1-types.workspace = true
+alloy-sol-types = { workspace = true, optional = true }
+bincode = { version = "1", optional = true }
+sp1-sdk = { version = "=6.1.0", features = ["network"], optional = true }
+async-trait.workspace = true
+world-chain-prover-service.workspace = true

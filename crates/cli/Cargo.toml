@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 world-chain-chainspec.workspace = true
+world-chain-primitives.workspace = true
+world-chain-commands.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
 reth-cli.workspace = true
@@ -15,7 +17,6 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-node-core.workspace = true
 reth-node-metrics.workspace = true
 reth-optimism-chainspec.workspace = true
-reth-optimism-cli.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-node.workspace = true
@@ -51,10 +52,6 @@ reqwest.workspace = true
 [dev-dependencies]
 alloy-genesis.workspace = true
 reth-node-core.workspace = true
-
-[features]
-default = []
-dev = ["reth-optimism-cli/dev"]
 
 [[example]]
 name = "sk-to-vk"

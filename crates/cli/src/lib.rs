@@ -1,13 +1,14 @@
 pub mod app;
 pub mod chainspec;
 pub mod cli;
+pub mod commands;
 pub mod config;
 
 // Re-export key types at the crate root for convenience
-pub use app::{Cli, CliApp, Commands};
+pub use app::{Cli, CliApp};
 pub use chainspec::WorldChainSpecParser;
 pub use cli::{
-    BuilderArgs, FlashblocksArgs, KonaArgs, KonaP2PArgs, KonaSignerArgs, PbhArgs, WorldChainArgs,
-    WorldChainRpcModuleValidator,
+    BuilderArgs, FlashblocksArgs, KonaArgs, KonaP2PArgs, KonaSignerArgs, PbhArgs, WitnessArgs,
+    WorldChainArgs, WorldChainRpcModuleValidator,
 };
 pub use config::{FlashblocksPayloadBuilderConfig, WorldChainNodeConfig};

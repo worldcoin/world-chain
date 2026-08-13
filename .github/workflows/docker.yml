@@ -4,15 +4,32 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch, tag, or SHA to build.
+        description: Branch, tag, or SHA to build. Leave blank to build the ref this run was launched from.
         required: false
-        default: main
+        type: string
       image_tag:
-        description: Custom image tag to publish (e.g. "nightly").
-        required: false
+        description: Mutable tag to publish alongside the immutable sha tag. "tag" applies the git tag (launch this run from a v* tag).
+        required: true
+        type: choice
         default: nightly
+        options:
+          - nightly
+          - alphanet
+          - tag
   push:
     branches: [main]
+    paths:
+      - "bin/world-chain/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/config.toml"
+      - "Dockerfile"
+      - "scripts/**"
+      - ".github/workflows/docker.yml"
+      - ".github/actions/docker-build-push-digest/**"
+      - ".github/actions/docker-merge-manifest/**"
 
 env:
   REPO_NAME: ${{ github.event.repository.name }}
@@ -42,7 +59,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.ref }}
       - name: Build and push digest
@@ -60,12 +77,14 @@ jobs:
       - build-and-push
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=sha
+            type=raw,value=nightly,enable=${{ inputs.image_tag == 'nightly' }}
+            type=raw,value=alphanet,enable=${{ inputs.image_tag == 'alphanet' }}
+            type=ref,event=tag,enable=${{ inputs.image_tag == 'tag' }}

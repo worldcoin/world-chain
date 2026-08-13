@@ -3,31 +3,79 @@ name: Rust CI
 on:
   push:
     branches: [main]
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
+      - ".config/nextest.toml"
+      - "clippy.toml"
+      - "rustfmt.toml"
+      - "Justfile"
+      - ".github/workflows/rust-ci.yml"
   merge_group:
   pull_request:
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
+      - ".config/nextest.toml"
+      - "clippy.toml"
+      - "rustfmt.toml"
+      - "Justfile"
+      - ".github/workflows/rust-ci.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_PROFILE_TEST_DEBUG: 0
   WORLDCHAIN_PROVIDER: "${{ secrets.WORLDCHAIN_PROVIDER }}"
+  AWS_REGION: us-east-1
+  SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
 
 jobs:
   cargo-tests:
     runs-on: arc-public-8xlarge-amd64-runner
+    environment: dev
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+      SCCACHE_REGION: us-east-1
     steps:
-      - uses: actions/checkout@v6
-      - uses: taiki-e/install-action@just
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: arduino/setup-protoc@v3
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-07-01
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup mold
+        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::348981876543:role/oidc/github-deploy
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@89e9040de88b577a072e3760aaf59f585da083af # v0.0.5
       - name: Cache
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         continue-on-error: false
         with:
           path: |
@@ -36,48 +84,42 @@ jobs:
             ~/.cargo/git/db/
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: nextest
       - name: tests
-        run: just test
-
-  cargo-lint:
-    runs-on: arc-public-8xlarge-amd64-runner
-    timeout-minutes: 20
-    name: lint
-    steps:
-      - uses: actions/checkout@v6
-      - uses: taiki-e/install-action@just
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy
-      - name: Cache
-        uses: actions/cache@v5
-        continue-on-error: false
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-test-
-      - name: fmt + lint
-        run: cargo +nightly fmt --all -- --check
+        run: mold -run just test --profile ci
 
   cargo-clippy:
     runs-on: arc-public-8xlarge-amd64-runner
+    environment: dev
     timeout-minutes: 20
     name: clippy
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+      SCCACHE_REGION: us-east-1
     steps:
-      - uses: actions/checkout@v6
-      - uses: taiki-e/install-action@just
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
+          tool: just
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-07-01
           components: rustfmt, clippy
-      - uses: arduino/setup-protoc@v3
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::348981876543:role/oidc/github-deploy
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@89e9040de88b577a072e3760aaf59f585da083af # v0.0.5
       - name: Cache
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         continue-on-error: false
         with:
           path: |
@@ -86,21 +128,40 @@ jobs:
             ~/.cargo/git/db/
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
+      - name: fmt
+        run: cargo +nightly-2026-07-01 fmt --all -- --check
       - name: clippy
-        run: cargo +nightly clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo +nightly-2026-07-01 clippy --workspace --all-targets --all-features -- -D warnings
 
   cargo-docs:
     runs-on: arc-public-8xlarge-amd64-runner
+    environment: dev
     timeout-minutes: 20
     name: docs
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+      SCCACHE_REGION: us-east-1
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: arduino/setup-protoc@v3
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-07-01
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup mold
+        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::348981876543:role/oidc/github-deploy
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@89e9040de88b577a072e3760aaf59f585da083af # v0.0.5
       - name: Cache
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         continue-on-error: false
         with:
           path: |
@@ -110,6 +171,6 @@ jobs:
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
       - name: Generate CLI docs
-        run: cargo xtask docs
+        run: mold -run cargo xtask docs
       - name: Check docs are up to date
         run: git diff --exit-code specs/

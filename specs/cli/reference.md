@@ -35,6 +35,18 @@ Rollup:
       --rollup.enable-tx-conditional
           Enable transaction conditional support on sequencer
 
+      --rollup.retain-forwarded-txs
+          Retain RPC-submitted transactions in the local pool after forwarding them to the sequencer.
+          
+          This flag only has an effect when `rollup.sequencer` is present.
+
+      --rollup.operator-sdm-opt-in <OPERATOR_SDM_OPT_IN>
+          Local operator opt-in for SDM `PostExec` production at process boot. The admin RPC (`admin_setOperatorSdmOptIn`) can still toggle it at runtime. Defaults to disabled
+          
+          [env: OP_RETH_OPERATOR_SDM_OPT_IN=]
+          [default: false]
+          [possible values: true, false]
+
       --rollup.interop-http <INTEROP_HTTP_URL>
           HTTP endpoint(s) for the interop filter, used to validate the interop messages referenced by incoming transactions. Repeat the flag to configure multiple endpoints; each check is fanned out to all of them and combined by quorum agreement (see `--rollup.interop-min-responses`). When none are set, interop transaction validation is disabled: a node that builds blocks will then include transactions carrying invalid interop messages, producing invalid blocks. It is only safe to leave this unset on nodes that do not build blocks
 
@@ -199,6 +211,21 @@ Flashblocks:
           Defaults to <datadir>/flashblocks/flashblocks.mdbx.
           
           [env: FLASHBLOCKS_STORE_PATH=]
+
+      --flashblocks.sentry-peers <ENODE>
+          Candidate flashblocks sentries and discovery bootnodes.
+          
+          By default, clients deterministically select `--flashblocks.max-sentry-connections` peers from this pool. The selection is stable for a persisted P2P identity and evenly distributes clients across the pool. Every candidate is retained as a UDP discovery bootnode, including sentries that are not selected for RLPx.
+          
+          [env: FLASHBLOCKS_SENTRY_PEERS=]
+
+      --flashblocks.max-sentry-connections <MAX_SENTRY_CONNECTIONS>
+          Maximum number of candidate flashblocks sentries maintained as trusted RLPx peers.
+          
+          Set this to at least the sentry pool size for builders that must connect to every sentry.
+          
+          [env: FLASHBLOCKS_MAX_SENTRY_CONNECTIONS=]
+          [default: 1]
 
       --flashblocks.max-send-peers <MAX_SEND_PEERS>
           Override the flashblocks send-set size
@@ -523,10 +550,18 @@ Kona P2P:
           
           [env: KONA_L1_SLOT_DURATION_OVERRIDE=]
 
+      --witness.collect
+          Enable live pre-image witness collection for the proof system
+
+      --witness.depth <DEPTH>
+          Ring-buffer depth: the maximum number of recent block witnesses retained in the in-memory cache served over `debug_collectRangeWitness`
+          
+          [default: 1024]
+
       --tx-peers <PEER_ID>
           Comma-separated list of peer IDs to which transactions should be propagated
 
       --worldchain.disable-bootnodes
-          Disable the default World Chain bootnodes
+          Disable the default World Chain flashblocks sentries
 
 ```

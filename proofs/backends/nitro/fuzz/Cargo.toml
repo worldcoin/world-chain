@@ -1,0 +1,30 @@
+[package]
+name = "world-chain-proof-nitro-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+world-chain-proof-nitro-enclave = { path = "../enclave" }
+
+[[bin]]
+name = "attestation_parse"
+path = "fuzz_targets/attestation_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "attestation_verify"
+path = "fuzz_targets/attestation_verify.rs"
+test = false
+doc = false
+bench = false
+
+# Fuzz targets need their own lockfile and libfuzzer's sanitizer flags, so this crate is
+# deliberately outside the parent workspace.
+[workspace]

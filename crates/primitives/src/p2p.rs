@@ -345,6 +345,48 @@ impl Authorized {
             .map_err(|_| FlashblocksError::InvalidBuilderSig)
     }
 
+    /// Parses a frame without decoding the message body.
+    ///
+    /// Only the fixed-size authorization and signature are decoded, so an unauthenticated peer
+    /// cannot force an unbounded allocation before [`AuthorizedParts::verify`] runs. The network
+    /// path must use this rather than [`Decodable::decode`].
+    pub fn parse<'a>(buf: &mut &'a [u8]) -> Result<AuthorizedParts<'a>, FlashblocksError> {
+        let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString.into());
+        }
+        let body = &buf[..header.payload_length];
+
+        // 1. payload — sized from its header alone, decoded only once the signatures check out
+        let mut cursor = body;
+        let msg_header = Header::decode(&mut cursor)?;
+        if !msg_header.list {
+            return Err(alloy_rlp::Error::Custom("AuthorizedMsg must be an RLP list").into());
+        }
+        let msg_len = body.len() - cursor.len() + msg_header.payload_length;
+
+        // 2. authorization
+        let after_msg = &body[msg_len..];
+        let mut rest = after_msg;
+        let authorization = Authorization::decode(&mut rest)?;
+        let signed_len = msg_len + (after_msg.len() - rest.len());
+
+        // 3. builder signature
+        let sig_bytes = Bytes::decode(&mut rest)?;
+        let actor_sig = Signature::try_from(sig_bytes.as_ref())
+            .map_err(|_| alloy_rlp::Error::Custom("bad signature"))?;
+
+        // advance caller's cursor
+        *buf = &buf[header.payload_length..];
+
+        Ok(AuthorizedParts {
+            authorization,
+            actor_sig,
+            msg: &body[..msg_len],
+            signed: &body[..signed_len],
+        })
+    }
+
     /// Converts this `Authorized` message into a type-safe `AuthorizedPayload<T>` without verification.
     ///
     /// This is an unchecked conversion that bypasses type checking. The caller must ensure
@@ -444,6 +486,56 @@ impl Decodable for Authorized {
     }
 }
 
+/// An [`Authorized`] frame whose fixed-size fields are decoded but whose message body is not.
+#[derive(Clone, Debug)]
+pub struct AuthorizedParts<'a> {
+    /// The authorization that grants permission to send this message.
+    pub authorization: Authorization,
+    /// The signature of the actor, made over the hash of the message and authorization.
+    pub actor_sig: Signature,
+    /// RLP-encoded [`AuthorizedMsg`], left undecoded until the signatures verify.
+    msg: &'a [u8],
+    /// `rlp(msg) || rlp(authorization)` — the actor signature preimage, contiguous on the wire.
+    signed: &'a [u8],
+}
+
+impl AuthorizedParts<'_> {
+    /// Verifies the authorizer and actor signatures.
+    pub fn verify(&self, authorizer_vk: VerifyingKey) -> Result<(), FlashblocksError> {
+        self.authorization.verify(authorizer_vk)?;
+
+        let hash = blake3::hash(self.signed);
+        self.authorization
+            .builder_vk
+            .verify(hash.as_bytes(), &self.actor_sig)
+            .map_err(|_| FlashblocksError::InvalidBuilderSig)
+    }
+
+    /// Decodes the message body. Only call once [`Self::verify`] has succeeded.
+    pub fn into_authorized(self) -> Result<Authorized, FlashblocksError> {
+        Ok(Authorized {
+            msg: AuthorizedMsg::decode(&mut &self.msg[..])?,
+            authorization: self.authorization,
+            actor_sig: self.actor_sig,
+        })
+    }
+}
+
+/// A parsed [`FlashblocksP2PMsg`] whose [`Authorized`] body is still undecoded.
+#[derive(Clone, Debug)]
+pub enum FlashblocksP2PMsgParts<'a> {
+    /// An authorized message, pending signature verification.
+    Authorized(Box<AuthorizedParts<'a>>),
+    /// Requests that the remote peer begin forwarding flashblocks to us.
+    RequestFlashblocks,
+    /// Accepts a previously sent [`Self::RequestFlashblocks`] request.
+    AcceptFlashblocks,
+    /// Rejects a previously sent [`Self::RequestFlashblocks`] request.
+    RejectFlashblocks,
+    /// Sent by a receiver to terminate an active flashblocks feed from a sender.
+    CancelFlashblocks,
+}
+
 impl FlashblocksP2PMsg {
     pub fn encode(&self) -> BytesMut {
         let mut buf = BytesMut::new();
@@ -460,6 +552,28 @@ impl FlashblocksP2PMsg {
         buf
     }
 
+    /// Parses a wire frame, deferring the unbounded `Authorized` body decode until
+    /// [`AuthorizedParts::verify`] has authenticated the sender. Use this for peer input.
+    pub fn parse(buf: &[u8]) -> Result<FlashblocksP2PMsgParts<'_>, FlashblocksError> {
+        if buf.is_empty() {
+            return Err(FlashblocksError::InputTooShort);
+        }
+        let id = buf[0];
+        let mut rest = &buf[1..];
+        match id {
+            0x00 => Ok(FlashblocksP2PMsgParts::Authorized(Box::new(
+                Authorized::parse(&mut rest)?,
+            ))),
+            0x01 => Ok(FlashblocksP2PMsgParts::RequestFlashblocks),
+            0x02 => Ok(FlashblocksP2PMsgParts::AcceptFlashblocks),
+            0x03 => Ok(FlashblocksP2PMsgParts::RejectFlashblocks),
+            0x04 => Ok(FlashblocksP2PMsgParts::CancelFlashblocks),
+            _ => Err(FlashblocksError::UnknownMessageType),
+        }
+    }
+
+    /// Decodes a frame in full. Not for peer input — use [`Self::parse`], which authenticates
+    /// before decoding the attacker-sized message body.
     pub fn decode(buf: &mut &[u8]) -> Result<Self, FlashblocksError> {
         if buf.is_empty() {
             return Err(FlashblocksError::InputTooShort);
@@ -608,18 +722,15 @@ impl Decodable for AuthorizedMsg {
 #[cfg(test)]
 mod tests {
     use crate::{
-        access_list::{FlashblockAccessList, FlashblockAccessListData},
         flashblocks::FlashblockMetadata,
         primitives::{
             ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
         },
+        test_fixtures::{decode_hex, sample_access_list_data},
     };
 
     use super::*;
 
-    use alloy_eips::eip7928::{
-        AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
-    };
     use alloy_primitives::{Address, B256, Bloom, U256};
     use alloy_rlp::{Decodable, Encodable, encode};
     use alloy_rpc_types_eth::Withdrawal;
@@ -657,40 +768,7 @@ mod tests {
             transactions: vec![Bytes::from_static(b"\xDE\xAD\xBE\xEF")],
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([0x44; 32]),
-            access_list_data: Some(FlashblockAccessListData {
-                access_list: sample_access_list(),
-                access_list_hash: B256::with_last_byte(0x4),
-            }),
-        }
-    }
-
-    fn sample_access_list() -> FlashblockAccessList {
-        FlashblockAccessList {
-            changes: vec![AccountChanges {
-                address: Address::default(),
-                storage_changes: vec![SlotChanges {
-                    slot: U256::from(0x2),
-                    changes: vec![StorageChange {
-                        block_access_index: 1,
-                        new_value: U256::from(0x3),
-                    }],
-                }],
-                code_changes: vec![CodeChange {
-                    block_access_index: 2,
-                    new_code: Bytes::from_static(b"\xCA\xFE"),
-                }],
-                storage_reads: vec![U256::from(0x4)],
-                balance_changes: vec![BalanceChange {
-                    block_access_index: 3,
-                    post_balance: U256::from(1_000_000u64),
-                }],
-                nonce_changes: vec![NonceChange {
-                    block_access_index: 4,
-                    new_nonce: 42,
-                }],
-            }],
-            max_tx_index: 5,
-            min_tx_index: 0,
+            access_list_data: Some(sample_access_list_data()),
         }
     }
 
@@ -716,6 +794,18 @@ mod tests {
             metadata: FlashblockMetadata::default(),
             base: Some(sample_base()),
         }
+    }
+
+    fn assert_p2p_msg_encoding_hex(msg: FlashblocksP2PMsg, expected_hex: &str) {
+        let expected = decode_hex(expected_hex);
+        let encoded = msg.encode();
+        let encoded: &[u8] = encoded.as_ref();
+        assert_eq!(encoded, expected.as_slice());
+
+        let mut slice = expected.as_slice();
+        let decoded = FlashblocksP2PMsg::decode(&mut slice).expect("decode pinned p2p message");
+        assert!(slice.is_empty());
+        assert_eq!(decoded, msg);
     }
 
     #[test]
@@ -856,6 +946,52 @@ mod tests {
     }
 
     #[test]
+    fn p2p_msg_encoding_regression() {
+        let (builder_sk, _) = key_pair(2);
+        let (authorization, _) = sample_authorization();
+
+        let variants = vec![
+            (
+                FlashblocksP2PMsg::Authorized(Authorized::new(
+                    &builder_sk,
+                    authorization,
+                    AuthorizedMsg::FlashblocksPayloadV1(sample_flashblocks_payload()),
+                )),
+                format!(
+                    "{}{}{}",
+                    "00f90368f902b080f902ac8800000000000000002af90201a01111111111111111111111111111111111111111111111111111111111111111a02222222222222222222222222222222222222222222222222222222222222222b90100",
+                    "00".repeat(256),
+                    "825208a03333333333333333333333333333333333333333333333333333333333333333c584deadbeefd9d8808094000000000000000000000000000000000000000080a04444444444444444444444444444444444444444444444444444444444444444f855f3f0ef940000000000000000000000000000000000000042c6c502c3c20103c104c6c503830f4240c3c2042ac5c40282cafe8005a036056e5d8e724530c6aa1548d2d40a02e385a6f874f7c94946d0899c32ab6b788e7b2266656573223a22307830227df88da05555555555555555555555555555555555555555555555555555555555555555a06666666666666666666666666666666666666666666666666666666666666666940000000000000000000000000000000000000000a077777777777777777777777777777777777777777777777777777777777777778204d28401c9c380846553f4e7826869843b9aca00f871880000000000000000846553f101a08139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394b840c9fb8b6311ebc286ef1976fe3149a1086a4349b531843241653cbd5cfefd0c3bd629a987b20d422cd4a58159cce1570b9b85209b9b8b43ec517109dfae27470db840d4a3306d8f030309df67af5a5bcf9128f8c8c0fd2fedf72b19d5f1ff067b878c5f7c432c92fa234d58aef6441508450738f2f0e1497abee89e7002722404c500",
+                ),
+            ),
+            (
+                FlashblocksP2PMsg::Authorized(Authorized::new(
+                    &builder_sk,
+                    authorization,
+                    AuthorizedMsg::StartPublish(StartPublish),
+                )),
+                "00f8b7c101f871880000000000000000846553f101a08139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394b840c9fb8b6311ebc286ef1976fe3149a1086a4349b531843241653cbd5cfefd0c3bd629a987b20d422cd4a58159cce1570b9b85209b9b8b43ec517109dfae27470db8400c121d65aa6696f6e6d2cd9a05e148f5e01b5d1d93f896357a209998d815b302dcf74ac52263f9760616d2ad5386d950189be9663cf6709accff6d23622f630f".to_string(),
+            ),
+            (
+                FlashblocksP2PMsg::Authorized(Authorized::new(
+                    &builder_sk,
+                    authorization,
+                    AuthorizedMsg::StopPublish(StopPublish),
+                )),
+                "00f8b7c102f871880000000000000000846553f101a08139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394b840c9fb8b6311ebc286ef1976fe3149a1086a4349b531843241653cbd5cfefd0c3bd629a987b20d422cd4a58159cce1570b9b85209b9b8b43ec517109dfae27470db840bf08c0a53bffe047ca4449c97bef1cf9dfc8f284cac35aeee1cd9ca9d4e80a755a5f95f59b7873c5ccea48392e439185cbee748fd765625c5d6a47216f30af03".to_string(),
+            ),
+            (FlashblocksP2PMsg::RequestFlashblocks, "01".to_string()),
+            (FlashblocksP2PMsg::AcceptFlashblocks, "02".to_string()),
+            (FlashblocksP2PMsg::RejectFlashblocks, "03".to_string()),
+            (FlashblocksP2PMsg::CancelFlashblocks, "04".to_string()),
+        ];
+
+        for (msg, expected_hex) in variants {
+            assert_p2p_msg_encoding_hex(msg, &expected_hex);
+        }
+    }
+
+    #[test]
     fn p2p_msg_unknown_type_errors() {
         let mut buf = BytesMut::new();
         buf.put_u8(0xFF); // unknown discriminator
@@ -864,5 +1000,87 @@ mod tests {
         let err =
             FlashblocksP2PMsg::decode(&mut slice).expect_err("should fail on unknown message type");
         assert_eq!(err, FlashblocksError::UnknownMessageType);
+    }
+
+    fn authorized_frame(builder_sk: &SigningKey, msg: AuthorizedMsg) -> (BytesMut, VerifyingKey) {
+        let (authorizer_sk, authorizer_vk) = key_pair(1);
+        let authorization = Authorization::new(
+            PayloadId::default(),
+            1_700_000_001,
+            &authorizer_sk,
+            builder_sk.verifying_key(),
+        );
+
+        let authorized = Authorized::new(builder_sk, authorization, msg);
+        (
+            FlashblocksP2PMsg::Authorized(authorized).encode(),
+            authorizer_vk,
+        )
+    }
+
+    fn parse_authorized(buf: &[u8]) -> AuthorizedParts<'_> {
+        match FlashblocksP2PMsg::parse(buf).expect("parse succeeds") {
+            FlashblocksP2PMsgParts::Authorized(parts) => *parts,
+            other => panic!("expected Authorized, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_then_decode_matches_eager_decode() {
+        let (builder_sk, _) = key_pair(2);
+        let (frame, authorizer_vk) =
+            authorized_frame(&builder_sk, sample_flashblocks_payload().into());
+
+        let parts = parse_authorized(&frame);
+        parts.verify(authorizer_vk).expect("signatures verify");
+        let authorized = parts.into_authorized().expect("body decodes");
+
+        let mut slice: &[u8] = &frame;
+        let expected = match FlashblocksP2PMsg::decode(&mut slice).expect("decoding succeeds") {
+            FlashblocksP2PMsg::Authorized(authorized) => authorized,
+            other => panic!("expected Authorized, got {other:?}"),
+        };
+        assert_eq!(authorized, expected);
+    }
+
+    #[test]
+    fn parse_rejects_tampered_msg_body() {
+        let (builder_sk, _) = key_pair(2);
+        let (frame, authorizer_vk) =
+            authorized_frame(&builder_sk, sample_flashblocks_payload().into());
+
+        // Flip a bit inside the sole sample transaction, leaving the frame structurally valid.
+        let mut tampered = frame.to_vec();
+        let tx = tampered
+            .windows(4)
+            .position(|w| w == [0xDE, 0xAD, 0xBE, 0xEF])
+            .expect("sample transaction present");
+        tampered[tx] ^= 0x01;
+
+        let parts = parse_authorized(&tampered);
+        assert_eq!(
+            parts.verify(authorizer_vk),
+            Err(FlashblocksError::InvalidBuilderSig),
+        );
+    }
+
+    #[test]
+    fn parse_rejects_unauthorized_builder_before_decoding_body() {
+        // A well-formed frame whose transaction list is far larger than any real flashblock.
+        let mut payload = sample_flashblocks_payload();
+        payload.diff.transactions = vec![Bytes::new(); 100_000];
+
+        let (unauthorized_sk, _) = key_pair(9);
+        let (frame, _) = authorized_frame(&unauthorized_sk, payload.into());
+        let (_, authorizer_vk) = key_pair(3);
+
+        let parts = parse_authorized(&frame);
+        assert_eq!(
+            parts.verify(authorizer_vk),
+            Err(FlashblocksError::InvalidAuthorizerSig),
+        );
+
+        // The frame itself is valid, so only the failed verification stopped the body decode.
+        parts.into_authorized().expect("body would have decoded");
     }
 }

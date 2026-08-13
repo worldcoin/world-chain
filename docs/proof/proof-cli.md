@@ -9,7 +9,7 @@ world-chain-prover-sp1 <COMMAND>
 Commands:
   hash-rollup-config   Print the rollup config hash used in proofs
   witness              Build and serialize a witness to a file
-  execute              Execute the SP1 range program locally
+  execute              Estimate SP1 range PGUs without generating a proof
   prove                Generate range + aggregation proofs
   vkeys                Compute the SP1 verification keys
 ```
@@ -21,6 +21,8 @@ Commands:
   hash-rollup-config   Print the rollup config hash used in proofs
   witness              Build and serialize a witness to a file
   prove                Generate witness and send it to a Nitro enclave
+  get-attestation      Fetch a bare attestation from a running enclave
+  register             Register the enclave's generated key on-chain
 ```
 
 ## Building
@@ -49,11 +51,10 @@ All RPC flags accept an environment variable fallback. The full set used across 
 | `ROLLUP_CONFIG_HASH` | `--rollup-config-hash` | Rollup config hash override |
 | `L1_HEAD` | `--l1-head` | L1 head hash override |
 | `NETWORK` | `--network` | `worldchain` (default) or `worldchain-sepolia` |
-| `RANGE_ELF_PATH` | `--range-elf` | SP1 range program ELF path |
-| `AGG_ELF_PATH` | `--agg-elf` | SP1 aggregation program ELF path |
 | `SP1_PROVER` | `--prover` | SP1 backend: `cpu`, `network`, or `mock` |
-| `SP1_PRIVATE_KEY` | — | Required for `--prover network` (sp1-sdk) |
+| `SP1_PRIVATE_KEY` | `--sp1-private-key` | Required for `--prover network` (sp1-sdk) |
 | `ENCLAVE_CID` | `--cid` | vsock CID of the running Nitro enclave |
+| `ENCLAVE_PORT` | `--port` | vsock port of the running Nitro enclave |
 | `PCR0` / `PCR1` / `PCR2` | `--pcr0/1/2` | Expected Nitro PCR measurements |
 
 A `.env` file in the working directory is loaded automatically.
@@ -141,41 +142,58 @@ world-chain-prover-sp1 <COMMAND>
 Commands:
   hash-rollup-config   Print the rollup config hash used in proofs
   witness              Build and serialize a witness to a file
-  execute   Execute the SP1 range program locally (no ZK proof)
-  prove     End-to-end range + aggregation proof from RPC
-  vkeys     Compute the on-chain verification keys
+  execute              Estimate SP1 range PGUs without generating a proof
+  prove                End-to-end range + aggregation proof from RPC
+  vkeys                Compute the on-chain verification keys
 ```
 
 ### `execute`
 
-Runs the SP1 range program in non-proving execution mode against a pre-built witness file. Fast —
-useful for checking the program terminates and inspecting cycle counts before committing to a full
-proof.
+Builds a witness for the requested block range in memory, then executes the embedded production
+range ELF locally with SP1 gas calculation enabled. It does not generate or submit a proof and does
+not require an SP1 private key.
 
 ```
-world-chain-prover-sp1 execute --witness <FILE> --elf <FILE>
+world-chain-prover-sp1 execute [RPC flags]
 ```
 
-| Flag | Env | Description |
-|---|---|---|
-| `--witness <FILE>` | `WITNESS_PATH` | rkyv witness produced by `world-chain-prover-sp1 witness` or `world-chain-prover-nitro witness` |
-| `--elf <FILE>` | `RANGE_ELF_PATH` | SP1 range ELF binary |
+| Flag | Env | Default | Description |
+|---|---|---|---|
+| `--start-block <N>` | — | required | Exclusive lower bound of the executed range |
+| `--end-block <N>` | — | required | Inclusive upper bound |
+| `--l2-rpc <URL>` | `L2_RPC_URL` | required | World Chain L2 execution RPC |
+| `--l1-rpc <URL>` | `L1_RPC_URL` | required | Ethereum L1 execution RPC |
+| `--l1-beacon-rpc <URL>` | `L1_BEACON_RPC_URL` | required | Ethereum L1 beacon API |
+| `--rollup-config <FILE>` | `ROLLUP_CONFIG` | — | Rollup config JSON |
+| `--rollup-config-hash <HASH>` | `ROLLUP_CONFIG_HASH` | — | Required when `--rollup-config` is omitted |
+| `--l1-head <HASH>` | `L1_HEAD` | auto-resolved | Override the L1 checkpoint head |
+| `--allow-unfinalized` | — | false | Allow executing blocks newer than the finalized L2 head |
+| `--witness-timeout-seconds <N>` | — | 900 | Maximum seconds for witness collection |
+| `--network <NAME>` | `NETWORK` | `worldchain` | `worldchain` or `worldchain-sepolia` |
 
 **Example**
 
 ```bash
 world-chain-prover-sp1 execute \
-  --witness ./witness.bin \
-  --elf     ./elf/world-chain-range-ethereum
+  --start-block 10000000 \
+  --end-block   10000010 \
+  --l2-rpc      $L2_RPC_URL \
+  --l1-rpc      $L1_RPC_URL \
+  --l1-beacon-rpc $L1_BEACON_RPC_URL \
+  --rollup-config-hash $ROLLUP_CONFIG_HASH
 ```
+
+The output includes the normalized PGU estimate used by SP1 Network as the range request's gas
+limit, plus total cycles, syscalls, and public values. This covers only the range request. The
+aggregation request, network base fee, and dynamic price per PGU are separate costs.
 
 ### `prove`
 
-Generates range proofs for N equal sub-ranges and then aggregates them into a single proof,
-entirely from RPC — no separate witness step needed.
+Generates a compressed range proof and then aggregates it into a final proof, entirely from RPC.
+No separate witness step is needed.
 
 ```
-world-chain-prover-sp1 prove [RPC flags] --range-elf <FILE> --agg-elf <FILE> [options]
+world-chain-prover-sp1 prove [RPC flags] [options]
 ```
 
 **Flags**
@@ -189,13 +207,13 @@ world-chain-prover-sp1 prove [RPC flags] --range-elf <FILE> --agg-elf <FILE> [op
 | `--l1-beacon-rpc <URL>` | `L1_BEACON_RPC_URL` | required | |
 | `--rollup-config <FILE>` | `ROLLUP_CONFIG` | — | |
 | `--rollup-config-hash <HASH>` | `ROLLUP_CONFIG_HASH` | — | |
-| `--range-elf <FILE>` | `RANGE_ELF_PATH` | required | SP1 range ELF |
-| `--agg-elf <FILE>` | `AGG_ELF_PATH` | required | SP1 aggregation ELF |
-| `--ranges <N>` | — | `1` | Number of equal sub-ranges to prove in parallel |
+| `--ranges <N>` | — | `1` | Number of sub-ranges; currently must be `1` |
 | `--prover <NAME>` | `SP1_PROVER` | `cpu` | `cpu`, `network`, or `mock` |
 | `--mode <NAME>` | — | `groth16` | Aggregation proof mode: `core`, `compressed`, `plonk`, `groth16` |
-| `--prover-address <ADDR>` | — | zero address | On-chain attribution address |
 | `--output <FILE>` | — | — | Write aggregation proof JSON to file |
+
+The range and aggregation ELFs are embedded into the SP1 prover binary at compile time —
+there are no `--range-elf` / `--agg-elf` flags. See [`elf-management.md`](./elf-management.md).
 
 **Prover backends**
 
@@ -224,8 +242,6 @@ world-chain-prover-sp1 prove \
   --l1-rpc      $L1_RPC_URL \
   --l1-beacon-rpc $L1_BEACON_RPC_URL \
   --rollup-config-hash 0x00821da4d0ba868e5... \
-  --range-elf ./elf/world-chain-range-ethereum \
-  --agg-elf   ./elf/world-chain-aggregation \
   --prover    mock \
   --output    ./proof.json
 ```
@@ -238,41 +254,32 @@ export SP1_PRIVATE_KEY=<your key>
 world-chain-prover-sp1 prove \
   --start-block 10000000 \
   --end-block   10001000 \
-  --ranges      4 \
   --l2-rpc      $L2_RPC_URL \
   --l1-rpc      $L1_RPC_URL \
   --l1-beacon-rpc $L1_BEACON_RPC_URL \
   --rollup-config-hash 0x00821da4d0ba868e5... \
-  --range-elf ./elf/world-chain-range-ethereum \
-  --agg-elf   ./elf/world-chain-aggregation \
   --prover    network \
   --output    ./proof.json
 ```
 
 ### `vkeys`
 
-Computes the on-chain verification keys for the range and aggregation ELFs: the range vkey
-commitment (`multiBlockVKey` committed by the aggregation guest) and the aggregation vkey
-registered with the SP1 verifier. Runs SP1 setup locally — no proving, no RPC.
-
-The default ELF paths point at the local development output directory. Run `just build-proof-elfs`
-first, or pass paths to ELFs downloaded from a proof release.
+Computes the on-chain verification keys for the (embedded) range and aggregation ELFs: the
+range vkey commitment (`multiBlockVKey` committed by the aggregation guest) and the
+aggregation vkey. Both are pinned by the `MultiProofGame` implementation. Runs SP1 setup locally —
+no proving, no RPC, no arguments.
 
 ```
-world-chain-prover-sp1 vkeys [--range-elf <FILE>] [--agg-elf <FILE>] [--output <FILE>]
+world-chain-prover-sp1 vkeys [--output <FILE>]
 ```
 
 | Flag | Env | Default | Description |
 |---|---|---|---|
-| `--range-elf <FILE>` | `RANGE_ELF_PATH` | `proofs/succinct/elf/world-chain-range-ethereum` | SP1 range ELF |
-| `--agg-elf <FILE>` | `AGG_ELF_PATH` | `proofs/succinct/elf/world-chain-aggregation` | SP1 aggregation ELF |
 | `--output <FILE>` | — | stdout | Write the JSON here instead of stdout |
 
 **Example**
 
 ```bash
-# From the repo root, against locally generated ELFs:
-just build-proof-elfs
 just proof-vkeys
 ```
 
@@ -281,8 +288,8 @@ just proof-vkeys
   "range_vkey_commitment": "0x…",
   "aggregation_vkey": "0x…",
   "elfs": {
-    "world-chain-range-ethereum": { "path": "…", "sha256": "…" },
-    "world-chain-aggregation": { "path": "…", "sha256": "…" }
+    "world-chain-range-ethereum": { "sha256": "…" },
+    "world-chain-aggregation":    { "sha256": "…" }
   }
 }
 ```
@@ -298,20 +305,20 @@ the same instance; vsock (AF_VSOCK) is Linux-only and does not cross machine bou
 
 ### 1. Build the Docker image
 
-Run from the repo root. The Dockerfile at `proofs/nitro/Dockerfile` compiles the enclave
+Run from the repo root. The Dockerfile at `proofs/backends/nitro/Dockerfile` compiles the enclave
 binary inside the container.
 
 ```bash
-docker build -t world-chain-nitro-enclave \
-  -f proofs/nitro/Dockerfile .
+docker build -t world-chain-proof-nitro-enclave \
+  -f proofs/backends/nitro/Dockerfile .
 ```
 
 ### 2. Package as an EIF
 
 ```bash
 nitro-cli build-enclave \
-  --docker-uri world-chain-nitro-enclave:latest \
-  --output-file world-chain-nitro-enclave.eif
+  --docker-uri world-chain-proof-nitro-enclave:latest \
+  --output-file world-chain-proof-nitro-enclave.eif
 ```
 
 `nitro-cli` prints the PCR measurements on success:
@@ -328,7 +335,7 @@ Save these — they are passed to `world-chain-prover-nitro prove` as `--pcr0/1/
 
 ```bash
 nitro-cli run-enclave \
-  --eif-path world-chain-nitro-enclave.eif \
+  --eif-path world-chain-proof-nitro-enclave.eif \
   --memory 16384 \
   --cpu-count 4 \
   --enclave-cid 16
@@ -376,7 +383,9 @@ world-chain-prover-nitro <COMMAND>
 Commands:
   hash-rollup-config   Print the rollup config hash used in proofs
   witness              Build and serialize a witness to a file
-  prove   Generate witness and send to a Nitro enclave for attested proving
+  prove                Generate witness and send to a Nitro enclave for attested proving
+  get-attestation      Fetch a bare attestation from a running enclave
+  register             Register the enclave's generated key on-chain
 ```
 
 ### `prove`
@@ -401,12 +410,15 @@ world-chain-prover-nitro prove [RPC flags] [--cid <N>] [--pcr0/1/2 <HEX>] [--out
 | `--rollup-config <FILE>` | `ROLLUP_CONFIG` | — | |
 | `--rollup-config-hash <HASH>` | `ROLLUP_CONFIG_HASH` | — | |
 | `--cid <N>` | `ENCLAVE_CID` | `16` | vsock CID of the Nitro enclave |
-| `--pcr0 <HEX>` | `PCR0` | — | Expected PCR0 (48-byte hex) |
-| `--pcr1 <HEX>` | `PCR1` | — | Expected PCR1 |
-| `--pcr2 <HEX>` | `PCR2` | — | Expected PCR2 |
-| `--output <FILE>` | — | — | Write JSON artifact (boot info + attestation doc hex) |
+| `--port <N>` | `ENCLAVE_PORT` | `5005` | vsock port the enclave listens on |
+| `--pcr0 <HEX>` | `PCR0` | — | Expected PCR0 (48-byte hex) — required |
+| `--pcr1 <HEX>` | `PCR1` | — | Expected PCR1 — required |
+| `--pcr2 <HEX>` | `PCR2` | — | Expected PCR2 — required |
+| `--output <FILE>` | — | — | Write JSON artifact (transition public values + attestation doc hex) |
 
-All three of `--pcr0/1/2` are required so the host can verify the enclave image.
+All three of `--pcr0`, `--pcr1`, and `--pcr2` must be provided; providing only a subset is
+an error. PCR values are the hex-encoded 48-byte enclave measurements that identify the
+exact EIF image running in the Nitro enclave.
 
 **Example**
 
@@ -429,7 +441,146 @@ The output JSON has the shape:
 
 ```json
 {
-  "bootInfo": { "l1Head": "0x...", "l2PreRoot": "0x...", "l2PostRoot": "0x...", "l2BlockNumber": 10000100, "rollupConfigHash": "0x..." },
+  "transitionPublicValues": { "l1Head": "0x...", "l2PreRoot": "0x...", "l2PreBlockNumber": 10000000, "l2PostRoot": "0x...", "l2PostBlockNumber": 10000100, "rollupConfigHash": "0x..." },
   "attestationDoc": "0x<hex-encoded COSE_Sign1 bytes>"
 }
 ```
+
+### `get-attestation`
+
+Fetches a bare NSM attestation document from a running Nitro enclave. No proof is generated
+and no RPC endpoints are required — the enclave simply calls its NSM device and returns the
+raw `COSE_Sign1` bytes. Connects to CID 16 on the default vsock port (5005) and prints the
+hex-encoded attestation to stdout.
+
+This is primarily used for the **CertManager pre-warm** workflow (see below).
+
+**Requires:** Linux host with AF_VSOCK support and a running Nitro enclave.
+
+```
+world-chain-prover-nitro get-attestation
+```
+
+This subcommand takes no flags.
+
+**Example**
+
+```bash
+cargo run -p world-chain-prover-nitro -- get-attestation > /tmp/attestation.hex
+```
+
+### `register`
+
+Registers the enclave's **generated** secp256k1 signing key on-chain so that
+`NitroProofVerifier` will accept the proofs this enclave produces. This automates what was
+previously a manual `cast` sequence:
+
+1. Fetch a `public_key`-embedding attestation from the running enclave over vsock (the
+   enclave's `PublicKey` request — **not** the bare `get-attestation`).
+2. Decode it into the `attestationTbs` + P-384 `signature` (same bytes as the on-chain
+   `NitroValidator.decodeAttestationTbs`) and compute the P-384 attestation hints (reusing
+   the `p384-hints` library).
+3. Submit `registerKey(attestationTbs, signature, attestationSigHints)` to
+   `NitroEnclaveKeyRegistry` and confirm `isSignerRegistered` afterwards.
+
+The command is **idempotent**: if the key is already registered it logs and exits 0. It is
+also available on the long-running worker as `nitro-worker register` and as a startup hook
+(`nitro-worker run --auto-register`); the `just proof-register-key <env>` recipe wraps the
+in-pod invocation.
+
+> **Prerequisites:** CertManager must be pre-warmed and the enclave PCR set approved on
+> `NitroAttestationVerifier` (see the `just proof-setup` / `just proof-*` recipes). `registerKey`
+> is **not** owner-gated — any funded L1 key can call it; authorization is enforced
+> cryptographically via the attestation + the owner-approved PCR allowlist.
+
+**Requires:** Linux host with AF_VSOCK support and a running Nitro enclave.
+
+```
+world-chain-prover-nitro register \
+  --registry <NitroEnclaveKeyRegistry address> \
+  --l1-rpc <L1 RPC URL> \
+  [--private-key <hex> | --kms-key-id <ID>] \
+  [--cid <N>] [--port <N>] [--pcr0/1/2 <HEX>]
+```
+
+| Flag | Env | Default | Description |
+|---|---|---|---|
+| `--registry <ADDR>` | `NITRO_ENCLAVE_KEY_REGISTRY` | required | `NitroEnclaveKeyRegistry` address on L1 |
+| `--l1-rpc <URL>` | `L1_RPC_URL` | required | L1 execution RPC to submit `registerKey` to |
+| `--private-key <HEX>` | `REGISTER_PRIVATE_KEY` | falls back to `PRIVATE_KEY` | Local funding key for the tx (not owner-gated) |
+| `--kms-key-id <ID>` | `REGISTER_KMS_KEY_ID` | — | AWS KMS key ID or alias for the funding account |
+| `--cid <N>` | `ENCLAVE_CID` | `16` | vsock CID of the Nitro enclave |
+| `--port <N>` | `ENCLAVE_PORT` | `5005` | vsock port the enclave listens on |
+| `--pcr0/1/2 <HEX>` | `PCR0`/`PCR1`/`PCR2` | — | Optional; when all three are set the attestation is verified host-side before submission |
+
+**Example**
+
+```bash
+world-chain-prover-nitro register \
+  --registry  0x<NitroEnclaveKeyRegistry> \
+  --l1-rpc    $L1_RPC_URL \
+  --private-key $REGISTER_PRIVATE_KEY
+# enclave key registered on-chain (tx 0x...)
+```
+
+For AWS KMS, set `REGISTER_KMS_KEY_ID` instead of `REGISTER_PRIVATE_KEY`; the standard AWS
+SDK credential and region providers are used. The KMS key must be an asymmetric
+`ECC_SECG_P256K1` signing key, and the worker's AWS identity needs `kms:GetPublicKey` and
+`kms:Sign`. Configure exactly one dedicated signer. The legacy `PRIVATE_KEY` fallback is
+consulted only when neither dedicated signer is set, so a KMS key ID can be used in environments
+that still define `PRIVATE_KEY` for unrelated tooling.
+
+The worker exposes the same choice through `nitro-worker register --kms-key-id` and through
+`nitro-worker run --auto-register --register-kms-key-id`.
+
+---
+
+## CertManager pre-warm workflow
+
+When deploying the Nitro proof system from scratch, the `CertManager` contract on L1 must
+be pre-warmed with the AWS Nitro CA certificate chain **before** any `registerKey` call can
+succeed. This creates a chicken-and-egg problem: to register an enclave's key you need the
+CA chain on-chain, and to get the CA chain you need a real attestation document from a
+running enclave.
+
+The `get-attestation` subcommand solves this by providing a lightweight way to obtain an
+attestation document without running a full proof.
+
+### Step 1 — Start the enclave
+
+Build and run the Nitro enclave as described in the [Running the Nitro enclave](#running-the-nitro-enclave)
+section above.
+
+### Step 2 — Fetch the attestation document
+
+```bash
+cargo run -p world-chain-prover-nitro -- get-attestation > /tmp/attestation.hex
+```
+
+The file contains the hex-encoded `COSE_Sign1` attestation bytes.
+
+### Step 3 — Pre-warm CertManager
+
+Pipe the attestation into the `hinted_attestation_calls.js` tool to extract the CA chain
+and submit it to `CertManager`:
+
+```bash
+cat /tmp/attestation.hex | xargs -I{} node tools/hinted_attestation_calls.js prepare \
+  --attestation {} \
+  --cert-manager 0x<CertManager address>
+```
+
+### Step 4 — Approve PCR set (Phase 3)
+
+Once the CA chain is registered, complete the setup by approving the enclave's PCR
+measurements:
+
+```bash
+node tools/hinted_attestation_calls.js approvePCRSet \
+  --pcr0 $PCR0 \
+  --pcr1 $PCR1 \
+  --pcr2 $PCR2 \
+  --cert-manager 0x<CertManager address>
+```
+
+After this, `registerKey` calls from the enclave will succeed.

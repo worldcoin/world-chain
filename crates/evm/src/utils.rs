@@ -1,7 +1,10 @@
 use alloy_eips::Encodable2718;
 use op_revm::estimate_tx_compressed_size;
 use reth_optimism_payload_builder::config::OpBuilderConfig;
-use revm_database::states::reverts::{AccountInfoRevert, Reverts};
+use revm_database::{
+    BundleState, CacheState,
+    states::reverts::{AccountInfoRevert, Reverts},
+};
 use std::collections::{HashMap, hash_map::Entry};
 
 /// Flattens a multi-transition [`Reverts`] into a single transition, merging per-account data.
@@ -46,6 +49,32 @@ pub fn flatten_reverts(reverts: &Reverts) -> Reverts {
     // Transform the map into a vec
     let flattened = per_account.into_iter().collect();
     Reverts::new(vec![flattened])
+}
+
+/// Converts a previously committed flashblock bundle into an execution cache prestate.
+///
+/// The new flashblock should produce its own fresh [`BundleState`]. Once execution finishes,
+/// compose that bundle with the committed one through [`BundleState::extend`].
+pub fn cache_prestate_from_bundle(bundle: &BundleState) -> CacheState {
+    CacheState {
+        accounts: bundle
+            .state
+            .iter()
+            .map(|(address, account)| (*address, account.into()))
+            .collect(),
+        contracts: bundle.contracts.clone(),
+    }
+}
+
+/// Appends a newly executed flashblock bundle to the already committed bundle.
+pub fn extend_flashblock_bundle(
+    committed_bundle: &BundleState,
+    next_bundle: BundleState,
+) -> BundleState {
+    let mut bundle = committed_bundle.clone();
+    bundle.extend(next_bundle);
+    bundle.reverts = flatten_reverts(&bundle.reverts);
+    bundle
 }
 
 /// Returns the local tx-selection gas limit for a payload build.

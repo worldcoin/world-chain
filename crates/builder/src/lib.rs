@@ -27,15 +27,14 @@
 //! - [`payload_builder`] - Main payload builder implementing [`FlashblocksPayloadBuilder`]
 //! - `world_chain_evm::execution` - Block execution builders
 //!
-//! ### Database Layer
+//! ### BAL Execution
 //!
-//! - `world_chain_state::database::bal_builder_db` - Database wrapper that constructs BAL during execution
-//! - `world_chain_state::database::temporal_db` - Time-indexed database views for parallel validation
-//! - `world_chain_state::database::bundle_db` - Bundle state overlay for incremental execution
+//! - Upstream `revm_database::State` BAL builders construct flashblock BAL sidecars
+//! - Upstream `revm::state::bal::Bal` powers BAL-driven validation workers
 //!
 //! ### Supporting Modules
 //!
-//! - `world_chain_state::access_list` - BAL construction and serialization utilities
+//! - `world_chain_primitives::access_list` - Flashblock BAL sidecar serialization utilities
 //! - [`assembler`] - Block assembly from execution results
 //! - [`traits`] - Abstractions for payload building contexts and builders
 //! - [`payload_txns`] - Transaction iteration with deduplication for incremental builds
@@ -94,15 +93,13 @@
 //! - **Nonce changes**: Account nonce updates per transaction
 //! - **Code changes**: Contract deployments per transaction
 //!
-//! The BAL enables validators to construct a [`TemporalDb`] that provides each transaction
-//! with a view of state as it existed at that point in execution, allowing parallel
-//! re-execution without sequential dependency resolution.
+//! The BAL enables validators to install upstream revm BAL state for speculative transaction
+//! execution. Canonical validation state rebuilds the BAL and commits ordered worker outputs.
 //!
 //! [`PayloadBuilder`]: reth_basic_payload_builder::PayloadBuilder
 //! [`FlashblocksPayloadBuilder`]: payload_builder::FlashblocksPayloadBuilder
 //! [`FlashblockPayloadBuilder::try_build_with_precommit`]: traits::payload_builder::FlashblockPayloadBuilder::try_build_with_precommit
 //! [`BalBlockBuilder`]: world_chain_evm::execution::bal::BalBlockBuilder
-//! [`TemporalDb`]: world_chain_state::database::temporal_db::TemporalDb
 
 mod execution_context;
 

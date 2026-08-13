@@ -166,9 +166,21 @@ impl WorldChainSpecBuilder {
         self
     }
 
+    /// Enable Karst at genesis.
+    pub fn karst_activated(mut self) -> Self {
+        self = self.jovian_activated();
+        self.inner = self
+            .inner
+            .with_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(WorldChainHardfork::Karst, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Enable Tropo at genesis.
     pub fn tropo_activated(mut self) -> Self {
-        self = self.jovian_activated();
+        self = self.karst_activated();
         self.inner = self
             .inner
             .with_fork(WorldChainHardfork::Tropo, ForkCondition::Timestamp(0));

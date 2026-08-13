@@ -11,7 +11,6 @@ world-chain-primitives.workspace = true
 world-chain-pool.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-evm.workspace = true
-world-chain-state.workspace = true
 
 # reth
 reth-basic-payload-builder.workspace = true

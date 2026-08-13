@@ -89,6 +89,13 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         Ok(vec![None; versioned_hashes.len()])
     }
 
+    fn has_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<bool>, BlobStoreError> {
+        Ok(vec![false; versioned_hashes.len()])
+    }
+
     fn get_pending_transactions_with_predicate(
         &self,
         _predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,

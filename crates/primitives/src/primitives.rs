@@ -234,7 +234,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::access_list::FlashblockAccessList;
+    use crate::test_fixtures::{decode_hex, sample_access_list_data};
 
     use super::*;
     use alloy_rlp::{Decodable, encode};
@@ -250,17 +250,6 @@ mod tests {
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([4u8; 32]),
             access_list_data: Some(sample_access_list_data()),
-        }
-    }
-
-    fn sample_access_list_data() -> FlashblockAccessListData {
-        FlashblockAccessListData {
-            access_list: FlashblockAccessList {
-                changes: vec![],
-                max_tx_index: 0,
-                min_tx_index: 0,
-            },
-            access_list_hash: B256::with_last_byte(0x4),
         }
     }
 
@@ -319,6 +308,32 @@ mod tests {
 
         let mut slice = encoded.as_ref();
         let decoded = FlashblocksPayloadV1::decode(&mut slice).expect("decode succeeds");
+        assert_eq!(original, decoded);
+        assert!(slice.is_empty());
+    }
+
+    #[test]
+    fn rlp_with_base_and_bal_is_pinned() {
+        let original = FlashblocksPayloadV1 {
+            payload_id: PayloadId::default(),
+            index: 42,
+            diff: sample_diff(),
+            metadata: serde_json::json!({ "foo": 1, "bar": [1, 2, 3] }),
+            base: Some(sample_base()),
+        };
+
+        let expected_rlp = decode_hex(&format!(
+            "{}{}{}",
+            "f902b68800000000000000002af90201a00101010101010101010101010101010101010101010101010101010101010101a00202020202020202020202020202020202020202020202020202020202020202b90100",
+            "00".repeat(256),
+            "825208a00303030303030303030303030303030303030303030303030303030303030303c584deadbeefd9d8808094000000000000000000000000000000000000000080a00404040404040404040404040404040404040404040404040404040404040404f855f3f0ef940000000000000000000000000000000000000042c6c502c3c20103c104c6c503830f4240c3c2042ac5c40282cafe8005a036056e5d8e724530c6aa1548d2d40a02e385a6f874f7c94946d0899c32ab6b78977b22626172223a5b312c322c335d2c22666f6f223a317df88ea00505050505050505050505050505050505050505050505050505050505050505a00606060606060606060606060606060606060606060606060606060606060606940000000000000000000000000000000000000000a007070707070707070707070707070707070707070707070707070707070707077b8401c9c380846553f1008568656c6c6f843b9aca00",
+        ));
+        let encoded = encode(&original);
+        let encoded: &[u8] = encoded.as_ref();
+        assert_eq!(encoded, expected_rlp.as_slice());
+
+        let mut slice = expected_rlp.as_ref();
+        let decoded = FlashblocksPayloadV1::decode(&mut slice).expect("decode pinned payload");
         assert_eq!(original, decoded);
         assert!(slice.is_empty());
     }

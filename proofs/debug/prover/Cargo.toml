@@ -1,0 +1,27 @@
+[package]
+name = "world-chain-prover"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+alloy-primitives.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+kona-genesis.workspace = true
+reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
+rkyv.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+world-chain-chainspec.workspace = true
+world-chain-proof-core.workspace = true
+world-chain-proof-kona-host.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

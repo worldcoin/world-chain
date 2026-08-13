@@ -5,8 +5,8 @@ use crate::{
     observability::ObservabilityConfig,
 };
 
-/// OP contract artifacts supported by the pinned op-deployer image.
-pub const DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR: &str = "tag://op-contracts/v3.0.0-rc.2";
+/// OP contract artifacts embedded in the pinned op-deployer image.
+pub const DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR: &str = "embedded";
 
 const DEFAULT_DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
@@ -33,11 +33,11 @@ impl Default for OpStackImages {
         Self {
             op_node: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/kona-node",
-                "v1.5.0",
+                "v1.6.1",
             ),
             op_deployer: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-deployer",
-                "v0.4.0-rc.2",
+                "v0.7.1",
             ),
             op_batcher: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher",
@@ -49,7 +49,7 @@ impl Default for OpStackImages {
             ),
             op_challenger: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-challenger",
-                "develop",
+                "v1.9.3",
             ),
             op_conductor: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-conductor",
@@ -111,12 +111,11 @@ impl WorldContractsDeploymentConfig {
         let mut contracts = Vec::new();
         if self.proof_system {
             contracts.extend([
-                "WorldChainAnchorStateRegistry",
-                "WorldChainProofSystemFactory",
+                "MultiProofGame(WIP_1006)",
+                "DelayedWETH(WIP_1006)",
                 "MockRootIdVerifier(VALIDITY_PROOF)",
                 "MockRootIdVerifier(TEE_ATTESTATION)",
                 "MockRootIdVerifier(SECURITY_COUNCIL)",
-                "MockStakingRegistry",
             ]);
         }
         if self.fee_vaults {
@@ -564,14 +563,14 @@ mod tests {
     }
 
     #[test]
-    fn default_op_contract_locator_uses_supported_tag_scheme() {
+    fn default_op_contract_locator_uses_embedded_artifacts() {
         assert_eq!(
             OpContractDeploymentConfig::default().l1_artifacts_locator,
-            "tag://op-contracts/v3.0.0-rc.2"
+            "embedded"
         );
         assert_eq!(
             OpContractDeploymentConfig::default().l2_artifacts_locator,
-            "tag://op-contracts/v3.0.0-rc.2"
+            "embedded"
         );
     }
 

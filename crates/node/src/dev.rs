@@ -47,6 +47,7 @@ where
                 .chain_spec
                 .is_amsterdam_active_at_timestamp(timestamp)
                 .then_some(0),
+            target_gas_limit: None,
         };
 
         // Dummy system transaction for dev mode.

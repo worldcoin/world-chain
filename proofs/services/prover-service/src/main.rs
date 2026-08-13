@@ -1,0 +1,92 @@
+//! `world-chain-prover-service` binary: hosts the proof-request JSON-RPC queue that sits
+//! between the defender (which requests proofs) and the proof workers (which lease and prove
+//! them).
+//!
+//! Mirrors the in-process prover-service wired by the devnet harness
+//! (`crates/devnet/src/full_stack.rs::start_prover_service`), reading its configuration
+//! from flags/environment so it can run as a standalone service.
+
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use tracing::info;
+use world_chain_prover_service::{
+    ProverService, ProverServiceConfig, run_status_poller, start_rpc_server,
+};
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "world-chain-prover-service",
+    about = "World Chain proof-request queue: serves proof jobs to SP1 workers over JSON-RPC"
+)]
+struct Cli {
+    /// Address the JSON-RPC server binds to.
+    #[arg(long, env = "LISTEN_ADDR", default_value = "0.0.0.0:8080")]
+    listen_addr: SocketAddr,
+
+    /// Postgres connection URL for durable prover-service state.
+    #[arg(long, env = "PROVER_SERVICE_DATABASE_URL")]
+    database_url: String,
+
+    /// Seconds a worker holds a job lease before it is re-queued.
+    #[arg(long, env = "LEASE_TIMEOUT_SECONDS", default_value_t = 1800)]
+    lease_timeout_seconds: u64,
+
+    /// Maximum proving attempts (leases) per request before it is failed.
+    #[arg(long, env = "MAX_ATTEMPTS", default_value_t = 3)]
+    max_attempts: u32,
+
+    /// Maximum proving retries per request before it is failed.
+    #[arg(long, env = "MAX_RETRIES", default_value_t = 3)]
+    max_retries: u32,
+
+    /// Seconds to wait before polling an unchanged backend job again.
+    #[arg(long, env = "BACKEND_POLL_INTERVAL_SECONDS", default_value_t = 30)]
+    backend_poll_interval_seconds: u64,
+
+    /// Seconds between scans that fail proof requests after exhausted attempts.
+    #[arg(long, env = "STATUS_POLLER_INTERVAL_SECS", default_value_t = 30)]
+    status_poller_interval_secs: u64,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    dotenvy::dotenv().ok();
+    let _telemetry_guard = telemetry_batteries::init()
+        .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
+    world_chain_proof_metrics::describe_metrics();
+
+    let cli = Cli::parse();
+
+    let config = ProverServiceConfig {
+        lock_timeout: Duration::from_secs(cli.lease_timeout_seconds),
+        max_attempts: cli.max_attempts,
+        backend_poll_interval: Duration::from_secs(cli.backend_poll_interval_seconds),
+        max_retries: cli.max_retries,
+        status_poller_interval: Duration::from_secs(cli.status_poller_interval_secs),
+    };
+    let status_poller_interval = config.status_poller_interval;
+    let service = Arc::new(
+        ProverService::connect(&cli.database_url, config)
+            .await
+            .context("failed to initialize postgres-backed prover-service")?,
+    );
+    let (addr, handle) = start_rpc_server(cli.listen_addr, Arc::clone(&service))
+        .await
+        .context("failed to start prover-service RPC server")?;
+
+    let status_poller = tokio::spawn(run_status_poller(service, status_poller_interval));
+
+    info!(listen_addr = %addr, "world-chain prover-service started");
+
+    tokio::select! {
+        _ = handle.clone().stopped() => info!("prover-service RPC server stopped"),
+        _ = tokio::signal::ctrl_c() => {
+            info!("received ctrl-c, shutting down");
+            let _ = handle.stop();
+        }
+    }
+    status_poller.abort();
+    Ok(())
+}

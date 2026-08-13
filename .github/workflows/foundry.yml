@@ -4,13 +4,20 @@ permissions: {}
 
 on:
   push:
+    branches: [main]
+    paths:
+      - "pkg/contracts/**"
+      - ".gitmodules"
+      - ".github/workflows/foundry.yml"
   pull_request:
+    paths:
+      - "pkg/contracts/**"
+      - ".gitmodules"
+      - ".github/workflows/foundry.yml"
   workflow_dispatch:
 
 env:
   FOUNDRY_PROFILE: ci
-  WORLDCHAIN_PROVIDER: "${{ secrets.WORLDCHAIN_PROVIDER }}"
-  ETHEREUM_PROVIDER: "${{ secrets.ETHEREUM_PROVIDER }}"
 
 jobs:
   check:
@@ -22,13 +29,22 @@ jobs:
       run:
         working-directory: pkg/contracts
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-          submodules: recursive
+          fetch-depth: 1
+          submodules: true
+
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just@1.57.0
+          fallback: none
+
+      - name: Set up Solidity dependencies
+        run: just setup-contracts
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1
 
       - name: Show Forge version
         run: forge --version
@@ -36,8 +52,15 @@ jobs:
       - name: Run Forge fmt
         run: forge fmt --check
 
+      - name: Build pinned OP Stack artifacts
+        run: forge build
+        working-directory: pkg/contracts/opstack
+
       - name: Run Forge build
         run: forge build --sizes
 
       - name: Run Forge tests
         run: forge test
+        env:
+          WORLDCHAIN_PROVIDER: "${{ secrets.WORLDCHAIN_PROVIDER }}"
+          ETHEREUM_PROVIDER: "${{ secrets.ETHEREUM_PROVIDER }}"

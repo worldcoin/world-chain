@@ -24,12 +24,16 @@ world-chain-evm.workspace = true
 world-chain-kona.workspace = true
 
 reth-node-builder.workspace = true
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-api.workspace = true
 reth-chainspec.workspace = true
 reth-evm.workspace = true
 reth-optimism-chainspec.workspace = true
+reth-optimism-exex = { workspace = true, features = ["metrics"] }
 reth-optimism-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-rpc.workspace = true
+reth-optimism-trie = { workspace = true, features = ["metrics"] }
 reth-optimism-evm.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-forks.workspace = true
@@ -58,19 +62,20 @@ alloy-consensus.workspace = true
 op-alloy-consensus.workspace = true
 kona-genesis.workspace = true
 
-# Optional deps for the `test` feature (also present in [dev-dependencies] for `cargo test`).
-alloy-rpc-types-eth = { workspace = true, optional = true }
-alloy-rpc-types-engine = { workspace = true, optional = true }
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 tokio.workspace = true
 eyre.workspace = true
+futures-util.workspace = true
 tracing.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
 serde_json.workspace = true
+crossbeam-channel.workspace = true
 
 [build-dependencies]
-vergen.workspace = true
+vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }
 vergen-git2.workspace = true
 
 [dev-dependencies]
@@ -86,7 +91,3 @@ alloy-rpc-types-engine.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 
 
-[features]
-test = ["dep:alloy-rpc-types-eth", "dep:alloy-rpc-types-engine"]
-
-default = []

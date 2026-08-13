@@ -20,15 +20,12 @@ use reth_transaction_pool::TransactionPool;
 use world_chain_cli::WorldChainNodeConfig;
 use world_chain_evm::WorldChainExecutorBuilder;
 
-#[cfg(any(test, feature = "test"))]
-use {
-    op_alloy_consensus::OpTxEnvelope,
-    reth_node_api::{BlockTy, PayloadAttributesBuilder},
-    reth_node_builder::{DebugNode, FullNodeComponents},
-    reth_node_core::primitives::EthereumHardforks,
-    reth_optimism_forks::OpHardforks,
-    reth_optimism_primitives::OpPrimitives,
-};
+use op_alloy_consensus::OpTxEnvelope;
+use reth_node_api::{BlockTy, PayloadAttributesBuilder};
+use reth_node_builder::{DebugNode, FullNodeComponents};
+use reth_node_core::primitives::EthereumHardforks;
+use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::OpPrimitives;
 
 /// Primitive types for a World Chain node implementation.
 ///
@@ -208,7 +205,6 @@ where
     }
 }
 
-#[cfg(any(test, feature = "test"))]
 impl<N, T> DebugNode<N> for WorldChainNode<T>
 where
     N: FullNodeComponents<Types = Self>,

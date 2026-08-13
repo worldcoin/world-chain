@@ -1,9 +1,6 @@
 //! Shared range-proof public-value types used by all World fault-proof backends.
 
-use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
-
-use crate::boot::BootInfoPublicValues;
 
 /// World hardfork activation schedule carried by World range proof inputs.
 #[derive(
@@ -46,6 +43,9 @@ pub struct WorldRangeHardforkConfig {
     /// Jovian activation timestamp.
     #[serde(default, alias = "jovianTime")]
     pub jovian_time: Option<u64>,
+    /// Karst activation timestamp.
+    #[serde(default, alias = "karstTime")]
+    pub karst_time: Option<u64>,
     /// Tropo activation timestamp. This is a World-only fork.
     #[serde(default, alias = "tropoTime")]
     pub tropo_time: Option<u64>,
@@ -71,6 +71,7 @@ impl WorldRangeHardforkConfig {
             WorldRangeHardfork::Holocene => timestamp_active(self.holocene_time, timestamp),
             WorldRangeHardfork::Isthmus => timestamp_active(self.isthmus_time, timestamp),
             WorldRangeHardfork::Jovian => timestamp_active(self.jovian_time, timestamp),
+            WorldRangeHardfork::Karst => timestamp_active(self.karst_time, timestamp),
             WorldRangeHardfork::Tropo => timestamp_active(self.tropo_time, timestamp),
             WorldRangeHardfork::Strato => timestamp_active(self.strato_time, timestamp),
         }
@@ -81,6 +82,7 @@ impl WorldRangeHardforkConfig {
         [
             WorldRangeHardfork::Strato,
             WorldRangeHardfork::Tropo,
+            WorldRangeHardfork::Karst,
             WorldRangeHardfork::Jovian,
             WorldRangeHardfork::Isthmus,
             WorldRangeHardfork::Holocene,
@@ -130,6 +132,8 @@ pub enum WorldRangeHardfork {
     Isthmus,
     /// Jovian hardfork.
     Jovian,
+    /// Karst hardfork.
+    Karst,
     /// Tropo hardfork.
     Tropo,
     /// Strato hardfork.
@@ -159,6 +163,8 @@ pub enum WorldRangeSpecId {
     ISTHMUS,
     /// Jovian spec id.
     JOVIAN,
+    /// Karst spec id.
+    KARST,
     /// Tropo spec id.
     TROPO,
     /// Strato spec id.
@@ -178,6 +184,7 @@ impl WorldRangeSpecId {
             WorldRangeHardfork::Holocene => Self::HOLOCENE,
             WorldRangeHardfork::Isthmus => Self::ISTHMUS,
             WorldRangeHardfork::Jovian => Self::JOVIAN,
+            WorldRangeHardfork::Karst => Self::KARST,
             WorldRangeHardfork::Tropo => Self::TROPO,
             WorldRangeHardfork::Strato => Self::STRATO,
         }
@@ -196,159 +203,62 @@ impl From<WorldRangeSpecId> for &'static str {
             WorldRangeSpecId::HOLOCENE => "Holocene",
             WorldRangeSpecId::ISTHMUS => "Isthmus",
             WorldRangeSpecId::JOVIAN => "Jovian",
+            WorldRangeSpecId::KARST => "Karst",
             WorldRangeSpecId::TROPO => "Tropo",
             WorldRangeSpecId::STRATO => "Strato",
         }
     }
 }
 
-/// Claimed transition proven by the World range program.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorldRangeProofClaim {
-    /// L1 head used for the derivation pipeline.
-    pub l1_head: B256,
-    /// Agreed pre-state output root.
-    pub agreed_l2_output_root: B256,
-    /// Claimed post-state output root.
-    pub claimed_l2_output_root: B256,
-    /// Claimed post-state L2 block number.
-    pub claimed_l2_block_number: u64,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
 
-impl WorldRangeProofClaim {
-    /// Converts the claim into OP Succinct-compatible public boot values.
-    pub const fn boot_info(self, rollup_config_hash: B256) -> BootInfoPublicValues {
-        BootInfoPublicValues::new(
-            self.l1_head,
-            self.agreed_l2_output_root,
-            self.claimed_l2_output_root,
-            self.claimed_l2_block_number,
-            rollup_config_hash,
-        )
+    #[test]
+    fn parses_snake_and_camel_case_fork_times() {
+        let snake: WorldRangeHardforkConfig = serde_json::from_value(json!({
+            "jovian_time": 10,
+            "karst_time": 20,
+            "tropo_time": 30,
+            "strato_time": 40
+        }))
+        .unwrap();
+        let camel: WorldRangeHardforkConfig = serde_json::from_value(json!({
+            "jovianTime": 10,
+            "karstTime": 20,
+            "tropoTime": 30,
+            "stratoTime": 40
+        }))
+        .unwrap();
+
+        assert_eq!(snake, camel);
+        assert_eq!(snake.karst_time, Some(20));
+        assert_eq!(snake.tropo_time, Some(30));
+        assert_eq!(snake.strato_time, Some(40));
     }
-}
 
-/// Input needed to build World public values after executing the range proof.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorldRangeProofInput {
-    /// World hardfork schedule extracted from the rollup config.
-    pub schedule: WorldRangeHardforkConfig,
-    /// Claimed transition.
-    pub claim: WorldRangeProofClaim,
-    /// Timestamp of the claimed post-state L2 block.
-    pub claimed_l2_timestamp: u64,
-    /// Hash of the full rollup config, computed with OP Succinct's hashing method.
-    pub rollup_config_hash: B256,
-}
+    #[test]
+    fn activates_karst_tropo_and_strato_in_order() {
+        let config = WorldRangeHardforkConfig {
+            jovian_time: Some(10),
+            karst_time: Some(20),
+            tropo_time: Some(30),
+            strato_time: Some(40),
+            ..Default::default()
+        };
 
-impl WorldRangeProofInput {
-    /// Builds the public values expected from the range proof.
-    pub fn public_values(self) -> WorldRangeProofPublicValues {
-        let active_fork = self.schedule.active_fork_at(
-            self.claim.claimed_l2_block_number,
-            self.claimed_l2_timestamp,
+        assert_eq!(config.active_fork_at(1, 19), WorldRangeHardfork::Jovian);
+        assert_eq!(config.active_fork_at(1, 20), WorldRangeHardfork::Karst);
+        assert_eq!(config.active_fork_at(1, 30), WorldRangeHardfork::Tropo);
+        assert_eq!(config.active_fork_at(1, 40), WorldRangeHardfork::Strato);
+        assert_eq!(
+            WorldRangeSpecId::from_hardfork(config.active_fork_at(1, 20)),
+            WorldRangeSpecId::KARST
         );
-        let world_spec_id = WorldRangeSpecId::from_hardfork(active_fork);
-        WorldRangeProofPublicValues {
-            boot_info: self.claim.boot_info(self.rollup_config_hash),
-            active_fork,
-            world_spec_id,
-        }
+        assert_eq!(
+            WorldRangeSpecId::from_hardfork(config.active_fork_at(1, 40)),
+            WorldRangeSpecId::STRATO
+        );
     }
-}
-
-/// Public values emitted by the World range proof.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorldRangeProofPublicValues {
-    /// Public values that match OP Succinct's fault-proof contract inputs.
-    pub boot_info: BootInfoPublicValues,
-    /// Latest active World hardfork at the claimed L2 block.
-    pub active_fork: WorldRangeHardfork,
-    /// EVM spec id used by the proof.
-    pub world_spec_id: WorldRangeSpecId,
-}
-
-/// Validates actual public values against expected public values.
-pub fn validate_public_values(
-    expected: &WorldRangeProofPublicValues,
-    actual: &WorldRangeProofPublicValues,
-) -> Result<(), WorldRangeProofValidationError> {
-    if expected.boot_info.l1_head != actual.boot_info.l1_head {
-        return Err(WorldRangeProofValidationError::L1Head {
-            expected: expected.boot_info.l1_head,
-            actual: actual.boot_info.l1_head,
-        });
-    }
-    if expected.boot_info.l2_pre_root != actual.boot_info.l2_pre_root {
-        return Err(WorldRangeProofValidationError::L2PreRoot {
-            expected: expected.boot_info.l2_pre_root,
-            actual: actual.boot_info.l2_pre_root,
-        });
-    }
-    if expected.boot_info.l2_post_root != actual.boot_info.l2_post_root {
-        return Err(WorldRangeProofValidationError::L2PostRoot {
-            expected: expected.boot_info.l2_post_root,
-            actual: actual.boot_info.l2_post_root,
-        });
-    }
-    if expected.boot_info.l2_block_number != actual.boot_info.l2_block_number {
-        return Err(WorldRangeProofValidationError::L2BlockNumber {
-            expected: expected.boot_info.l2_block_number,
-            actual: actual.boot_info.l2_block_number,
-        });
-    }
-    if expected.boot_info.rollup_config_hash != actual.boot_info.rollup_config_hash {
-        return Err(WorldRangeProofValidationError::RollupConfigHash {
-            expected: expected.boot_info.rollup_config_hash,
-            actual: actual.boot_info.rollup_config_hash,
-        });
-    }
-    if expected.active_fork != actual.active_fork {
-        return Err(WorldRangeProofValidationError::ActiveFork {
-            expected: expected.active_fork,
-            actual: actual.active_fork,
-        });
-    }
-    if expected.world_spec_id != actual.world_spec_id {
-        return Err(WorldRangeProofValidationError::WorldSpecId {
-            expected: expected.world_spec_id,
-            actual: actual.world_spec_id,
-        });
-    }
-    Ok(())
-}
-
-/// Validation error for mismatched proof public values.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub enum WorldRangeProofValidationError {
-    /// L1 head does not match.
-    #[error("l1 head mismatch: expected {expected:?}, got {actual:?}")]
-    L1Head { expected: B256, actual: B256 },
-    /// Pre-state output root does not match.
-    #[error("pre-state output root mismatch: expected {expected:?}, got {actual:?}")]
-    L2PreRoot { expected: B256, actual: B256 },
-    /// Post-state output root does not match.
-    #[error("post-state output root mismatch: expected {expected:?}, got {actual:?}")]
-    L2PostRoot { expected: B256, actual: B256 },
-    /// Claimed L2 block number does not match.
-    #[error("l2 block number mismatch: expected {expected}, got {actual}")]
-    L2BlockNumber { expected: u64, actual: u64 },
-    /// Rollup config hash does not match.
-    #[error("rollup config hash mismatch: expected {expected:?}, got {actual:?}")]
-    RollupConfigHash { expected: B256, actual: B256 },
-    /// Active World fork does not match.
-    #[error("active fork mismatch: expected {expected:?}, got {actual:?}")]
-    ActiveFork {
-        expected: WorldRangeHardfork,
-        actual: WorldRangeHardfork,
-    },
-    /// Active World proof spec does not match.
-    #[error("world spec id mismatch: expected {expected:?}, got {actual:?}")]
-    WorldSpecId {
-        expected: WorldRangeSpecId,
-        actual: WorldRangeSpecId,
-    },
 }

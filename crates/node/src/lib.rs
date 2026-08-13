@@ -1,6 +1,5 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-#[cfg(any(test, feature = "test"))]
 mod dev;
 
 pub mod add_ons;
@@ -10,6 +9,7 @@ pub mod node;
 pub mod payload;
 pub mod payload_service;
 pub mod pool;
+pub mod proof_history;
 pub mod tx_propagation;
 pub mod version;
 

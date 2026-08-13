@@ -1,6 +1,6 @@
 //! Public boot value ABI used by range proofs and the aggregation program.
 
-use alloy_primitives::B256;
+use alloy_primitives::{B256, BlockNumber};
 use alloy_sol_types::sol;
 use kona_genesis::RollupConfig;
 use serde::{Deserialize, Serialize};
@@ -24,54 +24,23 @@ pub fn hash_rollup_config<T: Serialize + ?Sized>(
     ))
 }
 
-/// Public boot values committed by the range proof.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BootInfoPublicValues {
-    /// L1 head used by the derivation pipeline.
-    pub l1_head: B256,
-    /// Agreed pre-state L2 output root.
-    pub l2_pre_root: B256,
-    /// Claimed post-state L2 output root.
-    pub l2_post_root: B256,
-    /// Claimed post-state L2 block number.
-    pub l2_block_number: u64,
-    /// OP Succinct rollup config hash.
-    pub rollup_config_hash: B256,
-}
-
-impl BootInfoPublicValues {
-    /// Creates boot public values from proof roots and an already computed rollup config hash.
-    pub const fn new(
-        l1_head: B256,
-        l2_pre_root: B256,
-        l2_post_root: B256,
-        l2_block_number: u64,
-        rollup_config_hash: B256,
-    ) -> Self {
-        Self {
-            l1_head,
-            l2_pre_root,
-            l2_post_root,
-            l2_block_number,
-            rollup_config_hash,
-        }
-    }
-}
-
 sol! {
-    /// OP Succinct-compatible range proof public values.
+    /// Range proof public values.
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-    struct BootInfoStruct {
+    struct TransitionPublicValues {
         bytes32 l1Head;
+
         bytes32 l2PreRoot;
+        uint64 l2PreBlockNumber;
+
         bytes32 l2PostRoot;
-        uint64 l2BlockNumber;
+        uint64 l2PostBlockNumber;
+
         bytes32 rollupConfigHash;
     }
 }
 
-impl BootInfoStruct {
+impl TransitionPublicValues {
     /// Converts Kona boot info into the on-chain public values.
     ///
     /// The rollup config hash is computed from Kona's rollup config plus the
@@ -80,52 +49,18 @@ impl BootInfoStruct {
     pub fn try_from_kona_boot_info(
         boot_info: kona_proof::BootInfo,
         world_schedule: &WorldRangeHardforkConfig,
+        l2_pre_block_number: BlockNumber,
     ) -> Result<Self, RollupConfigHashError> {
         let rollup_config_hash =
             hash_world_rollup_config(&boot_info.rollup_config, world_schedule)?;
         Ok(Self {
             l1Head: boot_info.l1_head,
             l2PreRoot: boot_info.agreed_l2_output_root,
+            l2PreBlockNumber: l2_pre_block_number,
             l2PostRoot: boot_info.claimed_l2_output_root,
-            l2BlockNumber: boot_info.claimed_l2_block_number,
+            l2PostBlockNumber: boot_info.claimed_l2_block_number,
             rollupConfigHash: rollup_config_hash,
         })
-    }
-}
-
-impl From<BootInfoPublicValues> for BootInfoStruct {
-    fn from(value: BootInfoPublicValues) -> Self {
-        Self {
-            l1Head: value.l1_head,
-            l2PreRoot: value.l2_pre_root,
-            l2PostRoot: value.l2_post_root,
-            l2BlockNumber: value.l2_block_number,
-            rollupConfigHash: value.rollup_config_hash,
-        }
-    }
-}
-
-impl From<&BootInfoPublicValues> for BootInfoStruct {
-    fn from(value: &BootInfoPublicValues) -> Self {
-        Self {
-            l1Head: value.l1_head,
-            l2PreRoot: value.l2_pre_root,
-            l2PostRoot: value.l2_post_root,
-            l2BlockNumber: value.l2_block_number,
-            rollupConfigHash: value.rollup_config_hash,
-        }
-    }
-}
-
-impl From<BootInfoStruct> for BootInfoPublicValues {
-    fn from(value: BootInfoStruct) -> Self {
-        Self::new(
-            value.l1Head,
-            value.l2PreRoot,
-            value.l2PostRoot,
-            value.l2BlockNumber,
-            value.rollupConfigHash,
-        )
     }
 }
 
@@ -145,6 +80,16 @@ struct WorldRollupConfigHashInput<'a, T: Serialize + ?Sized> {
 /// that are not represented in upstream Kona's `RollupConfig`. Delegates to
 /// [`hash_world_rollup_config_generic`] and propagates serialization errors instead of
 /// panicking on malformed input.
+///
+/// # Cross-chain replay resistance
+///
+/// Kona's `RollupConfig` contains both `l1_chain_id` and `l2_chain_id` (see
+/// `kona-genesis::RollupConfig`), and both are part of the serde-serialized JSON
+/// blob hashed here. The resulting `rollupConfigHash` is therefore an implicit
+/// domain separator: a Nitro signature whose payload commits to this hash
+/// cannot be replayed on a different chain id. The on-chain
+/// `NitroProofVerifier` commitment over `TransitionPublicValues` inherits the
+/// same property without needing an explicit `chainId` field.
 pub fn hash_world_rollup_config(
     rollup_config: &RollupConfig,
     world_schedule: &WorldRangeHardforkConfig,
@@ -174,25 +119,7 @@ fn sha256_b256(bytes: &[u8]) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
     use kona_genesis::RollupConfig;
-
-    #[test]
-    fn converts_world_boot_values_to_op_succinct_struct() {
-        let values = BootInfoPublicValues::new(
-            B256::from([1; 32]),
-            B256::from([2; 32]),
-            B256::from([3; 32]),
-            42,
-            B256::from([4; 32]),
-        );
-        let boot_info = BootInfoStruct::from(&values);
-        assert_eq!(boot_info.l1Head, values.l1_head);
-        assert_eq!(boot_info.l2PreRoot, values.l2_pre_root);
-        assert_eq!(boot_info.l2PostRoot, values.l2_post_root);
-        assert_eq!(boot_info.l2BlockNumber, values.l2_block_number);
-        assert_eq!(boot_info.rollupConfigHash, values.rollup_config_hash);
-    }
 
     #[test]
     fn world_rollup_hash_changes_when_world_fork_schedule_changes() {
@@ -210,6 +137,66 @@ mod tests {
         assert_ne!(
             hash_world_rollup_config(&rollup_config, &before).unwrap(),
             hash_world_rollup_config(&rollup_config, &after).unwrap()
+        );
+    }
+
+    /// Regression test for a class of bug where a rollup config hash is computed from the raw
+    /// source JSON (e.g. via [`hash_rollup_config`]) instead of from the same
+    /// parsed-then-reserialized [`RollupConfig`] the enclave/guest commits to via
+    /// [`hash_world_rollup_config`].
+    ///
+    /// Kona's `RollupConfig` fills in a default for `granite_channel_timeout` (and reorders
+    /// fields to its own struct declaration order) even when the source JSON omits that key
+    /// entirely — which is exactly what happens for rollup.json files not authored by Kona's own
+    /// serializer (e.g. one produced by `op-node` instead of `kona-node`). Hashing the raw JSON
+    /// therefore silently diverges from the value the enclave actually computes, causing spurious
+    /// "enclave rollup config hash != expected" failures. Callers MUST hash the parsed
+    /// [`RollupConfig`] (via [`hash_world_rollup_config`]), never the raw source JSON.
+    #[test]
+    fn raw_json_hash_diverges_from_parsed_rollup_config_hash_when_fields_are_omitted() {
+        // A minimal rollup config JSON, as might be produced by a non-Kona tool (e.g. op-node),
+        // that omits `granite_channel_timeout` entirely.
+        let raw = serde_json::json!({
+            "genesis": {
+                "l1": { "hash": format!("0x{}", "11".repeat(32)), "number": 1 },
+                "l2": { "hash": format!("0x{}", "22".repeat(32)), "number": 0 },
+                "l2_time": 0,
+                "system_config": null,
+            },
+            "block_time": 2,
+            "max_sequencer_drift": 600,
+            "seq_window_size": 3600,
+            "channel_timeout": 300,
+            "l1_chain_id": 11155111,
+            "l2_chain_id": 5496749,
+            "regolith_time": 0,
+            "canyon_time": 0,
+            "delta_time": 0,
+            "ecotone_time": 0,
+            "fjord_time": 0,
+            "granite_time": 0,
+            "holocene_time": 0,
+            "isthmus_time": 0,
+            "batch_inbox_address": format!("0x{}", "33".repeat(20)),
+            "deposit_contract_address": format!("0x{}", "44".repeat(20)),
+            "l1_system_config_address": format!("0x{}", "55".repeat(20)),
+        });
+
+        let raw_hash = hash_rollup_config(&raw).unwrap();
+
+        let parsed: RollupConfig = serde_json::from_value(raw).unwrap();
+        let schedule = WorldRangeHardforkConfig::default();
+        let parsed_hash = hash_world_rollup_config(&parsed, &schedule).unwrap();
+
+        // These MUST differ given the missing `granite_channel_timeout` field (Kona fills in a
+        // default of 50 when re-serializing `parsed`), demonstrating why any code path computing
+        // an "expected" rollup config hash must hash the parsed `RollupConfig`, not the raw JSON.
+        assert_ne!(
+            raw_hash, parsed_hash,
+            "raw-JSON and parsed-RollupConfig hashes were expected to diverge for a JSON \
+             document missing granite_channel_timeout — if this now passes, re-check whether \
+             kona_genesis::RollupConfig still fills in defaults for fields absent from the \
+             source JSON before relying on raw-JSON hashing anywhere in the proving pipeline"
         );
     }
 

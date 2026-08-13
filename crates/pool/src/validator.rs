@@ -8,7 +8,7 @@ use crate::{
 use alloy_eips::BlockId;
 use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_evm::ConfigureEvm;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
@@ -139,8 +139,13 @@ where
                 .to_outcome(tx);
         };
 
-        // Reject empty aggregator arrays - they bypass all validation
-        if calldata._0.is_empty() {
+        // Reject empty aggregator arrays and groups - they bypass proof validation.
+        if calldata._0.is_empty()
+            || calldata
+                ._0
+                .iter()
+                .any(|aggregated_ops| aggregated_ops.userOps.is_empty())
+        {
             return WorldChainPoolTransactionError::from(PBHValidationError::MissingPbhPayload)
                 .to_outcome(tx);
         }
@@ -155,6 +160,9 @@ where
             )
             .to_outcome(tx);
         }
+
+        // Take one root snapshot for the entire transaction so every group shares it.
+        let valid_roots = self.root_validator.roots();
 
         // Validate all proofs associated with each UserOp
         let mut aggregated_payloads = vec![];
@@ -177,16 +185,37 @@ where
                     .to_outcome(tx);
             }
 
-            let valid_roots = self.root_validator.roots();
-
-            let payloads: Vec<PbhPayload> = match pbh_payloads
-                .into_par_iter()
+            // Decode and reject duplicate nullifiers before performing expensive proof
+            // verification. This prevents a bundle from amplifying one valid proof by repeating
+            // the same (UserOp, payload) pair many times.
+            let payload_ops = match pbh_payloads
+                .into_iter()
                 .zip(aggregated_ops.userOps)
                 .map(|(payload, op)| {
+                    let pbh_payload = PbhPayload::try_from(payload).map_err(|_| {
+                        WorldChainPoolTransactionError::from(PBHValidationError::InvalidCalldata)
+                    })?;
+                    Ok((pbh_payload, op))
+                })
+                .collect::<Result<Vec<_>, WorldChainPoolTransactionError>>()
+            {
+                Ok(payload_ops) => payload_ops,
+                Err(err) => return err.to_outcome(tx),
+            };
+
+            for (payload, _) in &payload_ops {
+                if !seen_nullifier_hashes.insert(payload.nullifier_hash) {
+                    return WorldChainPoolTransactionError::from(
+                        PBHValidationError::DuplicateNullifierHash,
+                    )
+                    .to_outcome(tx);
+                }
+            }
+
+            let payloads: Vec<PbhPayload> = match payload_ops
+                .into_par_iter()
+                .map(|(payload, op)| {
                     let signal = crate::eip4337::hash_user_op(&op);
-                    let Ok(payload) = PbhPayload::try_from(payload) else {
-                        return Err(PBHValidationError::InvalidCalldata.into());
-                    };
                     payload.validate(
                         signal,
                         &valid_roots,
@@ -199,16 +228,6 @@ where
                 Ok(payloads) => payloads,
                 Err(err) => return err.to_outcome(tx),
             };
-
-            // Now check for duplicate nullifier_hashes
-            for payload in &payloads {
-                if !seen_nullifier_hashes.insert(payload.nullifier_hash) {
-                    return WorldChainPoolTransactionError::from(
-                        PBHValidationError::DuplicateNullifierHash,
-                    )
-                    .to_outcome(tx);
-                }
-            }
 
             aggregated_payloads.extend(payloads);
         }
@@ -494,13 +513,66 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn validate_pbh_bundle_duplicate_nullifier_hash() {
+    async fn validate_pbh_bundle_with_multiple_non_empty_groups() {
+        const BUNDLER_ACCOUNT: u32 = 9;
+
+        let pool = setup().await;
+        let external_nullifier =
+            ExternalNullifier::with_date_marker(DateMarker::from(chrono::Utc::now()), 0);
+        let (user_op_1, proof_1) = user_op()
+            .acc(0)
+            .external_nullifier(external_nullifier)
+            .call();
+        let (user_op_2, proof_2) = user_op()
+            .acc(1)
+            .external_nullifier(external_nullifier)
+            .call();
+        let mut bundle = pbh_bundle(vec![user_op_1], vec![proof_1.into()]);
+        let second_group = pbh_bundle(vec![user_op_2], vec![proof_2.into()])
+            ._0
+            .pop()
+            .unwrap();
+        bundle._0.push(second_group);
+
+        let tx = eip1559()
+            .to(PBH_DEV_ENTRYPOINT)
+            .input(bundle.abi_encode())
+            .call();
+        let tx = eth_tx(BUNDLER_ACCOUNT, tx).await;
+
+        pool.add_external_transaction(tx.into())
+            .await
+            .expect("Failed to add multi-group PBH transaction");
+    }
+
+    #[tokio::test]
+    async fn reject_pbh_bundle_with_empty_group() {
+        const BUNDLER_ACCOUNT: u32 = 9;
+
+        let pool = setup().await;
+        let bundle = pbh_bundle(vec![], vec![]);
+        let tx = eip1559()
+            .to(PBH_DEV_ENTRYPOINT)
+            .input(bundle.abi_encode())
+            .call();
+        let tx = eth_tx(BUNDLER_ACCOUNT, tx).await;
+
+        let err = pool
+            .add_external_transaction(tx.into())
+            .await
+            .expect_err("Empty aggregator groups must be rejected");
+
+        assert!(err.to_string().contains("Missing PBH Payload"));
+    }
+
+    #[tokio::test]
+    async fn reject_duplicate_nullifier_before_proof_validation() {
         const BUNDLER_ACCOUNT: u32 = 9;
         const USER_ACCOUNT: u32 = 0;
 
         let pool = setup().await;
 
-        let (user_op, proof) = user_op()
+        let (user_op, mut proof) = user_op()
             .acc(USER_ACCOUNT)
             .external_nullifier(ExternalNullifier::with_date_marker(
                 DateMarker::from(chrono::Utc::now()),
@@ -508,7 +580,10 @@ pub mod tests {
             ))
             .call();
 
-        // Lets add two of the same userOp in the bundle so the nullifier hash is the same and we should expect an error
+        // Make the proof invalid so this test also verifies that duplicate detection happens before
+        // cryptographic proof validation.
+        proof.proof = Default::default();
+
         let bundle = pbh_bundle(
             vec![user_op.clone(), user_op],
             vec![proof.clone().into(), proof.into()],

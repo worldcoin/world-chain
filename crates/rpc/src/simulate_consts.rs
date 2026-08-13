@@ -27,6 +27,12 @@ pub const SIMULATION_TIMEOUT: Duration = Duration::from_secs(5);
 /// in `decode_batch_transfer_data`.
 pub const MAX_BATCH_TRANSFERS: usize = 1000;
 
+/// Maximum number of asset-change rows decoded from logs.
+pub const MAX_LOG_ASSET_CHANGES: usize = 1000;
+
+/// Maximum UTF-8 byte length accepted for a token name or symbol.
+pub const MAX_METADATA_STRING_BYTES: usize = 256;
+
 // ─── Asset / approval event topics ───────────────────────────────────────────
 
 /// `Transfer(address,address,uint256)` — ERC-20 and ERC-721
@@ -121,6 +127,15 @@ pub(crate) const ERROR_STRING_SELECTOR: [u8; 4] = [0x08, 0xc3, 0x79, 0xa0];
 
 /// `Panic(uint256)` selector — `keccak256("Panic(uint256)")[..4]`.
 pub(crate) const PANIC_UINT256_SELECTOR: [u8; 4] = [0x4e, 0x48, 0x7b, 0x71];
+
+/// Safe4337Module `executeUserOp(address,uint256,bytes,uint8)` selector.
+pub const EXECUTE_USER_OP_SELECTOR: [u8; 4] = [0x7b, 0xb3, 0x74, 0x28];
+
+/// Safe `execTransactionFromModule(address,uint256,bytes,uint8)` selector.
+pub const EXEC_TRANSACTION_FROM_MODULE_SELECTOR: [u8; 4] = [0x46, 0x87, 0x21, 0xa7];
+
+/// Safe4337Module `ExecutionFailed()` selector.
+pub const EXECUTION_FAILED_SELECTOR: [u8; 4] = [0xac, 0xfd, 0xb4, 0x44];
 
 /// Minimum payload length for a well-formed `Error(string)` revert:
 /// selector(4) + string-offset(32) + string-length(32).
