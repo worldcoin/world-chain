@@ -4596,7 +4596,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-core"
-version = "2.4.1"
+version = "2.4.2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -4619,7 +4619,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-kona-client"
-version = "2.4.1"
+version = "2.4.2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
