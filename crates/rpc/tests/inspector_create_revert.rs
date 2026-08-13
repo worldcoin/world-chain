@@ -133,7 +133,7 @@ fn run_trampoline_with_input(
         install_runtime_code(&mut db, *address, code.to_vec());
     }
 
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         evm_env(),
         SimulationInspector::default(),

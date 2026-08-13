@@ -7,7 +7,7 @@ use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
 use op_alloy_consensus::{OpDepositReceipt, OpTxEnvelope, OpTxType};
 use op_alloy_rpc_types::{OpTransactionReceipt, OpTransactionRequest};
 use op_alloy_rpc_types_engine::{
-    OpExecutionData, OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4,
+    OpExecutionData, OpExecutionPayload, OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4,
 };
 use reth_node_api::{
     BuiltPayload, EngineTypes, FullNodeTypes, NodePrimitives, NodeTypes, PayloadTypes,
@@ -63,10 +63,11 @@ impl PayloadTypes for WorldEngineTypes {
         block: SealedBlock<BlockTy<<Self::BuiltPayload as BuiltPayload>::Primitives>>,
         _bal: Option<alloy_primitives::Bytes>,
     ) -> Self::ExecutionData {
-        OpExecData::from(OpExecutionData::from_block_unchecked(
+        let (payload, sidecar) = OpExecutionPayload::from_block_unchecked(
             block.hash(),
             &block.into_block().into_ethereum_block(),
-        ))
+        );
+        OpExecData::from(OpExecutionData::new(payload, sidecar))
     }
 }
 

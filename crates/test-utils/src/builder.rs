@@ -8,7 +8,7 @@
 use alloy_consensus::{BlockHeader, TxEip1559, constants::KECCAK_EMPTY};
 use alloy_eips::{BlockNumHash, eip2718::Encodable2718};
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory};
+use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory, OpTx};
 use alloy_primitives::{
     Address, B256, Bytes, FixedBytes, StorageKey, TxKind, U256, bytes, hex, keccak256,
 };
@@ -770,7 +770,7 @@ where
         .as_ref()
         .map(|(o, _)| o.block.clone_transactions_recovered().collect());
 
-    let evm = OpEvmFactory::default().create_evm(&mut state, EVM_ENV.clone());
+    let evm = OpEvmFactory::<OpTx>::default().create_evm(&mut state, EVM_ENV.clone());
 
     let mut executor = OpBlockExecutor::new(
         evm,
