@@ -1,15 +1,18 @@
-use alloy_evm::{Database, EvmEnv, EvmFactory, precompiles::PrecompilesMap};
+use alloy_evm::{precompiles::PrecompilesMap, Database, EvmEnv, EvmFactory};
 use alloy_op_evm::{
+    post_exec::{
+        NullRefundPolicy, PostExecEvmFactoryHooks, PostExecExecutedTx, PostExecRefundInspector,
+        PostExecTxContext,
+    },
     OpEvm, OpEvmContext, OpTx, OpTxError,
-    post_exec::{PostExecEvmFactoryHooks, PostExecExecutedTx, PostExecTxContext, WarmingState},
 };
 use op_revm::{
-    L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransaction, precompiles::OpPrecompiles,
+    precompiles::OpPrecompiles, L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransaction,
 };
 use revm::{
-    Context, Inspector, MainContext,
-    context::{BlockEnv, CfgEnv, DBErrorMarker, result::EVMError},
+    context::{result::EVMError, BlockEnv, CfgEnv, DBErrorMarker},
     inspector::NoOpInspector,
+    Context, Inspector, MainContext,
 };
 
 use world_chain_proof_core::range::{WorldRangeHardfork, WorldRangeHardforkConfig};
@@ -82,7 +85,8 @@ impl Default for ZkvmOpEvmFactory {
 }
 
 impl PostExecEvmFactoryHooks for ZkvmOpEvmFactory {
-    type Snapshot = WarmingState;
+    // `OpEvm` defaults its refund policy to `NullRefundPolicy`; keep the snapshot type tied to it.
+    type Snapshot = <NullRefundPolicy as PostExecRefundInspector>::Snapshot;
 
     fn begin_post_exec_tx<DB, I>(evm: &mut Self::Evm<DB, I>, ctx: PostExecTxContext)
     where
