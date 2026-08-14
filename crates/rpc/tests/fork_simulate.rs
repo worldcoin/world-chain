@@ -214,7 +214,7 @@ fn make_forked_db_at(
 async fn test_fork_view_calls() {
     let mut db = forked_db!();
     let env = metadata_evm_env();
-    let mut evm = OpEvmFactory::default().create_evm(&mut db, env);
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm(&mut db, env);
 
     // name()
     let res = RethEvm::transact(
@@ -301,7 +301,7 @@ async fn test_fork_view_calls() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_simulate_new_token_reads_post_state_for_normalized_asset() {
     let mut db = forked_db!(ANT_METADATA_BLOCK_NUMBER);
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         ant_metadata_evm_env(),
         SimulationInspector::default(),
@@ -341,7 +341,8 @@ async fn test_simulate_new_token_reads_post_state_for_normalized_asset() {
     drop(evm);
     db.commit(result.state);
 
-    let mut metadata_evm = OpEvmFactory::default().create_evm(&mut db, ant_metadata_evm_env());
+    let mut metadata_evm =
+        OpEvmFactory::<OpTx>::default().create_evm(&mut db, ant_metadata_evm_env());
     let name: String = match RethEvm::transact(
         &mut metadata_evm,
         OpTx(OpTransaction {
@@ -606,7 +607,7 @@ async fn test_native_eth_transfer_inspector() {
         },
     );
 
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         simulate_evm_env(),
         SimulationInspector::default(),
@@ -673,7 +674,7 @@ async fn test_simulate_unfunded_caller_bypasses_l1_fee() {
             ..Default::default()
         },
     );
-    let mut evm = OpEvmFactory::default().create_evm(&mut db, simulate_evm_env());
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm(&mut db, simulate_evm_env());
 
     let result = RethEvm::transact(
         &mut evm,
@@ -718,7 +719,7 @@ async fn test_revert_with_reason() {
             ..Default::default()
         },
     );
-    let mut evm = OpEvmFactory::default().create_evm(&mut db, simulate_evm_env());
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm(&mut db, simulate_evm_env());
 
     let result = RethEvm::transact(
         &mut evm,
@@ -765,7 +766,7 @@ async fn test_terminal_revert_reason_decodes_payload() {
         },
     );
 
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         simulate_evm_env(),
         SimulationInspector::default(),
@@ -817,7 +818,7 @@ async fn test_terminal_revert_reason_reports_halts() {
         },
     );
 
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         simulate_evm_env(),
         SimulationInspector::default(),
@@ -872,7 +873,7 @@ async fn test_trace_captures_calls() {
         },
     );
 
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         simulate_evm_env(),
         SimulationInspector::default(),
@@ -1008,7 +1009,7 @@ async fn test_trace_detects_malicious_safe_call() {
     // selector is correctly decoded. Even though the call will revert
     // (not authorized), the inspector still captures it.
 
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         simulate_evm_env(),
         SimulationInspector::default(),
@@ -1095,7 +1096,7 @@ async fn test_simulate_real_approve_emits_only_exposure() {
             ..Default::default()
         },
     );
-    let mut evm = OpEvmFactory::default().create_evm(&mut db, simulate_evm_env());
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm(&mut db, simulate_evm_env());
 
     let spender = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
     let result = RethEvm::transact(
@@ -1528,7 +1529,7 @@ async fn test_inspector_captures_create_via_call_frame() {
     );
     install_runtime_code(&mut db, trampoline, CREATE_TRAMPOLINE_BYTECODE);
 
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         simulate_evm_env(),
         SimulationInspector::default(),
@@ -1588,7 +1589,7 @@ async fn test_inspector_drops_create_on_parent_revert() {
     );
     install_runtime_code(&mut db, trampoline, CREATE_THEN_REVERT_BYTECODE);
 
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         simulate_evm_env(),
         SimulationInspector::default(),
@@ -1673,7 +1674,7 @@ async fn test_fresh_deploy_emits_only_contract_creation() {
     let sender = address!("e3e5dd70abcccc67fce203608cef7fab4d7d07d7");
     let call_data: Bytes = "0x7bb3742800000000000000000000000038869bf66a61cf6bdb996a6ae40d5853fd43b52600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000004448d80ff0a000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000003f900c301bace6e9409b1876347a3dc94ec24d18c1fe4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a4855700fd00000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001e0000000000000000000000000000000000000000000000000000000000000022000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000340000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003600000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003800000000000000000000000000000000000000000000000000000000000000008546875674c696665000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000326544c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004968747470733a2f2f63646e2e7075662e776f726c642f697066732f516d574c57724d51526b41706b555044363832785635636a47764c456e3148773966314d53476e655759594241520000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006cc389206469666572656e74652c2070656e7361646f20656d20746f646f73206f73207175652071756572656d2067616e686172206d6173206e616f20706f64656d20696e766573746972206d7569746f2e0a556d20746f6b656e206469666572656e7465206520756e69636f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000".parse().expect("valid hex");
 
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         simulate_evm_env(),
         SimulationInspector::default(),

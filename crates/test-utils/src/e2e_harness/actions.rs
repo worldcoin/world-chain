@@ -404,7 +404,7 @@ impl Action<OpEngineTypes> for FlashblocksValidatonStream {
                     execution_data_from_from_reduced_flashblock(reduced, chain_spec.clone());
 
                 // Update forkchoice to parent hash before validating
-                let parent = execution_data.parent_hash();
+                let parent = execution_data.payload.parent_hash();
                 let forkchoice = ForkchoiceState {
                     head_block_hash: parent,
                     safe_block_hash: parent,
