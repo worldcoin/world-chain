@@ -60,7 +60,7 @@ jobs:
         id: sha
         run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-  # Service deployable images, built from the same Dockerfile.proof via
+  # Service deployable images, built from the same Dockerfile.prover via
   # PROVER_PACKAGE/PROVER_BIN/FEATURES build-args. Each pushes to its own
   # `<repo>-<service>` image so tags do not collide with the builder image.
   build-service-images:
@@ -71,11 +71,11 @@ jobs:
       fail-fast: false
       matrix:
         service:
-          - { suffix: -sp1-worker, package: world-chain-proof-sp1-worker, bin: world-chain-proof-sp1-worker, prefix: digests-sp1-worker }
-          - { suffix: -proposer, package: world-chain-proposer, bin: world-chain-proposer, prefix: digests-proposer }
-          - { suffix: -challenger, package: world-chain-challenger, bin: world-chain-challenger, prefix: digests-challenger }
-          - { suffix: -defender, package: world-chain-defender, bin: world-chain-defender, prefix: digests-defender }
-          - { suffix: -prover-service, package: world-chain-prover-service, bin: world-chain-prover-service, prefix: digests-prover-service }
+          - { suffix: -sp1-worker, package: world-chain-proof-sp1-worker, bin: world-chain-proof-sp1-worker, prefix: digests-sp1-worker, target: sp1-worker }
+          - { suffix: -proposer, package: world-chain-proposer, bin: world-chain-proposer, prefix: digests-proposer, target: final }
+          - { suffix: -challenger, package: world-chain-challenger, bin: world-chain-challenger, prefix: digests-challenger, target: final }
+          - { suffix: -defender, package: world-chain-defender, bin: world-chain-defender, prefix: digests-defender, target: final }
+          - { suffix: -prover-service, package: world-chain-prover-service, bin: world-chain-prover-service, prefix: digests-prover-service, target: final }
         platform:
           - { runner: arc-public-8xlarge-amd64-runner, platform: linux/amd64 }
           - { runner: ubuntu-24.04-arm, platform: linux/arm64 }
@@ -85,6 +85,13 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.ref }}
+      # The guest ELFs are always compiled in the digest-pinned linux/amd64 SP1 image, so
+      # the vkeys are identical on every runner; arm64 runners emulate that stage.
+      - name: Set up QEMU for the canonical SP1 guest compiler
+        if: matrix.service.target == 'sp1-worker' && matrix.platform.platform == 'linux/arm64'
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: amd64
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -94,6 +101,7 @@ jobs:
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
+          target: ${{ matrix.service.target }}
           build_args: |
             PROVER_PACKAGE=${{ matrix.service.package }}
             PROVER_BIN=${{ matrix.service.bin }}

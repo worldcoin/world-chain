@@ -1,15 +1,13 @@
 [package]
-name = "world-chain-proof-sp1-elfs"
+name = "world-chain-proof-sp1-guest-builder"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-build = "build.rs"
-
-[build-dependencies]
-sp1-build = "=6.1.0"
+publish = false
 
 [dependencies]
-sp1-sdk = { version = "=6.1.0", features = ["network"] }
+anyhow.workspace = true
+sp1-build = "=6.1.0"

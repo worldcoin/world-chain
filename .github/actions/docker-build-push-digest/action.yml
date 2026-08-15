@@ -29,6 +29,10 @@ inputs:
     description: Path to the Dockerfile to build.
     required: false
     default: Dockerfile
+  target:
+    description: Optional Dockerfile target stage.
+    required: false
+    default: ""
   build_args:
     description: Extra build args passed to docker build (newline-separated KEY=value).
     required: false
@@ -90,6 +94,7 @@ runs:
       with:
         context: ${{ inputs.context }}
         file: ${{ inputs.dockerfile }}
+        target: ${{ inputs.target }}
         build-args: |
           VERGEN_GIT_SHA=${{ inputs.git_sha }}
           SCCACHE_BUCKET=${{ inputs.sccache_bucket }}
