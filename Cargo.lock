@@ -19216,7 +19216,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-sp1-guest-builder"
-version = "2.4.1"
+version = "2.4.2"
 dependencies = [
  "anyhow",
  "sp1-build",
