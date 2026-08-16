@@ -13,10 +13,13 @@ world-chain-proof-sp1-worker run \
   --l1-rpc "$L1_RPC_URL" \
   --l1-beacon-rpc "$L1_BEACON_RPC_URL" \
   --l2-rpc "$L2_RPC_URL" \
-  --block-interval 10 \
   --worker-id worker-0 \
   --prover network
 ```
+
+For every leased job, the worker reads the proof interval and immutable transition metadata from
+the job's `MultiProofGame`. It rejects queued root, block, L1 head, or rollup-config values that do
+not match the game before collecting a witness.
 
 The network prover additionally requires:
 

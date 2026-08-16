@@ -19170,6 +19170,7 @@ name = "world-chain-proof-nitro-worker"
 version = "2.4.2"
 dependencies = [
  "alloy-primitives",
+ "alloy-provider",
  "alloy-sol-types",
  "anyhow",
  "async-trait",
@@ -19184,6 +19185,7 @@ dependencies = [
  "world-chain-proof-kona-host",
  "world-chain-proof-metrics",
  "world-chain-proof-nitro-enclave",
+ "world-chain-proof-protocol",
  "world-chain-proof-worker",
  "world-chain-prover-service",
 ]
@@ -19195,7 +19197,9 @@ dependencies = [
  "alloy-contract",
  "alloy-primitives",
  "alloy-provider",
+ "alloy-rpc-client",
  "alloy-sol-types",
+ "alloy-transport",
  "async-trait",
  "futures-util",
  "reqwest 0.12.28",

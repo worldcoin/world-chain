@@ -1,12 +1,14 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::{Address, B256, U256};
+use alloy_provider::ProviderBuilder;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host::online::{
     OnlineHostConfig, build_online_config, hardfork_config_from_chain_spec,
 };
+use world_chain_proof_protocol::AlloyProofGameProvider;
 use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
@@ -98,11 +100,6 @@ pub struct WorkerArgs {
     /// Rollup config hash override (required when --rollup-config is not supplied).
     #[arg(long, env = "ROLLUP_CONFIG_HASH")]
     rollup_config_hash: Option<B256>,
-
-    /// L2 blocks between a proposal's parent and its claimed block (the proof system's
-    /// blockInterval domain constant).
-    #[arg(long, env = "BLOCK_INTERVAL")]
-    block_interval: u64,
 
     /// Number of equal-length sub-ranges proved independently per job.
     #[arg(long, default_value_t = 1)]
@@ -442,11 +439,14 @@ async fn run_worker<P>(cli: &WorkerArgs, host: OnlineHostConfig, prover: P) -> R
 where
     P: WorldSuccinctProver + Send + Sync + 'static,
 {
+    let l1_rpc_url = cli.l1_rpc.parse().context("invalid L1 RPC URL")?;
+    let game_provider =
+        AlloyProofGameProvider::new(ProviderBuilder::new().connect_http(l1_rpc_url));
     let backend = Sp1Backend::new(
         host,
         prover,
+        game_provider,
         Sp1BackendConfig {
-            block_interval: cli.block_interval,
             split_count: cli.ranges.max(1),
             allow_unfinalized: cli.allow_unfinalized,
             session_poll_interval: Duration::from_secs(cli.sp1_session_poll_interval_seconds),
@@ -481,7 +481,6 @@ where
 
     tracing::info!(
         prover_service = %cli.prover_service_url,
-        block_interval = cli.block_interval,
         ranges = cli.ranges.max(1),
         prover = %cli.prover,
         sp1_estimate_limits = cli.sp1_estimate_limits,
@@ -525,8 +524,6 @@ mod tests {
             "http://127.0.0.1:8545",
             "--l1-beacon-rpc",
             "http://127.0.0.1:5052",
-            "--block-interval",
-            "10",
             "--worker-id",
             "test",
         ]

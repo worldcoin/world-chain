@@ -9,6 +9,7 @@ use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArti
 use world_chain_proof_kona_host::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
 };
+use world_chain_proof_protocol::ProofGameProvider;
 use world_chain_proof_sp1_host::{
     WorldSuccinctProver, aggregation_artifact_from_sp1_proof, range_artifact_from_sp1_proof,
 };
@@ -23,10 +24,6 @@ use world_chain_prover_service::{
 /// Configuration for [`Sp1Backend`].
 #[derive(Clone, Copy, Debug)]
 pub struct Sp1BackendConfig {
-    /// L2 blocks between a proposal's parent and its claimed block (the proof system's
-    /// `blockInterval` domain constant). The proved range is
-    /// `(l2_block_number - block_interval, l2_block_number]`.
-    pub block_interval: u64,
     /// Number of equal-length sub-ranges proved independently before aggregation.
     pub split_count: u64,
     /// Allow proving blocks newer than the finalized L2 head.
@@ -37,27 +34,35 @@ pub struct Sp1BackendConfig {
 
 /// [`ClaimedProofJobHandler`] for the [`ProofBackend::Sp1`] lane: builds witnesses over RPC
 /// and proves them with a [`WorldSuccinctProver`] (the sp1-sdk env prover in production).
-pub struct Sp1Backend<P> {
+pub struct Sp1Backend<P, G> {
     host: OnlineHostConfig,
     prover: P,
+    game_provider: G,
     config: Sp1BackendConfig,
 }
 
-impl<P> Sp1Backend<P> {
+impl<P, G> Sp1Backend<P, G> {
     /// Creates a backend over the given RPC host config and SP1 prover.
-    pub const fn new(host: OnlineHostConfig, prover: P, config: Sp1BackendConfig) -> Self {
+    pub const fn new(
+        host: OnlineHostConfig,
+        prover: P,
+        game_provider: G,
+        config: Sp1BackendConfig,
+    ) -> Self {
         Self {
             host,
             prover,
+            game_provider,
             config,
         }
     }
 }
 
 #[async_trait::async_trait]
-impl<P> ClaimedProofJobHandler for Sp1Backend<P>
+impl<P, G> ClaimedProofJobHandler for Sp1Backend<P, G>
 where
     P: WorldSuccinctProver + Send + Sync + 'static,
+    G: ProofGameProvider,
 {
     fn lane(&self) -> ProofBackend {
         ProofBackend::Sp1
@@ -65,7 +70,7 @@ where
 
     async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
         let request = &job.request;
-        let start_block = self.start_block(request)?;
+        let start_block = self.start_block(request).await?;
 
         if let Some(snark_session) = self.get_session(&job, SessionType::Snark).await? {
             let agg = self
@@ -129,17 +134,31 @@ where
     }
 }
 
-impl<P: WorldSuccinctProver> Sp1Backend<P> {
-    fn start_block(&self, request: &ProofRequest) -> anyhow::Result<u64> {
-        request
-            .l2_block_number
-            .checked_sub(self.config.block_interval)
-            .with_context(|| {
-                format!(
-                    "l2 block number {} is below the block interval {}",
-                    request.l2_block_number, self.config.block_interval
-                )
-            })
+impl<P: WorldSuccinctProver, G: ProofGameProvider> Sp1Backend<P, G> {
+    async fn start_block(&self, request: &ProofRequest) -> anyhow::Result<u64> {
+        let context = self
+            .game_provider
+            .proof_game_context(request.game)
+            .await
+            .context("failed to read proof game context")?;
+        let start_block = context
+            .validated_start_block(
+                request.game,
+                request.root_claim,
+                request.l2_block_number,
+                request.l1_head,
+                self.host.rollup_config_hash,
+            )
+            .context("proof request does not match its game")?;
+        tracing::info!(
+            lifecycle_event = "proof_game_validated",
+            proof_id = %request.id(),
+            game_address = %request.game,
+            block_interval = context.block_interval,
+            pre_state_block = start_block,
+            "validated SP1 proof range against game"
+        );
+        Ok(start_block)
     }
 
     async fn get_session(

@@ -18,6 +18,7 @@ world-chain-proof-metrics.workspace = true
 alloy-primitives.workspace = true
 alloy-contract.workspace = true
 alloy-provider.workspace = true
+alloy-rpc-client.workspace = true
 alloy-sol-types.workspace = true
 
 # misc
@@ -29,6 +30,7 @@ reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 thiserror.workspace = true
 
 [dev-dependencies]
+alloy-transport.workspace = true
 tokio.workspace = true
 
 [features]

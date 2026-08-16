@@ -3,6 +3,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::B256;
+use alloy_provider::ProviderBuilder;
 use anyhow::{Context, Result};
 use backon::{ExponentialBuilder, Retryable};
 use clap::Parser;
@@ -13,6 +14,7 @@ use world_chain_proof_nitro_enclave::register::{
     RegisterParams, RegistrationOutcome, register_enclave_key,
 };
 use world_chain_proof_nitro_worker::{NitroBackend, NitroBackendConfig, build_expected_pcrs};
+use world_chain_proof_protocol::AlloyProofGameProvider;
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
@@ -163,11 +165,6 @@ pub struct WorkerArgs {
     /// Rollup config hash override (required when --rollup-config is not supplied).
     #[arg(long, env = "ROLLUP_CONFIG_HASH")]
     rollup_config_hash: Option<B256>,
-
-    /// L2 blocks between a proposal's parent and its claimed block (the proof system's
-    /// `blockInterval` domain constant).
-    #[arg(long, env = "BLOCK_INTERVAL")]
-    block_interval: u64,
 
     /// vsock CID of the running Nitro Enclave.
     #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
@@ -333,20 +330,24 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
     info!(
         prover_service = %args.prover_service_url,
         enclave_cid = args.enclave_cid,
-        block_interval = args.block_interval,
         submit_proof_retry_max_retries = args.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = args.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = args.submit_proof_retry_max_delay_ms,
         "nitro-worker starting"
     );
 
-    let backend = NitroBackend::new(NitroBackendConfig {
-        block_interval: args.block_interval,
-        online,
-        enclave_cid: args.enclave_cid,
-        enclave_port: args.enclave_port,
-        expected_pcrs,
-    });
+    let l1_rpc_url = args.l1_rpc.parse().context("invalid L1 RPC URL")?;
+    let game_provider =
+        AlloyProofGameProvider::new(ProviderBuilder::new().connect_http(l1_rpc_url));
+    let backend = NitroBackend::new(
+        NitroBackendConfig {
+            online,
+            enclave_cid: args.enclave_cid,
+            enclave_port: args.enclave_port,
+            expected_pcrs,
+        },
+        game_provider,
+    );
 
     let queue = RpcProverServiceClient::new(&args.prover_service_url)
         .with_context(|| format!("failed to connect to {}", args.prover_service_url))?;
