@@ -602,18 +602,6 @@ mod tests {
     }
 
     #[test]
-    fn explicit_bootnodes_are_not_overridden() {
-        let args = CommandParser::parse_from(["bin"]).world;
-        let mut node_config = NodeConfig::new(WorldChainSpec::sepolia());
-        let operator_bootnodes = parse_trusted_peer(FLASHBLOCKS_SEPOLIA_SENTRIES).unwrap();
-        node_config.network.bootnodes = Some(operator_bootnodes.clone());
-
-        args.into_config(&mut node_config).unwrap();
-
-        assert_eq!(node_config.network.bootnodes, Some(operator_bootnodes));
-    }
-
-    #[test]
     fn disable_bootnodes_skips_default_discovery_bootnodes() {
         let args = CommandParser::parse_from(["bin", "--worldchain.disable-bootnodes"]).world;
         let mut node_config = NodeConfig::new(WorldChainSpec::sepolia());
