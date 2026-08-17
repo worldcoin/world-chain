@@ -19197,7 +19197,6 @@ dependencies = [
  "alloy-contract",
  "alloy-primitives",
  "alloy-provider",
- "alloy-rpc-client",
  "alloy-sol-types",
  "alloy-transport",
  "async-trait",

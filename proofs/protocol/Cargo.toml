@@ -18,7 +18,6 @@ world-chain-proof-metrics.workspace = true
 alloy-primitives.workspace = true
 alloy-contract.workspace = true
 alloy-provider.workspace = true
-alloy-rpc-client.workspace = true
 alloy-sol-types.workspace = true
 
 # misc

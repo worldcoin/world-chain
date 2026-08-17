@@ -1,7 +1,5 @@
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_provider::Provider;
-use alloy_rpc_client::BatchRequest;
-use alloy_sol_types::SolCall;
 use async_trait::async_trait;
 
 use crate::IMultiProofGame;
@@ -82,7 +80,7 @@ pub trait ProofGameProvider: Send + Sync + 'static {
     ) -> Result<ProofGameContext, ProofGameContextError>;
 }
 
-/// Alloy-backed proof-game reader using one JSON-RPC batch without a Multicall3 dependency.
+/// Alloy-backed proof-game reader using typed contract calls without a Multicall3 dependency.
 #[derive(Clone, Debug)]
 pub struct AlloyProofGameProvider<P> {
     provider: P,
@@ -105,73 +103,20 @@ where
     ) -> Result<ProofGameContext, ProofGameContextError> {
         let game =
             IMultiProofGame::IMultiProofGameInstance::new(game_address, self.provider.clone());
-        let mut batch = BatchRequest::new(self.provider.client());
-        let block_interval = batch
-            .add_call::<_, Bytes>(
-                "eth_call",
-                &(game.blockInterval().into_transaction_request(), "latest"),
+        let block_interval_call = game.blockInterval();
+        let rollup_config_hash_call = game.rollupConfigHash();
+        let root_claim_call = game.rootClaim();
+        let l2_block_number_call = game.l2SequenceNumber();
+        let l1_head_call = game.l1Head();
+        let (block_interval, rollup_config_hash, root_claim, l2_block_number, l1_head) =
+            futures_util::try_join!(
+                async { block_interval_call.call().await },
+                async { rollup_config_hash_call.call().await },
+                async { root_claim_call.call().await },
+                async { l2_block_number_call.call().await },
+                async { l1_head_call.call().await },
             )
             .map_err(|error| contract_error(game_address, error))?;
-        let rollup_config_hash = batch
-            .add_call::<_, Bytes>(
-                "eth_call",
-                &(game.rollupConfigHash().into_transaction_request(), "latest"),
-            )
-            .map_err(|error| contract_error(game_address, error))?;
-        let root_claim = batch
-            .add_call::<_, Bytes>(
-                "eth_call",
-                &(game.rootClaim().into_transaction_request(), "latest"),
-            )
-            .map_err(|error| contract_error(game_address, error))?;
-        let l2_block_number = batch
-            .add_call::<_, Bytes>(
-                "eth_call",
-                &(game.l2SequenceNumber().into_transaction_request(), "latest"),
-            )
-            .map_err(|error| contract_error(game_address, error))?;
-        let l1_head = batch
-            .add_call::<_, Bytes>(
-                "eth_call",
-                &(game.l1Head().into_transaction_request(), "latest"),
-            )
-            .map_err(|error| contract_error(game_address, error))?;
-
-        batch
-            .send()
-            .await
-            .map_err(|error| contract_error(game_address, error))?;
-
-        let block_interval = IMultiProofGame::blockIntervalCall::abi_decode_returns(
-            &block_interval
-                .await
-                .map_err(|error| contract_error(game_address, error))?,
-        )
-        .map_err(|error| contract_error(game_address, error))?;
-        let rollup_config_hash = IMultiProofGame::rollupConfigHashCall::abi_decode_returns(
-            &rollup_config_hash
-                .await
-                .map_err(|error| contract_error(game_address, error))?,
-        )
-        .map_err(|error| contract_error(game_address, error))?;
-        let root_claim = IMultiProofGame::rootClaimCall::abi_decode_returns(
-            &root_claim
-                .await
-                .map_err(|error| contract_error(game_address, error))?,
-        )
-        .map_err(|error| contract_error(game_address, error))?;
-        let l2_block_number = IMultiProofGame::l2SequenceNumberCall::abi_decode_returns(
-            &l2_block_number
-                .await
-                .map_err(|error| contract_error(game_address, error))?,
-        )
-        .map_err(|error| contract_error(game_address, error))?;
-        let l1_head = IMultiProofGame::l1HeadCall::abi_decode_returns(
-            &l1_head
-                .await
-                .map_err(|error| contract_error(game_address, error))?,
-        )
-        .map_err(|error| contract_error(game_address, error))?;
 
         Ok(ProofGameContext {
             block_interval: u256_to_u64(game_address, "blockInterval", block_interval)?,
@@ -255,6 +200,7 @@ pub enum ProofGameContextError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Bytes;
     use alloy_provider::ProviderBuilder;
     use alloy_sol_types::SolValue;
     use alloy_transport::mock::Asserter;
@@ -275,7 +221,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reads_game_context_from_batched_rpc_calls() {
+    async fn reads_game_context_from_typed_contract_calls() {
         let asserter = Asserter::new();
         for response in [
             Bytes::from(U256::from(450).abi_encode()),
