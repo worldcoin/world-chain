@@ -17,10 +17,6 @@ inputs:
   sccache_bucket:
     description: S3 bucket used by sccache and BuildKit cache.
     required: true
-  s3_cache_enabled:
-    description: Whether to use temporary AWS credentials for remote sccache and BuildKit caches.
-    required: false
-    default: "true"
   git_sha:
     description: Git commit SHA to embed via VERGEN_GIT_SHA (defaults to the triggering commit).
     required: false
@@ -41,6 +37,10 @@ inputs:
     description: Extra build args passed to docker build (newline-separated KEY=value).
     required: false
     default: ""
+  build_contexts:
+    description: Additional named Docker build contexts (newline-separated name=path entries).
+    required: false
+    default: ""
   cache_scope:
     description: BuildKit cache scope name.
     required: false
@@ -56,43 +56,17 @@ runs:
   using: composite
   steps:
     - name: Prepare
-      id: prepare
       shell: bash
       env:
         CACHE_SCOPE_INPUT: ${{ inputs.cache_scope }}
         IMAGE_NAME: ${{ inputs.image_name }}
         PLATFORM: ${{ inputs.platform }}
-        S3_CACHE_ENABLED: ${{ inputs.s3_cache_enabled }}
-        SCCACHE_BUCKET_INPUT: ${{ inputs.sccache_bucket }}
-        AWS_REGION_INPUT: ${{ inputs.aws_region }}
       run: |
         platform="${PLATFORM}"
         cache_scope="${CACHE_SCOPE_INPUT}"
         echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
-        cache_scope="${cache_scope//\//-}"
-
-        case "${S3_CACHE_ENABLED}" in
-          true)
-            cache_prefix="buildkit/${IMAGE_NAME}/${platform//\//-}"
-            echo "sccache_bucket=${SCCACHE_BUCKET_INPUT}" >> "$GITHUB_OUTPUT"
-            {
-              echo "cache_from<<EOF"
-              echo "type=s3,region=${AWS_REGION_INPUT},bucket=${SCCACHE_BUCKET_INPUT},prefix=${cache_prefix},name=${cache_scope}"
-              echo "type=s3,region=${AWS_REGION_INPUT},bucket=${SCCACHE_BUCKET_INPUT},prefix=${cache_prefix},name=main"
-              echo "EOF"
-              echo "cache_to=type=s3,region=${AWS_REGION_INPUT},bucket=${SCCACHE_BUCKET_INPUT},prefix=${cache_prefix},name=${cache_scope},mode=max"
-            } >> "$GITHUB_OUTPUT"
-            ;;
-          false)
-            echo "sccache_bucket=" >> "$GITHUB_OUTPUT"
-            echo "cache_from=" >> "$GITHUB_OUTPUT"
-            echo "cache_to=" >> "$GITHUB_OUTPUT"
-            ;;
-          *)
-            echo "s3_cache_enabled must be 'true' or 'false'" >&2
-            exit 1
-            ;;
-        esac
+        echo "CACHE_SCOPE=${cache_scope//\//-}" >> "$GITHUB_ENV"
+        echo "BUILDKIT_CACHE_PREFIX=buildkit/${IMAGE_NAME}/${platform//\//-}" >> "$GITHUB_ENV"
 
     - name: Log in to Registry
       uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -113,7 +87,6 @@ runs:
       uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
     - name: Configure AWS credentials for S3 caches
-      if: inputs.s3_cache_enabled == 'true'
       uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
       with:
         aws-region: ${{ inputs.aws_region }}
@@ -124,11 +97,12 @@ runs:
       uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
       with:
         context: ${{ inputs.context }}
+        build-contexts: ${{ inputs.build_contexts }}
         file: ${{ inputs.dockerfile }}
         target: ${{ inputs.target }}
         build-args: |
           VERGEN_GIT_SHA=${{ inputs.git_sha }}
-          SCCACHE_BUCKET=${{ steps.prepare.outputs.sccache_bucket }}
+          SCCACHE_BUCKET=${{ inputs.sccache_bucket }}
           SCCACHE_REGION=${{ inputs.aws_region }}
           SCCACHE_S3_KEY_PREFIX=sccache/${{ github.repository }}/${{ env.PLATFORM_PAIR }}
           ${{ inputs.build_args }}
@@ -139,8 +113,10 @@ runs:
         tags: ${{ inputs.registry }}/${{ inputs.image_name }}
         platforms: ${{ inputs.platform }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: ${{ steps.prepare.outputs.cache_from }}
-        cache-to: ${{ steps.prepare.outputs.cache_to }}
+        cache-from: |
+          type=s3,region=${{ inputs.aws_region }},bucket=${{ inputs.sccache_bucket }},prefix=${{ env.BUILDKIT_CACHE_PREFIX }},name=${{ env.CACHE_SCOPE }}
+          type=s3,region=${{ inputs.aws_region }},bucket=${{ inputs.sccache_bucket }},prefix=${{ env.BUILDKIT_CACHE_PREFIX }},name=main
+        cache-to: type=s3,region=${{ inputs.aws_region }},bucket=${{ inputs.sccache_bucket }},prefix=${{ env.BUILDKIT_CACHE_PREFIX }},name=${{ env.CACHE_SCOPE }},mode=max
         outputs: type=registry,push-by-digest=true,name-canonical=true,push=true
 
     - name: Export digest
