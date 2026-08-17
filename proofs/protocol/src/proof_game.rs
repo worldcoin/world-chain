@@ -1,8 +1,16 @@
+use std::time::Duration;
+
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::Provider;
 use async_trait::async_trait;
+use backon::{ExponentialBuilder, Retryable};
+use tracing::warn;
 
 use crate::IMultiProofGame;
+
+const GAME_CONTEXT_RPC_MAX_RETRIES: usize = 3;
+const GAME_CONTEXT_RPC_INITIAL_DELAY: Duration = Duration::from_millis(100);
+const GAME_CONTEXT_RPC_MAX_DELAY: Duration = Duration::from_secs(1);
 
 /// Immutable game context that defines the exact transition a proof worker must execute.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,12 +100,11 @@ impl<P> AlloyProofGameProvider<P> {
     }
 }
 
-#[async_trait]
-impl<P> ProofGameProvider for AlloyProofGameProvider<P>
+impl<P> AlloyProofGameProvider<P>
 where
-    P: Provider + Clone + Send + Sync + 'static,
+    P: Provider + Clone,
 {
-    async fn proof_game_context(
+    async fn read_game_context(
         &self,
         game_address: Address,
     ) -> Result<ProofGameContext, ProofGameContextError> {
@@ -125,6 +132,36 @@ where
             l2_block_number: u256_to_u64(game_address, "l2SequenceNumber", l2_block_number)?,
             l1_head,
         })
+    }
+}
+
+#[async_trait]
+impl<P> ProofGameProvider for AlloyProofGameProvider<P>
+where
+    P: Provider + Clone + Send + Sync + 'static,
+{
+    async fn proof_game_context(
+        &self,
+        game_address: Address,
+    ) -> Result<ProofGameContext, ProofGameContextError> {
+        (|| self.read_game_context(game_address))
+            .retry(
+                ExponentialBuilder::default()
+                    .with_min_delay(GAME_CONTEXT_RPC_INITIAL_DELAY)
+                    .with_max_delay(GAME_CONTEXT_RPC_MAX_DELAY)
+                    .with_max_times(GAME_CONTEXT_RPC_MAX_RETRIES)
+                    .with_jitter(),
+            )
+            .when(|error| matches!(error, ProofGameContextError::Contract { .. }))
+            .notify(|error, delay| {
+                warn!(
+                    game_address = %game_address,
+                    %error,
+                    ?delay,
+                    "failed to read proof game context, retrying"
+                );
+            })
+            .await
     }
 }
 
@@ -223,6 +260,29 @@ mod tests {
     #[tokio::test]
     async fn reads_game_context_from_typed_contract_calls() {
         let asserter = Asserter::new();
+        for response in [
+            Bytes::from(U256::from(450).abi_encode()),
+            Bytes::from(ROLLUP_CONFIG_HASH.abi_encode()),
+            Bytes::from(ROOT.abi_encode()),
+            Bytes::from(U256::from(1_000).abi_encode()),
+            Bytes::from(L1_HEAD.abi_encode()),
+        ] {
+            asserter.push_success(&response);
+        }
+        let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
+        let game_provider = AlloyProofGameProvider::new(provider);
+
+        assert_eq!(
+            game_provider.proof_game_context(GAME).await.unwrap(),
+            context()
+        );
+        assert!(asserter.read_q().is_empty());
+    }
+
+    #[tokio::test]
+    async fn retries_transient_game_context_failure() {
+        let asserter = Asserter::new();
+        asserter.push_failure_msg("temporary RPC failure");
         for response in [
             Bytes::from(U256::from(450).abi_encode()),
             Bytes::from(ROLLUP_CONFIG_HASH.abi_encode()),

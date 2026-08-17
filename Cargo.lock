@@ -19200,12 +19200,14 @@ dependencies = [
  "alloy-sol-types",
  "alloy-transport",
  "async-trait",
+ "backon",
  "futures-util",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
+ "tracing",
  "world-chain-proof-metrics",
 ]
 

@@ -22,11 +22,13 @@ alloy-sol-types.workspace = true
 
 # misc
 async-trait.workspace = true
+backon.workspace = true
 futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 alloy-transport.workspace = true
