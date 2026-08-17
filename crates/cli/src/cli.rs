@@ -285,10 +285,6 @@ fn set_default_bootnodes(
     config: &mut NodeConfig<WorldChainSpec>,
     bootnodes: &str,
 ) -> eyre::Result<()> {
-    if config.network.bootnodes.is_some() {
-        return Ok(());
-    }
-
     if bootnodes.is_empty() {
         warn!(
             target: "world_chain::network",
@@ -312,7 +308,12 @@ fn set_default_bootnodes(
         bootnodes = ?bootnodes,
         "Setting default DiscV5 bootnodes"
     );
-    config.network.bootnodes = Some(bootnodes);
+
+    if let Some(existing) = &mut config.network.bootnodes {
+        existing.extend(bootnodes);
+    } else {
+        config.network.bootnodes = Some(bootnodes);
+    }
 
     Ok(())
 }
