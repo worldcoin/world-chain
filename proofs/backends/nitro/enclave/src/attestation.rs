@@ -14,7 +14,6 @@
 use crate::{ExpectedPcrs, PCR_LEN, PcrDigest};
 use p384::ecdsa::{Signature, signature::Verifier as _};
 use rustls_pki_types::{CertificateDer, SignatureVerificationAlgorithm, UnixTime};
-use std::collections::BTreeMap;
 use webpki::{EndEntityCert, ExtendedKeyUsageValidator, KeyPurposeIdIter};
 
 /// DER-encoded AWS Nitro Attestation PKI root CA certificate.
@@ -118,154 +117,28 @@ pub enum AttestationError {
     },
 }
 
-/// Decodes the relevant subset of a Nitro attestation document.
-#[derive(Clone, Debug)]
-pub struct ParsedAttestationDoc {
-    /// `pcrs` map from PCR index to digest bytes.
-    pub pcrs: BTreeMap<u8, Vec<u8>>,
-    /// Optional `user_data` field. Present whenever the enclave passed one to `Request::Attestation`.
-    pub user_data: Option<Vec<u8>>,
-    /// `module_id` of the originating enclave.
-    pub module_id: Option<String>,
-    /// `digest` algorithm field (typically `"SHA384"`).
-    pub digest: Option<String>,
-    /// DER-encoded leaf certificate used to sign the COSE_Sign1 structure.
-    pub certificate: Option<Vec<u8>>,
-    /// DER-encoded CA bundle, root first. The last element issued `certificate`.
-    pub cabundle: Vec<Vec<u8>>,
-    /// Optional `public_key` field. Present when the enclave called `NsmRequest::Attestation`
-    /// with `public_key: Some(bytes)` — i.e., for [`EnclaveRequest::PublicKey`] responses.
-    /// The bytes are the uncompressed SEC1 encoding (`0x04 || X || Y`, 65 bytes) of the
-    /// enclave's ephemeral secp256k1 key.
-    ///
-    /// Use [`extract_nsm_public_key`] to obtain this value with a mandatory-presence check.
-    pub public_key: Option<Vec<u8>>,
-    /// Optional `nonce` field. Present when the host supplied a nonce in the request, which
-    /// the NSM embeds verbatim into the signed payload for replay protection.
-    pub nonce: Option<Vec<u8>>,
-}
+/// AWS's own definition of the signed attestation payload, re-exported so callers work against
+/// the field set AWS declares rather than a local subset kept in step by hand.
+///
+/// `certificate` and `cabundle` are mandatory there, so a decoded document always carries a leaf.
+pub use aws_nitro_enclaves_nsm_api::api::AttestationDoc;
 
-/// Parses a `COSE_Sign1` Nitro attestation document and returns the inner payload fields the
-/// host cares about.
+/// Parses a `COSE_Sign1` Nitro attestation document and returns the signed payload.
+///
+/// Decoding is `serde`-driven, so a `pcrs` entry with a non-integer key or non-bstr value fails
+/// the whole parse instead of being silently skipped.
 ///
 /// This does **not** verify the signature or certificate chain — call
 /// [`verify_cose_sign1_signature`] for full cryptographic verification.
-pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, AttestationError> {
+pub fn parse_attestation_doc(doc: &[u8]) -> Result<AttestationDoc, AttestationError> {
     let sign1 = crate::cose::parse_cose_sign1(doc)
         .map_err(|err| AttestationError::Malformed(err.to_string()))?;
     // `parse_cose_sign1` rejects an absent payload, so this is always `Some`.
     let payload_bytes = sign1
         .payload
         .ok_or_else(|| AttestationError::Malformed("COSE_Sign1 payload is absent".into()))?;
-    let payload: ciborium::value::Value = ciborium::from_reader(payload_bytes.as_slice())
-        .map_err(|err| AttestationError::Malformed(format!("payload decode: {err}")))?;
-    let entries = match payload {
-        ciborium::value::Value::Map(m) => m,
-        _ => {
-            return Err(AttestationError::Malformed(
-                "attestation payload is not a CBOR map".into(),
-            ));
-        }
-    };
-
-    let mut pcrs: BTreeMap<u8, Vec<u8>> = BTreeMap::new();
-    let mut user_data: Option<Vec<u8>> = None;
-    let mut module_id: Option<String> = None;
-    let mut digest: Option<String> = None;
-    let mut certificate: Option<Vec<u8>> = None;
-    let mut cabundle: Vec<Vec<u8>> = Vec::new();
-    let mut public_key: Option<Vec<u8>> = None;
-    let mut nonce: Option<Vec<u8>> = None;
-
-    for (key, value) in entries {
-        let key_str = match key {
-            ciborium::value::Value::Text(t) => t,
-            _ => continue,
-        };
-        match key_str.as_str() {
-            "pcrs" => {
-                let entries = match value {
-                    ciborium::value::Value::Map(m) => m,
-                    _ => {
-                        return Err(AttestationError::Malformed(
-                            "pcrs field is not a map".into(),
-                        ));
-                    }
-                };
-                for (pcr_key, pcr_value) in entries {
-                    let idx: u8 = match pcr_key {
-                        ciborium::value::Value::Integer(i) => match u8::try_from(i) {
-                            Ok(idx) => idx,
-                            Err(_) => continue,
-                        },
-                        _ => continue,
-                    };
-                    let bytes = match pcr_value {
-                        ciborium::value::Value::Bytes(b) => b,
-                        _ => continue,
-                    };
-                    pcrs.insert(idx, bytes);
-                }
-            }
-            "user_data" => {
-                user_data = match value {
-                    ciborium::value::Value::Bytes(b) => Some(b),
-                    ciborium::value::Value::Null => None,
-                    _ => {
-                        return Err(AttestationError::Malformed(
-                            "user_data is not a byte string".into(),
-                        ));
-                    }
-                };
-            }
-            "module_id" => {
-                if let ciborium::value::Value::Text(t) = value {
-                    module_id = Some(t);
-                }
-            }
-            "digest" => {
-                if let ciborium::value::Value::Text(t) = value {
-                    digest = Some(t);
-                }
-            }
-            "certificate" => {
-                if let ciborium::value::Value::Bytes(b) = value {
-                    certificate = Some(b);
-                }
-            }
-            "cabundle" => {
-                if let ciborium::value::Value::Array(arr) = value {
-                    for item in arr {
-                        if let ciborium::value::Value::Bytes(b) = item {
-                            cabundle.push(b);
-                        }
-                    }
-                }
-            }
-            "public_key" => {
-                if let ciborium::value::Value::Bytes(b) = value {
-                    public_key = Some(b);
-                }
-            }
-            "nonce" => {
-                if let ciborium::value::Value::Bytes(b) = value {
-                    nonce = Some(b);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    Ok(ParsedAttestationDoc {
-        pcrs,
-        user_data,
-        module_id,
-        digest,
-        certificate,
-        cabundle,
-        public_key,
-        nonce,
-    })
+    ciborium::from_reader(payload_bytes.as_slice())
+        .map_err(|err| AttestationError::Malformed(format!("payload decode: {err}")))
 }
 
 /// Verifies the COSE_Sign1 signature on an AWS Nitro attestation document.
@@ -288,52 +161,16 @@ pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
         .as_deref()
         .ok_or_else(|| AttestationError::Malformed("COSE_Sign1 payload is absent".into()))?;
 
-    let payload_value: ciborium::value::Value = ciborium::from_reader(payload_bstr)
+    let payload: AttestationDoc = ciborium::from_reader(payload_bstr)
         .map_err(|e| AttestationError::Malformed(format!("payload decode: {e}")))?;
 
-    let payload_map = match payload_value {
-        ciborium::value::Value::Map(m) => m,
-        _ => {
-            return Err(AttestationError::Malformed(
-                "attestation payload is not a CBOR map".into(),
-            ));
-        }
-    };
+    let cert_der = payload.certificate.into_vec();
+    let cabundle: Vec<Vec<u8>> = payload
+        .cabundle
+        .into_iter()
+        .map(serde_bytes::ByteBuf::into_vec)
+        .collect();
 
-    let mut cert_der: Option<Vec<u8>> = None;
-    let mut cabundle: Vec<Vec<u8>> = Vec::new();
-
-    for (k, v) in &payload_map {
-        match k {
-            ciborium::value::Value::Text(s) if s == "certificate" => {
-                if let ciborium::value::Value::Bytes(b) = v {
-                    cert_der = Some(b.clone());
-                }
-            }
-            ciborium::value::Value::Text(s) if s == "cabundle" => {
-                if let ciborium::value::Value::Array(arr) = v {
-                    for item in arr {
-                        if let ciborium::value::Value::Bytes(b) = item {
-                            cabundle.push(b.clone());
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // A valid Nitro attestation document must always carry a leaf certificate.
-    // Accepting a document without one would allow PCR / user_data checks to pass
-    // without any cryptographic proof that those values came from AWS hardware.
-    let cert_der = cert_der.ok_or_else(|| {
-        AttestationError::Malformed(
-            "attestation document missing required `certificate` field".into(),
-        )
-    })?;
-
-    // Walk leaf → intermediates → root, verifying each signature and anchoring
-    // the root to the hardcoded AWS Nitro Attestation PKI constant.
     verify_cert_chain(&cert_der, &cabundle)?;
 
     let verifying_key = extract_p384_key(&cert_der)?;
@@ -375,17 +212,10 @@ fn extract_p384_key(cert_der: &[u8]) -> Result<p384::ecdsa::VerifyingKey, Attest
 ///
 /// # Errors
 ///
-/// Returns [`AttestationError::Malformed`] if the document carries no leaf certificate,
-/// and [`AttestationError::CertChain`] if the certificate or its key cannot be parsed.
+/// Returns [`AttestationError::Malformed`] if the document does not decode, and
+/// [`AttestationError::CertChain`] if the certificate or its key cannot be parsed.
 pub fn leaf_cert_pubkey_xy(doc: &[u8]) -> Result<[u8; 96], AttestationError> {
-    let parsed = parse_attestation_doc(doc)?;
-    let cert_der = parsed.certificate.ok_or_else(|| {
-        AttestationError::Malformed(
-            "attestation document missing required `certificate` field".into(),
-        )
-    })?;
-
-    cert_pubkey_xy(&cert_der)
+    cert_pubkey_xy(&parse_attestation_doc(doc)?.certificate)
 }
 
 /// Extracts any certificate's P-384 public key as the uncompressed `x || y` coordinate pair
@@ -625,6 +455,7 @@ pub fn extract_nsm_public_key(doc: &[u8]) -> Result<Vec<u8>, AttestationError> {
     let parsed = parse_attestation_doc(doc)?;
     parsed
         .public_key
+        .map(serde_bytes::ByteBuf::into_vec)
         .ok_or(AttestationError::MissingField("public_key"))
 }
 
@@ -670,7 +501,7 @@ pub fn parse_and_check_pcrs(
     doc: &[u8],
     expected_pcrs: &ExpectedPcrs,
     expected_user_data: &[u8],
-) -> Result<ParsedAttestationDoc, AttestationError> {
+) -> Result<AttestationDoc, AttestationError> {
     let parsed = parse_attestation_doc(doc)?;
 
     check_pcr(&parsed, 0, &expected_pcrs.pcr0)?;
@@ -700,7 +531,7 @@ pub fn parse_check_and_verify(
     doc: &[u8],
     expected_pcrs: &ExpectedPcrs,
     expected_user_data: &[u8],
-) -> Result<ParsedAttestationDoc, AttestationError> {
+) -> Result<AttestationDoc, AttestationError> {
     let parsed = parse_and_check_pcrs(doc, expected_pcrs, expected_user_data)?;
     verify_cose_sign1_signature(doc)?;
     Ok(parsed)
@@ -736,7 +567,7 @@ pub fn verify_nonce(doc: &[u8], expected: &[u8]) -> Result<(), AttestationError>
 pub fn verify_pcrs_only(
     doc: &[u8],
     expected_pcrs: &ExpectedPcrs,
-) -> Result<ParsedAttestationDoc, AttestationError> {
+) -> Result<AttestationDoc, AttestationError> {
     let parsed = parse_attestation_doc(doc)?;
     check_pcr(&parsed, 0, &expected_pcrs.pcr0)?;
     check_pcr(&parsed, 1, &expected_pcrs.pcr1)?;
@@ -745,7 +576,7 @@ pub fn verify_pcrs_only(
 }
 
 fn check_pcr(
-    parsed: &ParsedAttestationDoc,
+    parsed: &AttestationDoc,
     index: u8,
     expected: &PcrDigest,
 ) -> Result<(), AttestationError> {
@@ -754,7 +585,7 @@ fn check_pcr(
     }
     let actual = parsed
         .pcrs
-        .get(&index)
+        .get(&usize::from(index))
         .ok_or(AttestationError::MissingField(match index {
             0 => "pcr0",
             1 => "pcr1",
@@ -775,45 +606,69 @@ fn check_pcr(
 mod tests {
     use super::*;
 
+    /// Carries every field AWS declares mandatory. `certificate` / `cabundle` are placeholders:
+    /// these documents exercise the PCR / `user_data` checks, not the chain.
     fn make_doc(pcrs: Vec<(u8, Vec<u8>)>, user_data: Option<Vec<u8>>) -> Vec<u8> {
-        let pcr_map: Vec<(ciborium::value::Value, ciborium::value::Value)> = pcrs
+        make_doc_inner(pcrs, user_data, true)
+    }
+
+    /// Same, minus the mandatory `certificate` field, which the typed decode must reject.
+    fn make_doc_without_certificate(
+        pcrs: Vec<(u8, Vec<u8>)>,
+        user_data: Option<Vec<u8>>,
+    ) -> Vec<u8> {
+        make_doc_inner(pcrs, user_data, false)
+    }
+
+    fn make_doc_inner(
+        pcrs: Vec<(u8, Vec<u8>)>,
+        user_data: Option<Vec<u8>>,
+        with_certificate: bool,
+    ) -> Vec<u8> {
+        use ciborium::value::Value as V;
+
+        let pcr_map: Vec<(V, V)> = pcrs
             .into_iter()
             .map(|(idx, bytes)| {
                 (
-                    ciborium::value::Value::Integer((idx as i128).try_into().unwrap()),
-                    ciborium::value::Value::Bytes(bytes),
+                    V::Integer((idx as i128).try_into().unwrap()),
+                    V::Bytes(bytes),
                 )
             })
             .collect();
-        let mut entries: Vec<(ciborium::value::Value, ciborium::value::Value)> = vec![
+
+        let mut entries: Vec<(V, V)> = vec![
+            (V::Text("pcrs".into()), V::Map(pcr_map)),
+            (V::Text("module_id".into()), V::Text("test-module".into())),
+            (V::Text("digest".into()), V::Text("SHA384".into())),
             (
-                ciborium::value::Value::Text("pcrs".into()),
-                ciborium::value::Value::Map(pcr_map),
+                V::Text("timestamp".into()),
+                V::Integer(1_785_790_194_000u64.into()),
             ),
             (
-                ciborium::value::Value::Text("module_id".into()),
-                ciborium::value::Value::Text("test-module".into()),
+                V::Text("cabundle".into()),
+                V::Array(vec![V::Bytes(vec![0xAAu8; 64])]),
             ),
             (
-                ciborium::value::Value::Text("digest".into()),
-                ciborium::value::Value::Text("SHA384".into()),
+                V::Text("user_data".into()),
+                match user_data {
+                    Some(bytes) => V::Bytes(bytes),
+                    None => V::Null,
+                },
             ),
         ];
-        entries.push((
-            ciborium::value::Value::Text("user_data".into()),
-            match user_data {
-                Some(bytes) => ciborium::value::Value::Bytes(bytes),
-                None => ciborium::value::Value::Null,
-            },
-        ));
-        let mut payload_bytes = Vec::new();
-        ciborium::into_writer(&ciborium::value::Value::Map(entries), &mut payload_bytes).unwrap();
+        if with_certificate {
+            entries.push((V::Text("certificate".into()), V::Bytes(vec![0xBBu8; 64])));
+        }
 
-        let cose = ciborium::value::Value::Array(vec![
-            ciborium::value::Value::Bytes(vec![]),
-            ciborium::value::Value::Map(vec![]),
-            ciborium::value::Value::Bytes(payload_bytes),
-            ciborium::value::Value::Bytes(vec![0u8; 96]),
+        let mut payload_bytes = Vec::new();
+        ciborium::into_writer(&V::Map(entries), &mut payload_bytes).unwrap();
+
+        let cose = V::Array(vec![
+            V::Bytes(vec![]),
+            V::Map(vec![]),
+            V::Bytes(payload_bytes),
+            V::Bytes(vec![0u8; 96]),
         ]);
         let mut out = Vec::new();
         ciborium::into_writer(&cose, &mut out).unwrap();
@@ -835,8 +690,8 @@ mod tests {
             Some(vec![7u8; 32]),
         );
         let parsed = parse_and_check_pcrs(&doc, &non_placeholder_pcrs(3), &[7u8; 32]).unwrap();
-        assert_eq!(parsed.user_data.unwrap(), vec![7u8; 32]);
-        assert_eq!(parsed.module_id.unwrap(), "test-module");
+        assert_eq!(parsed.user_data.unwrap().into_vec(), vec![7u8; 32]);
+        assert_eq!(parsed.module_id, "test-module");
     }
 
     #[test]
@@ -880,17 +735,59 @@ mod tests {
         assert!(matches!(err, AttestationError::UserDataMismatch { .. }));
     }
 
-    /// Documents without a `certificate` field must be rejected by the signature
-    /// verifier — accepting them would allow PCR/user_data checks to pass without
-    /// any AWS hardware proof.
+    /// A document without a `certificate` field would let PCR/`user_data` checks pass with no
+    /// AWS hardware proof. Being mandatory in AWS's schema, the decode now catches it first.
     #[test]
-    fn verify_cose_sign1_rejects_missing_certificate() {
+    fn rejects_missing_certificate() {
+        let doc = make_doc_without_certificate(
+            vec![(0, vec![3u8; 48]), (1, vec![3u8; 48]), (2, vec![3u8; 48])],
+            Some(vec![7u8; 32]),
+        );
+
+        for err in [
+            parse_attestation_doc(&doc).unwrap_err(),
+            verify_cose_sign1_signature(&doc).unwrap_err(),
+        ] {
+            assert!(
+                matches!(err, AttestationError::Malformed(_)),
+                "expected Malformed error, got: {err:?}"
+            );
+        }
+    }
+
+    /// A non-bstr `pcrs` value used to be skipped, leaving the PCR absent rather than rejected.
+    #[test]
+    fn rejects_malformed_pcr_entry() {
+        use ciborium::value::Value as V;
+
         let doc = make_doc(
             vec![(0, vec![3u8; 48]), (1, vec![3u8; 48]), (2, vec![3u8; 48])],
             Some(vec![7u8; 32]),
         );
-        // Must return an error when the certificate field is absent.
-        let err = verify_cose_sign1_signature(&doc).unwrap_err();
+        // Re-encode the payload with pcr1 replaced by a text string.
+        let sign1 = crate::cose::parse_cose_sign1(&doc).unwrap();
+        let mut payload: V = ciborium::from_reader(sign1.payload.unwrap().as_slice()).unwrap();
+        if let V::Map(entries) = &mut payload {
+            for (k, v) in entries.iter_mut() {
+                if *k == V::Text("pcrs".into())
+                    && let V::Map(pcrs) = v
+                {
+                    pcrs[1].1 = V::Text("not-a-digest".into());
+                }
+            }
+        }
+        let mut payload_bytes = Vec::new();
+        ciborium::into_writer(&payload, &mut payload_bytes).unwrap();
+        let cose = V::Array(vec![
+            V::Bytes(vec![]),
+            V::Map(vec![]),
+            V::Bytes(payload_bytes),
+            V::Bytes(vec![0u8; 96]),
+        ]);
+        let mut tampered = Vec::new();
+        ciborium::into_writer(&cose, &mut tampered).unwrap();
+
+        let err = parse_attestation_doc(&tampered).unwrap_err();
         assert!(
             matches!(err, AttestationError::Malformed(_)),
             "expected Malformed error, got: {err:?}"
