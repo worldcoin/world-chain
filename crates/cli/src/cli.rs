@@ -3,7 +3,7 @@ use ::eyre::eyre::bail;
 use alloy_chains::NamedChain;
 use alloy_primitives::{Address, address};
 use reth_chainspec::{EthChainSpec, ForkCondition};
-use reth_network_peers::PeerId;
+use reth_network_peers::{PeerId, TrustedPeer};
 use reth_node_builder::NodeConfig;
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpGasLimitConfig};
@@ -25,141 +25,20 @@ pub use builder::*;
 pub use p2p::*;
 pub use pbh::*;
 
-pub const DEFAULT_FLASHBLOCKS_SENTRIES: &str = "enode://78ca7daeb63956cbc3985853d5699a6404d976a2612575563f46876968fdca2383a195ee7db40de348757b2256195996933708f351169ca3f3fe93ab2a774608@16.62.98.53:30303,enode://c96dcadf4cdea4c39ec3fd775637d9e67d455b856b1514cfcf55b72f873a34b96d69e47ccea9fc797a446d4e6948aa80f6b9d479a1727ca166758a900b08f422@16.63.14.166:30303,enode://15688a7b281c32a4da633252dcc5019d60f037ee9eb46d05093dd3023bdd688b9b207d10a39e054a5ed87db666b2cb75696f6537de74d1e1f8dcabc53dc8d2ab@16.63.123.160:30303";
+/// Default flashblocks sentries for World Chain Mainnet.
+pub const FLASHBLOCKS_MAINNET_SENTRIES: &str = "enode://78ca7daeb63956cbc3985853d5699a6404d976a2612575563f46876968fdca2383a195ee7db40de348757b2256195996933708f351169ca3f3fe93ab2a774608@16.62.98.53:30303,enode://c96dcadf4cdea4c39ec3fd775637d9e67d455b856b1514cfcf55b72f873a34b96d69e47ccea9fc797a446d4e6948aa80f6b9d479a1727ca166758a900b08f422@16.63.14.166:30303,enode://15688a7b281c32a4da633252dcc5019d60f037ee9eb46d05093dd3023bdd688b9b207d10a39e054a5ed87db666b2cb75696f6537de74d1e1f8dcabc53dc8d2ab@16.63.123.160:30303";
 
-pub const DEFAULT_FLASHBLOCKS_SENTRIES_SEPOLIA: &str = "enode://08f6bec85b85908cc0bf09fb26fba7e5c53c4e924aae795784aa002a18afd7d1e0be5f9bb8c71fbad9b86c00b27fd45b654e234ef4b7eff2432acd6cddc256d3@51.34.157.154:30303,enode://444a4af7a46f668f8f1abf3863caa72cbe773e6830083a493cc43e9996b4e3017013605bfddb779b2494a3f9cf75961b70ad35a347bc055969a3744e1738de6d@16.18.61.93:30303,enode://ae8e652ad611d0276427ecc751c5effacdb6a9dcf8080b9380f24db7a0770ff657ded924d45805fb3eef21159f7294316b0e6dc51101f92b86c955509a3e8cc0@51.96.83.177:30303";
+/// DiscV5 Bootnodes for World Chain Mainnet.
+/// TODO: FIXME:
+pub const MAINNET_BOOTNODES: &str = "";
+
+/// DiscV5 Bootnodes for World Chain Sepolia.
+pub const SEPOLIA_BOOTNODES: &str = "enode://d356f4ccdb491b4ef7d481d2015332fe8eb63084f38e1fa0c65ef2a400a35c5de1447cfbc502e9232fc30d419d43f270bdbdb854d5d4482ad470fc0dbae900d2@51.96.6.253:0?discport=30301,enode://bfbb7c57e012e42d5322f159a251df9c2c102a0d8cc1d77d1f0ab3b09639d90900717b8ff6a7b46ae26e3781b62a6d69abcdd681f6f8a7534a2bb327c1f56eed@51.34.138.169:0?discport=30301";
+
+/// Default flashblocks sentries for World Chain Sepolia.
+pub const FLASHBLOCKS_SEPOLIA_SENTRIES: &str = "enode://08f6bec85b85908cc0bf09fb26fba7e5c53c4e924aae795784aa002a18afd7d1e0be5f9bb8c71fbad9b86c00b27fd45b654e234ef4b7eff2432acd6cddc256d3@51.34.157.154:30303,enode://444a4af7a46f668f8f1abf3863caa72cbe773e6830083a493cc43e9996b4e3017013605bfddb779b2494a3f9cf75961b70ad35a347bc055969a3744e1738de6d@16.18.61.93:30303,enode://ae8e652ad611d0276427ecc751c5effacdb6a9dcf8080b9380f24db7a0770ff657ded924d45805fb3eef21159f7294316b0e6dc51101f92b86c955509a3e8cc0@51.96.83.177:30303";
 
 use crate::config::WorldChainNodeConfig;
-
-/// Custom RPC module validator for World Chain.
-///
-/// Behaves like reth's `DefaultRpcModuleValidator` (typos and unknown
-/// modules are rejected), but additionally accepts the World Chain custom
-/// namespaces. Currently:
-///
-/// - `simulate` — gates the `worldchain_simulateUnsignedUserOp` endpoint.
-///   Only valid in `--http.api` (the endpoint is registered on the HTTP
-///   server only, so allowing it on `--ws.api` would silently do nothing).
-#[derive(Debug, Clone, Copy)]
-pub struct WorldChainRpcModuleValidator;
-
-/// World Chain custom RPC namespaces accepted by the validator. All entries
-/// here are HTTP-only — they're rejected in `--ws.api`.
-const WORLD_CHAIN_CUSTOM_MODULES: &[&str] = &["simulate"];
-
-impl RpcModuleValidator for WorldChainRpcModuleValidator {
-    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String> {
-        // Defer to reth's default validator first — it accepts every standard
-        // module and rejects anything else. If it succeeds, no `Other` was
-        // present and there is nothing for us to whitelist.
-        if let Ok(selection) = DefaultRpcModuleValidator::parse_selection(s) {
-            return Ok(selection);
-        }
-        // Default rejected: re-parse and let through only `Other` entries that
-        // match a World Chain custom namespace. Anything else stays an error.
-        let selection = RpcModuleSelection::from_str(s)
-            .map_err(|e| format!("Failed to parse RPC modules: {e}"))?;
-        if let RpcModuleSelection::Selection(modules) = &selection {
-            for module in modules {
-                if let RethRpcModule::Other(name) = module
-                    && !WORLD_CHAIN_CUSTOM_MODULES.contains(&name.as_str())
-                {
-                    return Err(format!("Unknown RPC module: '{name}'"));
-                }
-            }
-        }
-        Ok(selection)
-    }
-
-    fn validate_selection(modules: &RpcModuleSelection, arg_name: &str) -> Result<(), String> {
-        let RpcModuleSelection::Selection(set) = modules else {
-            // `All` / `Standard` never include custom modules.
-            return Ok(());
-        };
-        for module in set {
-            let RethRpcModule::Other(name) = module else {
-                continue;
-            };
-            if !WORLD_CHAIN_CUSTOM_MODULES.contains(&name.as_str()) {
-                return Err(format!(
-                    "Invalid RPC module '{name}' in {arg_name}: Unknown RPC module: '{name}'"
-                ));
-            }
-            // All custom modules are HTTP-only.
-            if arg_name != "http.api" {
-                return Err(format!(
-                    "RPC module '{name}' is only supported in --http.api, not --{arg_name}"
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod validator_tests {
-    use super::*;
-
-    #[test]
-    fn accepts_simulate_alongside_standard() {
-        assert!(WorldChainRpcModuleValidator::parse_selection("eth,simulate").is_ok());
-    }
-
-    #[test]
-    fn rejects_typos() {
-        let err = WorldChainRpcModuleValidator::parse_selection("eth,simualte").unwrap_err();
-        assert!(err.contains("Unknown RPC module: 'simualte'"), "got: {err}");
-    }
-
-    #[test]
-    fn simulate_allowed_on_http_api() {
-        let selection = WorldChainRpcModuleValidator::parse_selection("eth,simulate").unwrap();
-        WorldChainRpcModuleValidator::validate_selection(&selection, "http.api").unwrap();
-    }
-
-    #[test]
-    fn simulate_rejected_on_ws_api() {
-        let selection = WorldChainRpcModuleValidator::parse_selection("eth,simulate").unwrap();
-        let err =
-            WorldChainRpcModuleValidator::validate_selection(&selection, "ws.api").unwrap_err();
-        assert!(err.contains("simulate"), "got: {err}");
-        assert!(err.contains("http.api"), "got: {err}");
-    }
-
-    #[test]
-    fn all_selection_passes_validation() {
-        let selection = WorldChainRpcModuleValidator::parse_selection("all").unwrap();
-        WorldChainRpcModuleValidator::validate_selection(&selection, "ws.api").unwrap();
-    }
-}
-
-/// Arguments controlling the live pre-image witness oracle.
-#[derive(Debug, Clone, clap::Args)]
-pub struct WitnessArgs {
-    /// Enable live pre-image witness collection for the proof system.
-    #[arg(long = "witness.collect", default_value_t = false)]
-    pub collect: bool,
-    /// Ring-buffer depth: the maximum number of recent block witnesses retained in the in-memory
-    /// cache served over `debug_collectRangeWitness`.
-    #[arg(long = "witness.depth", default_value_t = Self::DEFAULT_DEPTH)]
-    pub depth: usize,
-}
-
-impl WitnessArgs {
-    /// Default ring-buffer depth, matching the witness cache's
-    /// compile-time default capacity.
-    const DEFAULT_DEPTH: usize = 1024;
-}
-
-impl Default for WitnessArgs {
-    fn default() -> Self {
-        Self {
-            collect: false,
-            depth: Self::DEFAULT_DEPTH,
-        }
-    }
-}
-
 #[derive(Debug, Clone, clap::Args)]
 pub struct WorldChainArgs {
     /// op rollup args
@@ -256,12 +135,16 @@ impl WorldChainArgs {
                     && flashblocks.sentry_peers.is_empty()
                     && !self.disable_bootnodes
                 {
-                    flashblocks.sentry_peers = parse_trusted_peer(DEFAULT_FLASHBLOCKS_SENTRIES)?;
+                    flashblocks.sentry_peers = parse_trusted_peer(FLASHBLOCKS_MAINNET_SENTRIES)?;
                     debug!(
                         target: "world_chain::network",
                         sentries = ?flashblocks.sentry_peers,
                         "Setting default flashblocks sentries"
                     );
+                }
+
+                if !self.disable_bootnodes {
+                    set_default_bootnodes(config, MAINNET_BOOTNODES)?;
                 }
 
                 if self.pbh.entrypoint == Address::default() {
@@ -300,13 +183,16 @@ impl WorldChainArgs {
                     && flashblocks.sentry_peers.is_empty()
                     && !self.disable_bootnodes
                 {
-                    flashblocks.sentry_peers =
-                        parse_trusted_peer(DEFAULT_FLASHBLOCKS_SENTRIES_SEPOLIA)?;
+                    flashblocks.sentry_peers = parse_trusted_peer(FLASHBLOCKS_SEPOLIA_SENTRIES)?;
                     debug!(
                         target: "world_chain::network",
                         sentries = ?flashblocks.sentry_peers,
                         "Setting default flashblocks sentry pool"
                     );
+                }
+
+                if !self.disable_bootnodes {
+                    set_default_bootnodes(config, SEPOLIA_BOOTNODES)?;
                 }
 
                 if self.pbh.entrypoint == Address::default() {
@@ -391,6 +277,128 @@ impl WorldChainArgs {
             },
             flashblocks_store,
         })
+    }
+}
+
+/// Sets the corresponding chain's default DiscV5 bootnodes.
+fn set_default_bootnodes(
+    config: &mut NodeConfig<WorldChainSpec>,
+    bootnodes: &str,
+) -> eyre::Result<()> {
+    if bootnodes.is_empty() {
+        warn!(
+            target: "world_chain::network",
+            chain = %config.chain.chain(),
+            "No default DiscV5 bootnodes for this chain, falling back to the chain spec bootnodes"
+        );
+        return Ok(());
+    }
+
+    let bootnodes = bootnodes
+        .split(',')
+        .map(|enode| {
+            enode.parse::<TrustedPeer>().map_err(|err| {
+                eyre::Report::msg(format!("invalid default bootnode '{enode}': {err}"))
+            })
+        })
+        .collect::<eyre::Result<Vec<_>>>()?;
+
+    debug!(
+        target: "world_chain::network",
+        bootnodes = ?bootnodes,
+        "Setting default DiscV5 bootnodes"
+    );
+
+    if let Some(existing) = &mut config.network.bootnodes {
+        existing.extend(bootnodes);
+    } else {
+        config.network.bootnodes = Some(bootnodes);
+    }
+
+    Ok(())
+}
+
+/// Custom RPC module validator for World Chain.
+#[derive(Debug, Clone, Copy)]
+pub struct WorldChainRpcModuleValidator;
+
+/// World Chain custom RPC namespaces accepted by the validator. All entries
+/// here are HTTP-only — they're rejected in `--ws.api`.
+const WORLD_CHAIN_CUSTOM_MODULES: &[&str] = &["simulate"];
+
+impl RpcModuleValidator for WorldChainRpcModuleValidator {
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String> {
+        // Defer to reth's default validator first — it accepts every standard
+        // module and rejects anything else. If it succeeds, no `Other` was
+        // present and there is nothing for us to whitelist.
+        if let Ok(selection) = DefaultRpcModuleValidator::parse_selection(s) {
+            return Ok(selection);
+        }
+        // Default rejected: re-parse and let through only `Other` entries that
+        // match a World Chain custom namespace. Anything else stays an error.
+        let selection = RpcModuleSelection::from_str(s)
+            .map_err(|e| format!("Failed to parse RPC modules: {e}"))?;
+        if let RpcModuleSelection::Selection(modules) = &selection {
+            for module in modules {
+                if let RethRpcModule::Other(name) = module
+                    && !WORLD_CHAIN_CUSTOM_MODULES.contains(&name.as_str())
+                {
+                    return Err(format!("Unknown RPC module: '{name}'"));
+                }
+            }
+        }
+        Ok(selection)
+    }
+
+    fn validate_selection(modules: &RpcModuleSelection, arg_name: &str) -> Result<(), String> {
+        let RpcModuleSelection::Selection(set) = modules else {
+            // `All` / `Standard` never include custom modules.
+            return Ok(());
+        };
+        for module in set {
+            let RethRpcModule::Other(name) = module else {
+                continue;
+            };
+            if !WORLD_CHAIN_CUSTOM_MODULES.contains(&name.as_str()) {
+                return Err(format!(
+                    "Invalid RPC module '{name}' in {arg_name}: Unknown RPC module: '{name}'"
+                ));
+            }
+            // All custom modules are HTTP-only.
+            if arg_name != "http.api" {
+                return Err(format!(
+                    "RPC module '{name}' is only supported in --http.api, not --{arg_name}"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Arguments controlling the live pre-image witness oracle.
+#[derive(Debug, Clone, clap::Args)]
+pub struct WitnessArgs {
+    /// Enable live pre-image witness collection for the proof system.
+    #[arg(long = "witness.collect", default_value_t = false)]
+    pub collect: bool,
+    /// Ring-buffer depth: the maximum number of recent block witnesses retained in the in-memory
+    /// cache served over `debug_collectRangeWitness`.
+    #[arg(long = "witness.depth", default_value_t = Self::DEFAULT_DEPTH)]
+    pub depth: usize,
+}
+
+impl WitnessArgs {
+    /// Default ring-buffer depth, matching the witness cache's
+    /// compile-time default capacity.
+    const DEFAULT_DEPTH: usize = 1024;
+}
+
+impl Default for WitnessArgs {
+    fn default() -> Self {
+        Self {
+            collect: false,
+            depth: Self::DEFAULT_DEPTH,
+        }
     }
 }
 
@@ -579,6 +587,31 @@ mod tests {
     }
 
     #[test]
+    fn sepolia_seeds_default_discovery_bootnodes() {
+        let args = CommandParser::parse_from(["bin"]).world;
+        let mut node_config = NodeConfig::new(WorldChainSpec::sepolia());
+
+        args.into_config(&mut node_config).unwrap();
+
+        let bootnodes = node_config.network.bootnodes.expect("sepolia bootnodes");
+        assert_eq!(
+            bootnodes,
+            parse_trusted_peer(SEPOLIA_BOOTNODES).unwrap(),
+            "every default sepolia bootnode must reach the discovery bootstrap list"
+        );
+    }
+
+    #[test]
+    fn disable_bootnodes_skips_default_discovery_bootnodes() {
+        let args = CommandParser::parse_from(["bin", "--worldchain.disable-bootnodes"]).world;
+        let mut node_config = NodeConfig::new(WorldChainSpec::sepolia());
+
+        args.into_config(&mut node_config).unwrap();
+
+        assert!(node_config.network.bootnodes.is_none());
+    }
+
+    #[test]
     fn flashblocks_store_config_defaults_under_datadir() {
         let args = CommandParser::parse_from([
             "bin",
@@ -714,5 +747,37 @@ mod tests {
             result.is_err(),
             "Clap should error on empty string for PeerId"
         );
+    }
+
+    #[test]
+    fn accepts_simulate_alongside_standard() {
+        assert!(WorldChainRpcModuleValidator::parse_selection("eth,simulate").is_ok());
+    }
+
+    #[test]
+    fn rejects_typos() {
+        let err = WorldChainRpcModuleValidator::parse_selection("eth,simualte").unwrap_err();
+        assert!(err.contains("Unknown RPC module: 'simualte'"), "got: {err}");
+    }
+
+    #[test]
+    fn simulate_allowed_on_http_api() {
+        let selection = WorldChainRpcModuleValidator::parse_selection("eth,simulate").unwrap();
+        WorldChainRpcModuleValidator::validate_selection(&selection, "http.api").unwrap();
+    }
+
+    #[test]
+    fn simulate_rejected_on_ws_api() {
+        let selection = WorldChainRpcModuleValidator::parse_selection("eth,simulate").unwrap();
+        let err =
+            WorldChainRpcModuleValidator::validate_selection(&selection, "ws.api").unwrap_err();
+        assert!(err.contains("simulate"), "got: {err}");
+        assert!(err.contains("http.api"), "got: {err}");
+    }
+
+    #[test]
+    fn all_selection_passes_validation() {
+        let selection = WorldChainRpcModuleValidator::parse_selection("all").unwrap();
+        WorldChainRpcModuleValidator::validate_selection(&selection, "ws.api").unwrap();
     }
 }
