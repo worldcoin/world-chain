@@ -3104,9 +3104,7 @@ where
         prover,
         game_provider,
         Sp1BackendConfig {
-            split_count: 1,
             allow_unfinalized: false,
-            session_poll_interval: Duration::from_secs(10),
         },
     );
 
