@@ -280,13 +280,7 @@ impl WorldChainArgs {
     }
 }
 
-/// Seeds discovery with the chain's default DiscV5 bootnodes.
-///
-/// `NodeConfig::network::bootnodes` is the only hook that reaches both discovery protocols: op-reth
-/// snapshots it into the DiscV5 bootstrap list and the DiscV4/peer-manager boot set while building
-/// the network config, so mutating the resolved `NetworkConfig::boot_nodes` later is DiscV4-only.
-/// Operator-supplied `--bootnodes` always wins, and an empty constant leaves the chain-spec
-/// fallback in place rather than resolving to an empty bootstrap list.
+/// Sets the corresponding chain's default DiscV5 bootnodes.
 fn set_default_bootnodes(
     config: &mut NodeConfig<WorldChainSpec>,
     bootnodes: &str,
