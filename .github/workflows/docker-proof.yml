@@ -100,6 +100,7 @@ jobs:
           image_name: ${{ env.IMAGE_NAME }}${{ matrix.service.suffix }}
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          s3_cache_enabled: ${{ matrix.service.target != 'sp1-worker' || matrix.platform.platform != 'linux/arm64' }}
           dockerfile: Dockerfile.prover
           target: ${{ matrix.service.target }}
           build_args: |
