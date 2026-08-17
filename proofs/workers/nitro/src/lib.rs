@@ -25,7 +25,7 @@
 use alloy_primitives::Bytes;
 use alloy_sol_types::SolValue;
 use anyhow::{Context, Result, bail};
-use tracing::info;
+use tracing::{debug, info};
 use world_chain_proof_kona_host::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input,
 };
@@ -90,8 +90,7 @@ where
             )
             .context("proof request does not match its game")?;
 
-        info!(
-            lifecycle_event = "proof_game_validated",
+        debug!(
             proof_id = %request.id(),
             game_address = %request.game,
             l2_block_number = request.l2_block_number,

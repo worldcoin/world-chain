@@ -150,8 +150,7 @@ impl<P: WorldSuccinctProver, G: ProofGameProvider> Sp1Backend<P, G> {
                 self.host.rollup_config_hash,
             )
             .context("proof request does not match its game")?;
-        tracing::info!(
-            lifecycle_event = "proof_game_validated",
+        tracing::debug!(
             proof_id = %request.id(),
             game_address = %request.game,
             block_interval = context.block_interval,
