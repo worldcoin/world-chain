@@ -47,7 +47,9 @@ permissions:
 jobs:
   build-and-push:
     name: build and push docker
-    environment: dev
+    environment:
+      name: dev
+      deployment: false
     strategy:
       fail-fast: false
       matrix:

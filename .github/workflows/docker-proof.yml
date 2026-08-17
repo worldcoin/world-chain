@@ -66,7 +66,9 @@ jobs:
   build-sp1-guests:
     name: build canonical SP1 guests
     needs: [resolve-sha]
-    environment: dev
+    environment:
+      name: dev
+      deployment: false
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - name: Check Out Repo
@@ -118,7 +120,9 @@ jobs:
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     needs: [resolve-sha, build-sp1-guests]
-    environment: dev
+    environment:
+      name: dev
+      deployment: false
     strategy:
       fail-fast: false
       matrix:
@@ -192,7 +196,9 @@ jobs:
   build-nitro-worker-image:
     name: build nitro-worker image
     needs: [resolve-sha]
-    environment: dev
+    environment:
+      name: dev
+      deployment: false
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - name: Check Out Repo
@@ -238,7 +244,9 @@ jobs:
   build-nitro-enclave-image:
     name: build nitro-enclave image
     needs: [resolve-sha]
-    environment: dev
+    environment:
+      name: dev
+      deployment: false
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - name: Check Out Repo
