@@ -19149,6 +19149,8 @@ dependencies = [
  "rand 0.8.7",
  "rcgen",
  "rkyv",
+ "rustls-pki-types",
+ "rustls-webpki 0.103.13",
  "serde",
  "serde_bytes",
  "serde_json",
