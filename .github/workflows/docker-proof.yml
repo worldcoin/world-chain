@@ -17,6 +17,11 @@ on:
         description: Custom image tag to publish (e.g. "alpha-v0.1.0").
         required: false
         default: nightly
+      build_sp1_arm:
+        description: Build the SP1 worker for ARM64 under QEMU.
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -86,13 +91,14 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
       # The guest ELFs are always compiled in the digest-pinned linux/amd64 SP1 image, so
-      # the vkeys are identical on every runner; arm64 runners emulate that stage.
+      # the vkeys are identical on every runner; optional arm64 builds emulate that stage.
       - name: Set up QEMU for the canonical SP1 guest compiler
-        if: matrix.service.target == 'sp1-worker' && matrix.platform.platform == 'linux/arm64'
+        if: matrix.service.target == 'sp1-worker' && matrix.platform.platform == 'linux/arm64' && inputs.build_sp1_arm
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
           platforms: amd64
       - name: Build and push digest
+        if: matrix.service.target != 'sp1-worker' || matrix.platform.platform != 'linux/arm64' || inputs.build_sp1_arm
         uses: ./.github/actions/docker-build-push-digest
         with:
           platform: ${{ matrix.platform.platform }}
