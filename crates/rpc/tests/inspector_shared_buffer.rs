@@ -110,7 +110,7 @@ async fn shared_buffer_call_resolves_selector() {
 
     db.insert_account_info(target, AccountInfo::default());
 
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm_with_inspector(
         &mut db,
         evm_env(),
         SimulationInspector::default(),

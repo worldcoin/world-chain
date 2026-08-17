@@ -33,7 +33,9 @@ jobs:
   acceptance-tests:
     name: acceptance-tests (${{ matrix.network }})
     runs-on: arc-public-8xlarge-amd64-runner
-    environment: ${{ matrix.environment }}
+    environment:
+      name: ${{ matrix.environment }}
+      deployment: false
     timeout-minutes: 45
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.network }}

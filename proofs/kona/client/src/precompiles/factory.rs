@@ -1,7 +1,10 @@
 use alloy_evm::{Database, EvmEnv, EvmFactory, precompiles::PrecompilesMap};
 use alloy_op_evm::{
     OpEvm, OpEvmContext, OpTx, OpTxError,
-    post_exec::{PostExecEvmFactoryHooks, PostExecExecutedTx, PostExecTxContext, WarmingState},
+    post_exec::{
+        NullRefundPolicy, PostExecEvmFactoryHooks, PostExecExecutedTx, PostExecRefundInspector,
+        PostExecTxContext,
+    },
 };
 use op_revm::{
     L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransaction, precompiles::OpPrecompiles,
@@ -82,7 +85,8 @@ impl Default for ZkvmOpEvmFactory {
 }
 
 impl PostExecEvmFactoryHooks for ZkvmOpEvmFactory {
-    type Snapshot = WarmingState;
+    // `OpEvm` defaults its refund policy to `NullRefundPolicy`; keep the snapshot type tied to it.
+    type Snapshot = <NullRefundPolicy as PostExecRefundInspector>::Snapshot;
 
     fn begin_post_exec_tx<DB, I>(evm: &mut Self::Evm<DB, I>, ctx: PostExecTxContext)
     where

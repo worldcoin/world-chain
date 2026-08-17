@@ -13,10 +13,13 @@ world-chain-proof-sp1-worker run \
   --l1-rpc "$L1_RPC_URL" \
   --l1-beacon-rpc "$L1_BEACON_RPC_URL" \
   --l2-rpc "$L2_RPC_URL" \
-  --block-interval 10 \
   --worker-id worker-0 \
   --prover network
 ```
+
+For every leased job, the worker reads the proof interval and immutable transition metadata from
+the job's `MultiProofGame`. It rejects queued root, block, L1 head, or rollup-config values that do
+not match the game before collecting a witness.
 
 The network prover additionally requires:
 
@@ -33,6 +36,22 @@ does not interrupt in-flight work.
 
 `NETWORK_RPC_URL` remains the optional override for the SP1 Network API itself. It is distinct from
 `SP1_NETWORK_L1_RPC_URL`.
+
+### SP1 Network execution limits
+
+Network requests skip local guest execution by default and submit with separate upper bounds for
+the range and aggregation guests:
+
+| Variable | Flag | Default |
+|---|---|---:|
+| `SP1_RANGE_CYCLE_LIMIT` | `--sp1-range-cycle-limit` | `1500000000000` |
+| `SP1_RANGE_GAS_LIMIT` | `--sp1-range-gas-limit` | `1300000000000` PGUs |
+| `SP1_AGGREGATION_CYCLE_LIMIT` | `--sp1-aggregation-cycle-limit` | `7000000` |
+| `SP1_AGGREGATION_GAS_LIMIT` | `--sp1-aggregation-gas-limit` | `6500000` PGUs |
+
+These are safety ceilings, not requested billing amounts. To execute each guest locally and let the
+SP1 SDK estimate both limits instead, set `SP1_ESTIMATE_LIMITS=true` or pass
+`--sp1-estimate-limits`. Local estimation conflicts with explicitly configured limit flags.
 
 ## Deposit PROVE
 
