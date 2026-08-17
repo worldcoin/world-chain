@@ -32,7 +32,10 @@ use alloy_primitives::{Address, B256};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres;
 use world_chain_proof_kona_host::online::{OnlineHostConfig, resolve_l1_head};
-use world_chain_proof_protocol::{ConsensusProvider, OptimismConsensusClient};
+use world_chain_proof_protocol::{
+    ConsensusProvider, OptimismConsensusClient, ProofGameContext, ProofGameContextError,
+    ProofGameProvider,
+};
 use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
@@ -214,11 +217,18 @@ async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
 ) where
     P: WorldSuccinctProver + Send + Sync + 'static,
 {
+    let game_provider = StaticProofGameProvider(ProofGameContext {
+        block_interval,
+        rollup_config_hash: host.rollup_config_hash,
+        root_claim,
+        l2_block_number: claimed_block,
+        l1_head,
+    });
     let backend = Sp1Backend::new(
         host,
         prover,
+        game_provider,
         Sp1BackendConfig {
-            block_interval,
             split_count,
             allow_unfinalized: false,
             session_poll_interval: Duration::from_secs(10),
@@ -316,4 +326,17 @@ async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
 
     token.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), worker_handle).await;
+}
+
+#[derive(Clone, Copy)]
+struct StaticProofGameProvider(ProofGameContext);
+
+#[async_trait::async_trait]
+impl ProofGameProvider for StaticProofGameProvider {
+    async fn proof_game_context(
+        &self,
+        _game: Address,
+    ) -> Result<ProofGameContext, ProofGameContextError> {
+        Ok(self.0)
+    }
 }

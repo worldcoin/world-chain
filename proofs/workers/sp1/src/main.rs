@@ -59,8 +59,6 @@ mod tests {
             "http://127.0.0.1:8545",
             "--l1-beacon-rpc",
             "http://127.0.0.1:5052",
-            "--block-interval",
-            "10",
             "--worker-id",
             "test",
         ]);

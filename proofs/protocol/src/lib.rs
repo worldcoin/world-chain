@@ -10,6 +10,7 @@ pub const DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS: u64 = 5 * 60;
 mod bindings;
 mod consensus_provider;
 mod lineage;
+mod proof_game;
 mod types;
 
 // re-exports
@@ -22,6 +23,9 @@ pub use lineage::{
     RegisteredLineageConfig, SelectedLineage, SelectedLineageGame, read_game_for_transition,
     read_lineage_anchor, read_lineage_resolution_status, read_registered_lineage_config,
     select_lineage,
+};
+pub use proof_game::{
+    AlloyProofGameProvider, ProofGameContext, ProofGameContextError, ProofGameProvider,
 };
 pub use types::{
     ClaimData, GameCreation, GameStatus, GameStatusError, InvalidationReason,

@@ -56,7 +56,9 @@ use world_chain_proof_core::{
     boot::TransitionPublicValues, hash_world_rollup_config, range::WorldRangeHardforkConfig,
 };
 use world_chain_proof_kona_host::online::OnlineHostConfig;
-use world_chain_proof_protocol::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
+use world_chain_proof_protocol::{
+    AlloyProofGameProvider, OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD,
+};
 use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
@@ -3042,13 +3044,27 @@ async fn start_sp1_worker(
             let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16)
                 .await
                 .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
-            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+            start_sp1_worker_with_prover(
+                l1_rpc_url,
+                prover_service_url,
+                deployment,
+                kind,
+                host,
+                prover,
+            )
         }
         Sp1ProverKind::Mock => {
             let prover = MockSuccinctProver::new(SP1ProofMode::Groth16)
                 .await
                 .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
-            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+            start_sp1_worker_with_prover(
+                l1_rpc_url,
+                prover_service_url,
+                deployment,
+                kind,
+                host,
+                prover,
+            )
         }
         Sp1ProverKind::Network => {
             let private_key = std::env::var(SP1_PRIVATE_KEY_ENV).wrap_err_with(|| {
@@ -3058,12 +3074,20 @@ async fn start_sp1_worker(
                 NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key, SignerType::Local)
                     .await
                     .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
-            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+            start_sp1_worker_with_prover(
+                l1_rpc_url,
+                prover_service_url,
+                deployment,
+                kind,
+                host,
+                prover,
+            )
         }
     }
 }
 
 fn start_sp1_worker_with_prover<P>(
+    l1_rpc_url: &str,
     prover_service_url: &str,
     deployment: &WorldProofSystemDeployment,
     kind: Sp1ProverKind,
@@ -3073,11 +3097,13 @@ fn start_sp1_worker_with_prover<P>(
 where
     P: WorldSuccinctProver + Send + Sync + 'static,
 {
+    let game_provider =
+        AlloyProofGameProvider::new(ProviderBuilder::new().connect_http(Url::parse(l1_rpc_url)?));
     let backend = Sp1Backend::new(
         host,
         prover,
+        game_provider,
         Sp1BackendConfig {
-            block_interval: deployment.block_interval,
             split_count: 1,
             allow_unfinalized: false,
             session_poll_interval: Duration::from_secs(10),

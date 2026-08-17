@@ -19,6 +19,7 @@ path = "src/main.rs"
 # Generic worker infrastructure
 world-chain-proof-worker.workspace = true
 world-chain-proof-metrics.workspace = true
+world-chain-proof-protocol.workspace = true
 world-chain-prover-service.workspace = true
 
 # Nitro prover (host-side, requires Linux + enclave feature)
@@ -32,6 +33,7 @@ world-chain-chainspec.workspace = true
 
 # Alloy types
 alloy-primitives = { workspace = true, features = ["serde"] }
+alloy-provider = { workspace = true, features = ["reqwest", "reqwest-rustls-tls"] }
 alloy-sol-types.workspace = true
 
 # Async / runtime

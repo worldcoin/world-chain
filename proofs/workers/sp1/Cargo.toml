@@ -20,6 +20,7 @@ world-chain-chainspec.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-kona-host.workspace = true
 world-chain-proof-metrics.workspace = true
+world-chain-proof-protocol.workspace = true
 world-chain-proof-sp1-host = { workspace = true, features = ["sp1"] }
 world-chain-proof-sp1-types.workspace = true
 world-chain-proof-worker.workspace = true
@@ -54,4 +55,3 @@ url.workspace = true
 testcontainers.workspace = true
 testcontainers-modules.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
-world-chain-proof-protocol.workspace = true
