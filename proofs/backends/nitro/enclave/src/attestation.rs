@@ -24,20 +24,7 @@ use webpki::{EndEntityCert, ExtendedKeyUsageValidator, KeyPurposeIdIter};
 /// This constant is used to anchor the certificate chain validation in
 /// [`verify_cose_sign1_signature`]. The root certificate in the attestation document's
 /// `cabundle` field must match this value byte-for-byte.
-pub const AWS_NITRO_ROOT_CA_PEM: &str = r"-----BEGIN CERTIFICATE-----
-MIICETCCAZagAwIBAgIRAPkxdWgbkK/hHUbMtOTn+FYwCgYIKoZIzj0EAwMwSTEL
-MAkGA1UEBhMCVVMxDzANBgNVBAoMBkFtYXpvbjEMMAoGA1UECwwDQVdTMRswGQYD
-VQQDDBJhd3Mubml0cm8tZW5jbGF2ZXMwHhcNMTkxMDI4MTMyODA1WhcNNDkxMDI4
-MTQyODA1WjBJMQswCQYDVQQGEwJVUzEPMA0GA1UECgwGQW1hem9uMQwwCgYDVQQL
-DANBV1MxGzAZBgNVBAMMEmF3cy5uaXRyby1lbmNsYXZlczB2MBAGByqGSM49AgEG
-BSuBBAAiA2IABPwCVOumCMHzaHDimtqQvkY4MpJzbolL//Zy2YlES1BR5TSksfbb
-48C8WBoyt7F2Bw7eEtaaP+ohG2bnUs990d0JX28TcPQXCEPZ3BABIeTPYwEoCWZE
-h8l5YoQwTcU/9KNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUkCW1DdkF
-R+eWw5b6cp3PmanfS5YwDgYDVR0PAQH/BAQDAgGGMAoGCCqGSM49BAMDA2kAMGYC
-MQCjfy+Rocm9Xue4YnwWmNJVA44fA0P5W2OpYow9OYCVRaEevL8uO1XYru5xtMPW
-rfMCMQCi85sWBbJwKKXdS6BptQFuZbT73o/gBh1qUxl/nNr12UO8Yfwr6wPLb+6N
-IwLz3/Y=
------END CERTIFICATE-----";
+pub const AWS_NITRO_ROOT_CA_PEM: &str = include_str!("../res/aws_nitro_root_g1.pem");
 
 /// Lazy-decoded DER bytes of [`AWS_NITRO_ROOT_CA_PEM`].
 ///
@@ -804,7 +791,11 @@ mod tests {
     fn root_ca_pem_decodes_successfully() {
         // Verify the PEM delimiters are intact.
         assert!(AWS_NITRO_ROOT_CA_PEM.starts_with("-----BEGIN CERTIFICATE-----"));
-        assert!(AWS_NITRO_ROOT_CA_PEM.ends_with("-----END CERTIFICATE-----"));
+        assert!(
+            AWS_NITRO_ROOT_CA_PEM
+                .trim_end()
+                .ends_with("-----END CERTIFICATE-----")
+        );
         // Verify the base64 body decodes to valid DER.
         assert!(
             aws_root_ca_der().is_ok(),

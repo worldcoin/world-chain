@@ -24,7 +24,7 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{Context, Result, anyhow};
 use aws_nitro_enclaves_nsm_api::{
     api::{Request as NsmRequest, Response as NsmResponse},
-    driver::{nsm_init, nsm_process_request},
+    driver::{nsm_exit, nsm_init, nsm_process_request},
 };
 use k256::ecdsa::SigningKey;
 use kona_proof::{l1::OracleL1ChainProvider, l2::OracleL2ChainProvider};
@@ -47,6 +47,30 @@ use crate::protocol::{
 };
 
 const VMADDR_CID_ANY: u32 = 0xFFFF_FFFF;
+
+static NSM_FD: OnceLock<i32> = OnceLock::new();
+
+fn init_nsm() -> Result<i32> {
+    let fd = nsm_init();
+    if fd < 0 {
+        return Err(anyhow!("nsm_init returned negative fd: {fd}"));
+    }
+    match NSM_FD.set(fd) {
+        Ok(()) => Ok(fd),
+        Err(duplicate) => {
+            nsm_exit(duplicate);
+            nsm_fd()
+        }
+    }
+}
+
+/// Returns the shared NSM descriptor.
+fn nsm_fd() -> Result<i32> {
+    NSM_FD
+        .get()
+        .copied()
+        .ok_or_else(|| anyhow!("NSM device not initialised; call init_nsm() at startup"))
+}
 
 // ──────────────────────────────────────────────────────────────────────────────────────
 // Ephemeral signing key
@@ -188,10 +212,7 @@ fn sign_transition_public_values(
 /// Runs the enclave loop forever on the supplied vsock port.
 pub async fn serve_forever(port: u32) -> Result<()> {
     // Initialise NSM and the ephemeral signing key before accepting any connections.
-    let fd = nsm_init();
-    if fd < 0 {
-        return Err(anyhow!("nsm_init returned negative fd: {fd}"));
-    }
+    let fd = init_nsm()?;
     let _pubkey = init_signing_key(fd).context("failed to initialise enclave signing key")?;
 
     let addr = VsockAddr::new(VMADDR_CID_ANY, port);
@@ -419,10 +440,7 @@ fn ensure_transition_public_values_match(
 ///
 /// Produces a bare attestation document via the NSM device. No proof is run.
 fn handle_get_attestation() -> Result<EnclaveResponse> {
-    let fd = nsm_init();
-    if fd < 0 {
-        return Err(anyhow!("nsm_init returned negative fd: {fd}"));
-    }
+    let fd = nsm_fd()?;
 
     let request = NsmRequest::Attestation {
         user_data: None,
@@ -442,10 +460,7 @@ fn handle_get_attestation() -> Result<EnclaveResponse> {
 
 /// Calls the NSM device to produce an attestation document committing to `user_data`.
 fn request_attestation_doc(user_data: Option<&[u8; 32]>, nonce: &[u8; 32]) -> Result<Vec<u8>> {
-    let fd = nsm_init();
-    if fd < 0 {
-        return Err(anyhow!("nsm_init returned negative fd: {fd}"));
-    }
+    let fd = nsm_fd()?;
 
     let public_key_bytes = signing_key()
         .verifying_key()
