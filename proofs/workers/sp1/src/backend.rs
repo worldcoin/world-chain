@@ -21,15 +21,13 @@ use world_chain_prover_service::{
     BackendSession, BackendSessionStatus, ProofBackend, ProofData, ProofRequest, SessionType,
 };
 
+const SP1_SESSION_POLL_INTERVAL: Duration = Duration::from_secs(10);
+
 /// Configuration for [`Sp1Backend`].
 #[derive(Clone, Copy, Debug)]
 pub struct Sp1BackendConfig {
-    /// Number of equal-length sub-ranges proved independently before aggregation.
-    pub split_count: u64,
     /// Allow proving blocks newer than the finalized L2 head.
     pub allow_unfinalized: bool,
-    /// Sleep between SP1 prover session status polls while a proof is still running.
-    pub session_poll_interval: Duration,
 }
 
 /// [`ClaimedProofJobHandler`] for the [`ProofBackend::Sp1`] lane: builds witnesses over RPC
@@ -222,7 +220,7 @@ impl<P: WorldSuccinctProver, G: ProofGameProvider> Sp1Backend<P, G> {
         loop {
             match self.prover.poll(&session_id).await? {
                 Sp1SessionStatus::Running => {
-                    tokio::time::sleep(self.config.session_poll_interval).await;
+                    tokio::time::sleep(SP1_SESSION_POLL_INTERVAL).await;
                 }
                 Sp1SessionStatus::Completed => {
                     let proof = self.prover.download(&session_id).await?;
@@ -269,7 +267,7 @@ impl<P: WorldSuccinctProver, G: ProofGameProvider> Sp1Backend<P, G> {
         loop {
             match self.prover.poll(&session_id).await? {
                 Sp1SessionStatus::Running => {
-                    tokio::time::sleep(self.config.session_poll_interval).await;
+                    tokio::time::sleep(SP1_SESSION_POLL_INTERVAL).await;
                 }
                 Sp1SessionStatus::Completed => {
                     let proof = self.prover.download(&session_id).await?;

@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::ProviderBuilder;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::Parser;
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host::online::{
@@ -34,7 +34,6 @@ const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
 const DEFAULT_WORKER_HEARTBEAT_INTERVAL_SEC: u64 = 30;
 const DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES: u32 = 5;
-const DEFAULT_SP1_SESSION_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const SP1_NETWORK_BALANCE_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const MINIMUM_DEPOSIT_MULTIPLIER: u64 = 10;
 const DEFAULT_SP1_RANGE_CYCLE_LIMIT: u64 = 1_500_000_000_000;
@@ -101,10 +100,6 @@ pub struct WorkerArgs {
     #[arg(long, env = "ROLLUP_CONFIG_HASH")]
     rollup_config_hash: Option<B256>,
 
-    /// Number of equal-length sub-ranges proved independently per job.
-    #[arg(long, default_value_t = 1)]
-    ranges: u64,
-
     /// Allow proving blocks newer than the finalized L2 head.
     #[arg(long)]
     allow_unfinalized: bool,
@@ -145,15 +140,6 @@ pub struct WorkerArgs {
     /// Seconds to sleep between job-queue polls when no work is available.
     #[arg(long, default_value_t = 10)]
     poll_interval_seconds: u64,
-
-    /// Seconds to sleep between SP1 prover session status polls while a proof is running.
-    #[arg(
-        long,
-        env = "SP1_SESSION_POLL_INTERVAL_SECONDS",
-        default_value_t = DEFAULT_SP1_SESSION_POLL_INTERVAL.as_secs(),
-        value_parser = clap::value_parser!(u64).range(1..)
-    )]
-    sp1_session_poll_interval_seconds: u64,
 
     /// Execute each SP1 guest locally to estimate its cycle and gas limits before submitting it.
     /// By default, the worker skips local execution and uses the configured fixed limits.
@@ -261,13 +247,6 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
         &schedule,
         Duration::from_secs(cli.witness_timeout_seconds),
     )?;
-
-    // currently we don't support split_range != 1, therefore we ensure it's exactly 1
-    if cli.ranges != 1 {
-        bail!(
-            "Currently we don't support splitting the range proof into multiple ranges. Set `ranges` to 1."
-        )
-    }
 
     // ELFs are embedded at compile time via `sp1_sdk::include_elf!()`
     // (see `proofs/backends/sp1/elfs/build.rs`). Challenged roots are
@@ -447,9 +426,7 @@ where
         prover,
         game_provider,
         Sp1BackendConfig {
-            split_count: cli.ranges.max(1),
             allow_unfinalized: cli.allow_unfinalized,
-            session_poll_interval: Duration::from_secs(cli.sp1_session_poll_interval_seconds),
         },
     );
 
@@ -481,14 +458,12 @@ where
 
     tracing::info!(
         prover_service = %cli.prover_service_url,
-        ranges = cli.ranges.max(1),
         prover = %cli.prover,
         sp1_estimate_limits = cli.sp1_estimate_limits,
         sp1_range_cycle_limit = cli.sp1_range_cycle_limit,
         sp1_range_gas_limit = cli.sp1_range_gas_limit,
         sp1_aggregation_cycle_limit = cli.sp1_aggregation_cycle_limit,
         sp1_aggregation_gas_limit = cli.sp1_aggregation_gas_limit,
-        sp1_session_poll_interval_seconds = cli.sp1_session_poll_interval_seconds,
         submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = cli.submit_proof_retry_max_delay_ms,
@@ -527,27 +502,6 @@ mod tests {
             "--worker-id",
             "test",
         ]
-    }
-
-    #[test]
-    fn parses_sp1_session_poll_interval_seconds() {
-        let mut args = base_args();
-        args.extend(["--sp1-session-poll-interval-seconds", "3"]);
-
-        let cli = WorkerArgs::parse_from(args);
-
-        assert_eq!(cli.sp1_session_poll_interval_seconds, 3);
-    }
-
-    #[test]
-    fn rejects_zero_sp1_session_poll_interval_seconds() {
-        let mut args = base_args();
-        args.extend(["--sp1-session-poll-interval-seconds", "0"]);
-
-        let error =
-            WorkerArgs::try_parse_from(args).expect_err("zero poll interval should be rejected");
-
-        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
     }
 
     #[test]

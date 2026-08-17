@@ -86,16 +86,6 @@ async fn worker_proves_real_range_end_to_end() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1);
-    let split_count: u64 = std::env::var("E2E_SPLIT_COUNT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1);
-    // currently we don't support split_range != 1, therefore we ensure it's exactly 1
-    if split_count != 1 {
-        panic!(
-            "Currently we don't support splitting the range proof into multiple ranges. Set `ranges` to 1."
-        )
-    }
     let timeout = Duration::from_secs(
         std::env::var("E2E_TIMEOUT_SECS")
             .ok()
@@ -155,7 +145,6 @@ async fn worker_proves_real_range_end_to_end() {
                 prover,
                 kind,
                 block_interval,
-                split_count,
                 root_claim,
                 l1_head,
                 claimed_block,
@@ -172,7 +161,6 @@ async fn worker_proves_real_range_end_to_end() {
                 prover,
                 kind,
                 block_interval,
-                split_count,
                 root_claim,
                 l1_head,
                 claimed_block,
@@ -193,7 +181,6 @@ async fn worker_proves_real_range_end_to_end() {
                 prover,
                 kind,
                 block_interval,
-                split_count,
                 root_claim,
                 l1_head,
                 claimed_block,
@@ -209,7 +196,6 @@ async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
     prover: P,
     kind: Sp1ProverKind,
     block_interval: u64,
-    split_count: u64,
     root_claim: B256,
     l1_head: B256,
     claimed_block: u64,
@@ -229,9 +215,7 @@ async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
         prover,
         game_provider,
         Sp1BackendConfig {
-            split_count,
             allow_unfinalized: false,
-            session_poll_interval: Duration::from_secs(10),
         },
     );
 
