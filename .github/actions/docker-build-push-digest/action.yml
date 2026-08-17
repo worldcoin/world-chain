@@ -37,6 +37,10 @@ inputs:
     description: Extra build args passed to docker build (newline-separated KEY=value).
     required: false
     default: ""
+  build_contexts:
+    description: Additional named Docker build contexts (newline-separated name=path entries).
+    required: false
+    default: ""
   cache_scope:
     description: BuildKit cache scope name.
     required: false
@@ -93,6 +97,7 @@ runs:
       uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
       with:
         context: ${{ inputs.context }}
+        build-contexts: ${{ inputs.build_contexts }}
         file: ${{ inputs.dockerfile }}
         target: ${{ inputs.target }}
         build-args: |

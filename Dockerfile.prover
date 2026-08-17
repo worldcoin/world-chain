@@ -41,6 +41,17 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
     cargo run --locked --release --ignore-rust-version \
       -p world-chain-proof-sp1-guest-builder
 
+# Export only the final canonical guest ELFs. CI builds this target once on
+# amd64 and supplies it as a named `sp1-guests-context` build context to every
+# SP1 worker build, so arm64 never has to emulate the SP1 compiler.
+FROM scratch AS sp1-guests-context
+COPY --from=sp1-guests \
+    /root/program/proofs/backends/sp1/programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-range-ethereum \
+    /riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-range-ethereum
+COPY --from=sp1-guests \
+    /root/program/proofs/backends/sp1/programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-aggregation \
+    /riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-aggregation
+
 FROM base AS planner
 WORKDIR /app
 
@@ -113,9 +124,12 @@ RUN test "${PROVER_BIN}" = "world-chain-proof-sp1-worker" || \
 ENV SP1_BUILD_DOCKER=true \
     SP1_SKIP_PROGRAM_BUILD=true
 
-COPY --from=sp1-guests \
-    /root/program/proofs/backends/sp1/programs/target/elf-compilation/docker \
-    /app/proofs/backends/sp1/programs/target/elf-compilation/docker
+COPY --from=sp1-guests-context \
+    /riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-range-ethereum \
+    /app/proofs/backends/sp1/programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-range-ethereum
+COPY --from=sp1-guests-context \
+    /riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-aggregation \
+    /app/proofs/backends/sp1/programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-aggregation
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
