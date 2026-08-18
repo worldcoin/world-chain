@@ -32,7 +32,6 @@ import {
     ClaimAlreadyResolved,
     GameNotFinalized,
     GameNotOver,
-    GameNotResolved,
     GameOver,
     GamePaused,
     IncorrectBondAmount,
@@ -484,7 +483,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         // INVARIANT: Cannot prove if the parent game is invalid: this game will resolve
         // `CHALLENGER_WINS` with `INVALID_PARENT` regardless of its own proof state.
-        (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
+        (GameStatus parentStatus, bool parentBlacklisted,) = _parentResolution();
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
             revert InvalidParentGame();
         }
@@ -535,14 +534,21 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Returns the parent's resolution inputs.
     /// @dev The anchor sentinel counts as a finalized parent: the anchor is only ever set from
     ///      a claim-valid game, so its root is already trusted.
-    function _parentResolution() internal view returns (GameStatus parentStatus, bool parentBlacklisted) {
+    function _parentResolution()
+        internal
+        view
+        returns (GameStatus parentStatus, bool parentBlacklisted, bool parentFinalized)
+    {
         address parentRef_ = parentRef();
         if (parentRef_ == address(anchorStateRegistry)) {
-            return (GameStatus.DEFENDER_WINS, false);
+            return (GameStatus.DEFENDER_WINS, false, true);
         }
         IDisputeGame parent = IDisputeGame(parentRef_);
         parentBlacklisted = anchorStateRegistry.isGameBlacklisted(parent);
-        if (!parentBlacklisted) parentStatus = parent.status();
+        if (!parentBlacklisted) {
+            parentStatus = parent.status();
+            parentFinalized = anchorStateRegistry.isGameFinalized(parent);
+        }
     }
 
     /// @notice Resolves the game after the clock expires or the proof threshold is reached.
@@ -553,7 +559,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // INVARIANT: Resolution cannot occur if the game has already been resolved.
         if (status != GameStatus.IN_PROGRESS) revert ClaimAlreadyResolved();
 
-        (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
+        (GameStatus parentStatus, bool parentBlacklisted, bool parentFinalized) = _parentResolution();
 
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
             // An invalid parent invalidates this game regardless of its own proof state.
@@ -563,8 +569,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             if (claimData.challenger != address(0)) {
                 normalModeCredit[claimData.challenger] += challengerBond;
             }
-        } else if (parentStatus == GameStatus.IN_PROGRESS) {
-            // INVARIANT: Cannot resolve a game if the parent game has not been resolved.
+        } else if (!parentFinalized) {
+            // INVARIANT: Cannot resolve a game before the parent's finality airgap has elapsed.
             revert ParentGameNotResolved();
         } else {
             // INVARIANT: Game must be completed either by clock expiration or the threshold.
@@ -633,11 +639,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             return (false, status, claimData.invalidationReason);
         }
 
-        (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
+        (GameStatus parentStatus, bool parentBlacklisted, bool parentFinalized) = _parentResolution();
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
             return (true, GameStatus.CHALLENGER_WINS, InvalidationReason.INVALID_PARENT);
         }
-        if (parentStatus == GameStatus.IN_PROGRESS || !gameOver()) {
+        if (!parentFinalized || !gameOver()) {
             return (false, GameStatus.IN_PROGRESS, InvalidationReason.NONE);
         }
 
@@ -707,9 +713,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // While the system is paused games are temporarily invalid; closing now would lock in
         // refund mode spuriously.
         if (anchorStateRegistry.paused()) revert GamePaused();
-
-        // Make sure that the game is resolved.
-        if (resolvedAt.raw() == 0) revert GameNotResolved();
 
         IDisputeGame self = IDisputeGame(address(this));
 

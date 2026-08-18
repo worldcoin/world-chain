@@ -575,8 +575,28 @@ contract MultiProofGameTest is OPStackFixtures {
         child.resolve();
 
         _resolveUnchallenged(parent);
+
+        vm.expectRevert(ParentGameNotResolved.selector);
+        child.resolve();
+
+        _passAirgap(parent);
         child.resolve();
         assertEq(uint8(child.status()), uint8(GameStatus.DEFENDER_WINS));
+    }
+
+    function test_ParentBlacklistedDuringFinalityAirgap_InvalidatesChild() public {
+        MultiProofGame parent = _proposeAtAnchor();
+        MultiProofGame child = _proposeChild(0);
+        _challenge(child);
+        _submitLanes(child, 2);
+        _resolveUnchallenged(parent);
+
+        vm.prank(guardian);
+        asr.blacklistDisputeGame(IDisputeGame(address(parent)));
+        child.resolve();
+
+        assertEq(uint8(child.status()), uint8(GameStatus.CHALLENGER_WINS));
+        assertEq(uint8(child.invalidationReason()), uint8(InvalidationReason.INVALID_PARENT));
     }
 
     function test_InvalidParent_CascadesAndRefundsChildBonds() public {
