@@ -151,40 +151,12 @@ pub struct ParsedAttestationDoc {
 /// This does **not** verify the signature or certificate chain — call
 /// [`verify_cose_sign1_signature`] for full cryptographic verification.
 pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, AttestationError> {
-    // COSE_Sign1 layout: [protected, unprotected, payload, signature]
-    let cose: ciborium::value::Value =
-        ciborium::from_reader(doc).map_err(|err| AttestationError::Malformed(err.to_string()))?;
-    let array = match cose {
-        ciborium::value::Value::Array(a) => a,
-        // Tag 18 = COSE_Sign1 tag.
-        ciborium::value::Value::Tag(18, inner) => match *inner {
-            ciborium::value::Value::Array(a) => a,
-            _ => {
-                return Err(AttestationError::Malformed(
-                    "expected array under tag 18".into(),
-                ));
-            }
-        },
-        _ => {
-            return Err(AttestationError::Malformed(
-                "expected COSE_Sign1 array".into(),
-            ));
-        }
-    };
-    if array.len() != 4 {
-        return Err(AttestationError::Malformed(format!(
-            "expected 4-element COSE_Sign1 array, got {}",
-            array.len()
-        )));
-    }
-    let payload_bytes = match &array[2] {
-        ciborium::value::Value::Bytes(b) => b.clone(),
-        _ => {
-            return Err(AttestationError::Malformed(
-                "COSE_Sign1 payload is not a byte string".into(),
-            ));
-        }
-    };
+    let sign1 = crate::cose::parse_cose_sign1(doc)
+        .map_err(|err| AttestationError::Malformed(err.to_string()))?;
+    // `parse_cose_sign1` rejects an absent payload, so this is always `Some`.
+    let payload_bytes = sign1
+        .payload
+        .ok_or_else(|| AttestationError::Malformed("COSE_Sign1 payload is absent".into()))?;
     let payload: ciborium::value::Value = ciborium::from_reader(payload_bytes.as_slice())
         .map_err(|err| AttestationError::Malformed(format!("payload decode: {err}")))?;
     let entries = match payload {
@@ -300,73 +272,23 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
 ///
 /// # What this verifies
 ///
-/// 1. Parses the outer COSE_Sign1 envelope to extract `protected`, `payload`, and
-///    `signature` fields.
-/// 2. Extracts the DER-encoded leaf certificate from the payload's `certificate` field.
-/// 3. Extracts the P-384 public key from the leaf certificate.
-/// 4. Reconstructs the `Sig_Structure`: `CBOR(["Signature1", protected, b"", payload])`.
-/// 5. Verifies the P-384 / ES384 signature over the `Sig_Structure` bytes.
-/// 6. Builds and validates an RFC 5280 certification path from the leaf to the hardcoded
-///    AWS Nitro Attestation PKI root CA, anchored on the pinned root rather than on anything
-///    the document supplies.
-/// 7. Checks the keyUsage bits AWS requires on the CAs and on the leaf.
+/// 1. Decodes the COSE_Sign1 envelope via [`crate::cose::parse_cose_sign1`].
+/// 2. Validates an RFC 5280 path from the payload's leaf certificate to the pinned AWS Nitro
+///    root CA, plus the keyUsage bits AWS requires.
+/// 3. Verifies the ES384 signature over the `Sig_Structure`, using the leaf certificate's key.
 ///
 /// A document without a `certificate` field is rejected: accepting one would let PCR and
 /// `user_data` checks pass with no cryptographic proof the values came from AWS hardware.
 pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
-    let cose: ciborium::value::Value = ciborium::from_reader(doc)
+    let sign1 = crate::cose::parse_cose_sign1(doc)
         .map_err(|e| AttestationError::Malformed(format!("COSE parse: {e}")))?;
+    // `parse_cose_sign1` rejects an absent payload, so this is always `Some`.
+    let payload_bstr = sign1
+        .payload
+        .as_deref()
+        .ok_or_else(|| AttestationError::Malformed("COSE_Sign1 payload is absent".into()))?;
 
-    let array = match cose {
-        ciborium::value::Value::Array(a) => a,
-        ciborium::value::Value::Tag(18, inner) => match *inner {
-            ciborium::value::Value::Array(a) => a,
-            _ => {
-                return Err(AttestationError::Malformed(
-                    "expected array under tag 18".into(),
-                ));
-            }
-        },
-        _ => {
-            return Err(AttestationError::Malformed(
-                "expected COSE_Sign1 array".into(),
-            ));
-        }
-    };
-
-    if array.len() != 4 {
-        return Err(AttestationError::Malformed(format!(
-            "COSE_Sign1 must have 4 elements, got {}",
-            array.len()
-        )));
-    }
-
-    let protected_bstr = match &array[0] {
-        ciborium::value::Value::Bytes(b) => b.clone(),
-        _ => {
-            return Err(AttestationError::Malformed(
-                "COSE_Sign1 protected is not a bstr".into(),
-            ));
-        }
-    };
-    let payload_bstr = match &array[2] {
-        ciborium::value::Value::Bytes(b) => b.clone(),
-        _ => {
-            return Err(AttestationError::Malformed(
-                "COSE_Sign1 payload is not a bstr".into(),
-            ));
-        }
-    };
-    let signature_bytes = match &array[3] {
-        ciborium::value::Value::Bytes(b) => b.clone(),
-        _ => {
-            return Err(AttestationError::Malformed(
-                "COSE_Sign1 signature is not a bstr".into(),
-            ));
-        }
-    };
-
-    let payload_value: ciborium::value::Value = ciborium::from_reader(payload_bstr.as_slice())
+    let payload_value: ciborium::value::Value = ciborium::from_reader(payload_bstr)
         .map_err(|e| AttestationError::Malformed(format!("payload decode: {e}")))?;
 
     let payload_map = match payload_value {
@@ -414,33 +336,17 @@ pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
     // the root to the hardcoded AWS Nitro Attestation PKI constant.
     verify_cert_chain(&cert_der, &cabundle)?;
 
-    // RFC 8152 §4.4:
-    //   Sig_Structure = [
-    //     context:      "Signature1",
-    //     body_protected: protected_bstr,
-    //     external_aad: h'',
-    //     payload:      payload_bstr,
-    //   ]
-    let sig_structure = ciborium::value::Value::Array(vec![
-        ciborium::value::Value::Text("Signature1".into()),
-        ciborium::value::Value::Bytes(protected_bstr),
-        ciborium::value::Value::Bytes(vec![]), // external_aad
-        ciborium::value::Value::Bytes(payload_bstr),
-    ]);
-    let mut sig_struct_bytes = Vec::new();
-    ciborium::into_writer(&sig_structure, &mut sig_struct_bytes)
-        .map_err(|e| AttestationError::Malformed(format!("Sig_Structure encode: {e}")))?;
-
     let verifying_key = extract_p384_key(&cert_der)?;
 
+    // `coset` rebuilds the RFC 8152 §4.4 `Sig_Structure` from the original `protected` bytes.
     // COSE ES384 uses the fixed (r‖s) 96-byte encoding for P-384 signatures.
-    let sig = Signature::from_slice(&signature_bytes)
-        .map_err(|e| AttestationError::CoseSignature(format!("signature decode: {e}")))?;
-    verifying_key
-        .verify(&sig_struct_bytes, &sig)
-        .map_err(|e| AttestationError::CoseSignature(format!("ES384 verify: {e}")))?;
-
-    Ok(())
+    sign1.verify_signature(&[], |signature_bytes, sig_struct_bytes| {
+        let sig = Signature::from_slice(signature_bytes)
+            .map_err(|e| AttestationError::CoseSignature(format!("signature decode: {e}")))?;
+        verifying_key
+            .verify(sig_struct_bytes, &sig)
+            .map_err(|e| AttestationError::CoseSignature(format!("ES384 verify: {e}")))
+    })
 }
 
 /// Extracts the P-384 verifying key from a DER-encoded X.509 certificate.
