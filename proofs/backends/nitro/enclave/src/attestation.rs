@@ -6,18 +6,16 @@
 //!
 //! 1. PCR / `user_data` invariants needed by the World fault proof flow.
 //! 2. The COSE_Sign1 P-384 signature against the leaf certificate's public key.
-//! 3. That the root certificate in the chain matches the hardcoded AWS Nitro root CA.
-//! 4. Certificate validity periods (not-before / not-after) for every cert in the chain.
+//! 3. An RFC 5280 certification path from the leaf to the AWS Nitro Root CA.
+//! 4. The keyUsage bits AWS requires, which `webpki` does not inspect.
 //! 5. Nonce freshness: the host supplies a per-request nonce that the NSM embeds in the
 //!    signed payload, preventing replay of captured attestation documents.
 
 use crate::{ExpectedPcrs, PCR_LEN, PcrDigest};
 use p384::ecdsa::{Signature, signature::Verifier as _};
+use rustls_pki_types::{CertificateDer, SignatureVerificationAlgorithm, UnixTime};
 use std::collections::BTreeMap;
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// AWS Nitro Attestation PKI root CA
-// ──────────────────────────────────────────────────────────────────────────────────────
+use webpki::{EndEntityCert, ExtendedKeyUsageValidator, KeyPurposeIdIter};
 
 /// DER-encoded AWS Nitro Attestation PKI root CA certificate.
 ///
@@ -57,10 +55,6 @@ fn aws_root_ca_der() -> Result<Vec<u8>, String> {
         .decode(b64)
         .map_err(|e| format!("AWS root CA PEM decode failed: {e}"))
 }
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Error types
-// ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Errors raised while validating an attestation document.
 #[derive(Debug, thiserror::Error)]
@@ -124,10 +118,6 @@ pub enum AttestationError {
     },
 }
 
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Parsed attestation doc
-// ──────────────────────────────────────────────────────────────────────────────────────
-
 /// Decodes the relevant subset of a Nitro attestation document.
 #[derive(Clone, Debug)]
 pub struct ParsedAttestationDoc {
@@ -154,10 +144,6 @@ pub struct ParsedAttestationDoc {
     /// the NSM embeds verbatim into the signed payload for replay protection.
     pub nonce: Option<Vec<u8>>,
 }
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Parsing
-// ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Parses a `COSE_Sign1` Nitro attestation document and returns the inner payload fields the
 /// host cares about.
@@ -310,10 +296,6 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
     })
 }
 
-// ──────────────────────────────────────────────────────────────────────────────────────
-// COSE_Sign1 signature verification
-// ──────────────────────────────────────────────────────────────────────────────────────
-
 /// Verifies the COSE_Sign1 signature on an AWS Nitro attestation document.
 ///
 /// # What this verifies
@@ -324,18 +306,14 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
 /// 3. Extracts the P-384 public key from the leaf certificate.
 /// 4. Reconstructs the `Sig_Structure`: `CBOR(["Signature1", protected, b"", payload])`.
 /// 5. Verifies the P-384 / ES384 signature over the `Sig_Structure` bytes.
-/// 6. Checks that the root certificate in `cabundle` matches the hardcoded
-///    AWS Nitro Attestation PKI root CA.
-/// 7. Checks certificate validity periods (not-before / not-after) for the leaf and
-///    all intermediate certificates in the chain.
+/// 6. Builds and validates an RFC 5280 certification path from the leaf to the hardcoded
+///    AWS Nitro Attestation PKI root CA, anchored on the pinned root rather than on anything
+///    the document supplies.
+/// 7. Checks the keyUsage bits AWS requires on the CAs and on the leaf.
 ///
-/// # Skipping for synthetic test documents
-///
-/// If the payload does not contain a `certificate` field (i.e., synthetic test documents),
-/// this function returns `Ok(())` without performing any cryptographic checks. Real Nitro
-/// attestation documents always include a certificate.
+/// A document without a `certificate` field is rejected: accepting one would let PCR and
+/// `user_data` checks pass with no cryptographic proof the values came from AWS hardware.
 pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
-    // ── 1. Parse outer COSE_Sign1 ───────────────────────────────────────────────────
     let cose: ciborium::value::Value = ciborium::from_reader(doc)
         .map_err(|e| AttestationError::Malformed(format!("COSE parse: {e}")))?;
 
@@ -388,7 +366,6 @@ pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
         }
     };
 
-    // ── 2. Parse payload to get certificate and cabundle ───────────────────────────
     let payload_value: ciborium::value::Value = ciborium::from_reader(payload_bstr.as_slice())
         .map_err(|e| AttestationError::Malformed(format!("payload decode: {e}")))?;
 
@@ -433,12 +410,10 @@ pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
         )
     })?;
 
-    // ── 3. Verify full certificate chain ─────────────────────────────────────────
     // Walk leaf → intermediates → root, verifying each signature and anchoring
     // the root to the hardcoded AWS Nitro Attestation PKI constant.
     verify_cert_chain(&cert_der, &cabundle)?;
 
-    // ── 4. Build Sig_Structure ─────────────────────────────────────────────────────
     // RFC 8152 §4.4:
     //   Sig_Structure = [
     //     context:      "Signature1",
@@ -456,10 +431,8 @@ pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
     ciborium::into_writer(&sig_structure, &mut sig_struct_bytes)
         .map_err(|e| AttestationError::Malformed(format!("Sig_Structure encode: {e}")))?;
 
-    // ── 5. Extract P-384 public key from leaf certificate ─────────────────────────
     let verifying_key = extract_p384_key(&cert_der)?;
 
-    // ── 6. Verify ES384 signature ──────────────────────────────────────────────────
     // COSE ES384 uses the fixed (r‖s) 96-byte encoding for P-384 signatures.
     let sig = Signature::from_slice(&signature_bytes)
         .map_err(|e| AttestationError::CoseSignature(format!("signature decode: {e}")))?;
@@ -549,24 +522,49 @@ fn verify_root_ca_against(
     Ok(())
 }
 
-/// Checks that `now_secs` falls within `cert`'s not-before / not-after window.
-fn check_cert_validity(
-    cert: &x509_parser::prelude::X509Certificate<'_>,
-    label: &str,
-    now_secs: i64,
-) -> Result<(), AttestationError> {
-    use x509_parser::time::ASN1Time;
-    let now = ASN1Time::from_timestamp(now_secs).map_err(|_| {
-        AttestationError::CertExpired(format!("{label}: failed to construct current time"))
+/// Checks the pinned root's own validity window.
+fn check_root_validity(root_der: &[u8], now_secs: i64) -> Result<(), AttestationError> {
+    use x509_parser::prelude::{ASN1Time, FromDer as _, X509Certificate};
+
+    let (_, root) = X509Certificate::from_der(root_der)
+        .map_err(|e| AttestationError::CertChain(format!("pinned root CA parse: {e}")))?;
+
+    let now = ASN1Time::from_timestamp(now_secs).map_err(|e| {
+        AttestationError::CertExpired(format!("current time is unrepresentable: {e}"))
     })?;
-    if !cert.validity().is_valid_at(now) {
-        let v = cert.validity();
+
+    if !root.validity().is_valid_at(now) {
         return Err(AttestationError::CertExpired(format!(
-            "{label}: not_before={} not_after={}",
-            v.not_before, v.not_after
+            "pinned root CA outside its validity window (notBefore {}, notAfter {}, now {now_secs})",
+            root.validity().not_before.timestamp(),
+            root.validity().not_after.timestamp(),
         )));
     }
     Ok(())
+}
+
+/// AWS signs every Nitro certificate with ecdsa-with-SHA384; naming only that pins the chain
+/// away from weaker primitives.
+static NITRO_SIG_ALGS: &[&dyn SignatureVerificationAlgorithm] = &[webpki::ring::ECDSA_P384_SHA384];
+
+/// Nitro certificates carry no EKU, so no policy applies. `webpki` requires one to be supplied.
+struct AnyExtendedKeyUsage;
+
+impl ExtendedKeyUsageValidator for AnyExtendedKeyUsage {
+    fn validate(&self, _eku: KeyPurposeIdIter<'_, '_>) -> Result<(), webpki::Error> {
+        Ok(())
+    }
+}
+
+/// Keeps expiry distinguishable from the rest, so a stale document reads differently from a
+/// forged one. `Debug` names the `webpki::Error` variant; `Display` collapses several into one.
+fn map_path_error(err: webpki::Error) -> AttestationError {
+    match err {
+        webpki::Error::CertExpired { .. } | webpki::Error::CertNotValidYet { .. } => {
+            AttestationError::CertExpired(format!("{err:?}"))
+        }
+        other => AttestationError::CertChain(format!("path validation failed: {other:?}")),
+    }
 }
 
 /// Verifies the chain from `leaf_der` up to the AWS Nitro root CA.
@@ -599,95 +597,67 @@ fn verify_cert_chain_against(
     expected_root: &[u8],
     now_secs: i64,
 ) -> Result<(), AttestationError> {
+    // Shape check only: the anchor below comes from `expected_root`, never from the document.
+    verify_root_ca_against(cabundle, expected_root)?;
+    check_root_validity(expected_root, now_secs)?;
+
+    let root = CertificateDer::from(expected_root);
+    let anchor = webpki::anchor_from_trusted_cert(&root)
+        .map_err(|e| AttestationError::CertChain(format!("pinned root CA parse: {e:?}")))?;
+
+    // `cabundle[0]` is the root, passed as the anchor. Order of the rest is not load-bearing.
+    let intermediates: Vec<CertificateDer<'_>> = cabundle[1..]
+        .iter()
+        .map(|der| CertificateDer::from(der.as_slice()))
+        .collect();
+
+    let leaf_der_typed = CertificateDer::from(leaf_der);
+    let leaf = EndEntityCert::try_from(&leaf_der_typed)
+        .map_err(|e| AttestationError::CertChain(format!("leaf cert parse: {e:?}")))?;
+
+    let now = UnixTime::since_unix_epoch(std::time::Duration::from_secs(
+        u64::try_from(now_secs).map_err(|_| {
+            AttestationError::CertExpired("current time is before the Unix epoch".into())
+        })?,
+    ));
+
+    // Revocation is `None`: AWS publishes no CRL or OCSP for the Nitro Attestation PKI.
+    leaf.verify_for_usage(
+        NITRO_SIG_ALGS,
+        &[anchor],
+        &intermediates,
+        now,
+        AnyExtendedKeyUsage,
+        None,
+        None,
+    )
+    .map_err(map_path_error)?;
+
+    check_key_usage_policy(leaf_der, cabundle)
+}
+
+/// The keyUsage bits AWS requires ([§3.2.3.3]) and `webpki` never enforces.
+///
+/// [§3.2.3.3]: https://github.com/aws/aws-nitro-enclaves-nsm-api/blob/main/docs/attestation_process.md
+fn check_key_usage_policy(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
     use x509_parser::prelude::{FromDer as _, X509Certificate};
 
-    verify_root_ca_against(cabundle, expected_root)?;
-
-    // Every element of cabundle is a CA in the path, root included: its own pathLenConstraint
-    // bounds what may follow it. Only the signature and issuer checks are skipped for the root,
-    // which is self-signed and anchored above.
-    for i in 0..cabundle.len() {
-        let (_, cert) = X509Certificate::from_der(&cabundle[i])
+    for (i, der) in cabundle.iter().enumerate() {
+        let (_, cert) = X509Certificate::from_der(der)
             .map_err(|e| AttestationError::CertChain(format!("cabundle[{i}] parse: {e}")))?;
-        let label = format!("cabundle[{i}]");
-        check_cert_validity(&cert, &label, now_secs)?;
-        check_signature_algorithm(&cert, &label)?;
-        check_is_ca(&cert, &label)?;
-        // pathLenConstraint counts the CAs that follow this one, excluding the leaf.
-        check_path_len(&cert, &label, cabundle.len() - 1 - i)?;
-
-        if i == 0 {
-            continue;
-        }
-        let (_, issuer) = X509Certificate::from_der(&cabundle[i - 1])
-            .map_err(|e| AttestationError::CertChain(format!("cabundle[{}] parse: {e}", i - 1)))?;
-        check_issued_by(&cert, &issuer, &label, &format!("cabundle[{}]", i - 1))?;
-        cert.verify_signature(Some(issuer.public_key()))
-            .map_err(|e| {
-                AttestationError::CertChain(format!(
-                    "cabundle[{i}] signature invalid (issuer cabundle[{}]): {e}",
-                    i - 1
-                ))
-            })?;
+        check_ca_key_usage(&cert, &format!("cabundle[{i}]"))?;
     }
 
     let (_, leaf) = X509Certificate::from_der(leaf_der)
         .map_err(|e| AttestationError::CertChain(format!("leaf cert parse: {e}")))?;
-    check_cert_validity(&leaf, "leaf", now_secs)?;
-    check_signature_algorithm(&leaf, "leaf")?;
-    // A CA presented as the leaf would let any intermediate stand in for an enclave.
-    check_end_entity(&leaf, "leaf")?;
-    let last = cabundle.len() - 1;
-    let (_, leaf_issuer) = X509Certificate::from_der(&cabundle[last])
-        .map_err(|e| AttestationError::CertChain(format!("cabundle[{last}] parse: {e}")))?;
-    check_issued_by(&leaf, &leaf_issuer, "leaf", &format!("cabundle[{last}]"))?;
-    leaf.verify_signature(Some(leaf_issuer.public_key()))
-        .map_err(|e| AttestationError::CertChain(format!("leaf cert signature invalid: {e}")))?;
-
-    Ok(())
+    check_end_entity_policy(&leaf, "leaf")
 }
 
-/// Every AWS Nitro cert is signed with ecdsa-with-SHA384. Pinning it stops an algorithm
-/// substitution from steering verification onto a weaker primitive.
-///
-/// This pin is our policy, not an RFC requirement: RFC 5280 defines the `signatureAlgorithm`
-/// field but does not restrict which algorithm a CA may use.
-///
-/// See: [RFC 5280 §4.1.1.2 — signatureAlgorithm](https://datatracker.ietf.org/doc/html/rfc5280#section-4.1.1.2)
-fn check_signature_algorithm(
+/// Requires `keyCertSign` on a CA, and the extension itself — a CA with none would pass.
+fn check_ca_key_usage(
     cert: &x509_parser::prelude::X509Certificate<'_>,
     label: &str,
 ) -> Result<(), AttestationError> {
-    use x509_parser::oid_registry::OID_SIG_ECDSA_WITH_SHA384;
-    if cert.signature_algorithm.algorithm != OID_SIG_ECDSA_WITH_SHA384 {
-        return Err(AttestationError::CertChain(format!(
-            "{label}: unexpected signature algorithm {}",
-            cert.signature_algorithm.algorithm
-        )));
-    }
-    Ok(())
-}
-
-/// Requires basicConstraints CA:TRUE and, when keyUsage is present, keyCertSign. Without this
-/// a leaf certificate could be spliced in as an intermediate — the CVE-2021-3450 class.
-///
-/// See: [RFC 5280 §4.2.1.9 — Basic Constraints](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.9)
-/// See: [RFC 5280 §4.2.1.3 — Key Usage](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.3)
-fn check_is_ca(
-    cert: &x509_parser::prelude::X509Certificate<'_>,
-    label: &str,
-) -> Result<(), AttestationError> {
-    let bc = cert
-        .basic_constraints()
-        .map_err(|e| AttestationError::CertChain(format!("{label}: basicConstraints parse: {e}")))?
-        .ok_or_else(|| AttestationError::CertChain(format!("{label}: missing basicConstraints")))?;
-    if !bc.value.ca {
-        return Err(AttestationError::CertChain(format!(
-            "{label}: basicConstraints CA is not TRUE"
-        )));
-    }
-
-    // Required, not optional: a CA with no keyUsage at all would otherwise pass.
     let ku = cert
         .key_usage()
         .map_err(|e| AttestationError::CertChain(format!("{label}: keyUsage parse: {e}")))?
@@ -700,29 +670,20 @@ fn check_is_ca(
     Ok(())
 }
 
-/// Checks the end-entity ("target") certificate: `digitalSignature` asserted, and no
-/// `pathLenConstraint`, which only belongs on a CA.
+/// Requires `digitalSignature` on the leaf and no `pathLenConstraint`, which belongs on a CA.
 ///
-/// AWS marks `keyUsage` critical on every CA in the chain but *not* on the leaf, so
-/// criticality is deliberately not required here.
-///
-/// See: [AWS Nitro Enclaves NSM API — attestation process §3.2.3.3](https://github.com/aws/aws-nitro-enclaves-nsm-api/blob/main/docs/attestation_process.md)
-/// See: [RFC 5280 §4.2.1.3 — Key Usage](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.3)
-fn check_end_entity(
+/// Criticality is deliberately not required: AWS marks `keyUsage` critical on the CAs but not
+/// on the leaf. `webpki` tolerates `pathLenConstraint` here, so that check stays local.
+fn check_end_entity_policy(
     cert: &x509_parser::prelude::X509Certificate<'_>,
     label: &str,
 ) -> Result<(), AttestationError> {
-    if let Ok(Some(bc)) = cert.basic_constraints() {
-        if bc.value.ca {
-            return Err(AttestationError::CertChain(format!(
-                "{label}: end-entity cert asserts basicConstraints CA:TRUE"
-            )));
-        }
-        if bc.value.path_len_constraint.is_some() {
-            return Err(AttestationError::CertChain(format!(
-                "{label}: end-entity cert carries a pathLenConstraint"
-            )));
-        }
+    if let Ok(Some(bc)) = cert.basic_constraints()
+        && bc.value.path_len_constraint.is_some()
+    {
+        return Err(AttestationError::CertChain(format!(
+            "{label}: end-entity cert carries a pathLenConstraint"
+        )));
     }
 
     let ku = cert
@@ -736,49 +697,6 @@ fn check_end_entity(
     }
     Ok(())
 }
-
-/// `pathLenConstraint` caps how many CAs may follow this one in the path.
-///
-/// See: [RFC 5280 §4.2.1.9 — Basic Constraints](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.9)
-fn check_path_len(
-    cert: &x509_parser::prelude::X509Certificate<'_>,
-    label: &str,
-    following_cas: usize,
-) -> Result<(), AttestationError> {
-    if let Ok(Some(bc)) = cert.basic_constraints()
-        && let Some(max) = bc.value.path_len_constraint
-        && following_cas as u64 > max as u64
-    {
-        return Err(AttestationError::CertChain(format!(
-            "{label}: pathLenConstraint {max} exceeded by {following_cas} following CAs"
-        )));
-    }
-    Ok(())
-}
-
-/// Signature checks alone do not tie a cert to its issuer's identity. RFC 5280 calls this name
-/// chaining: users "MUST be prepared to process the issuer distinguished name and subject
-/// distinguished name ... to perform name chaining for certification path validation".
-///
-/// See: [RFC 5280 §4.1.2.4 — Issuer](https://datatracker.ietf.org/doc/html/rfc5280#section-4.1.2.4)
-/// See: [RFC 5280 §6.1.3 — Basic Certificate Processing](https://datatracker.ietf.org/doc/html/rfc5280#section-6.1.3)
-fn check_issued_by(
-    cert: &x509_parser::prelude::X509Certificate<'_>,
-    issuer: &x509_parser::prelude::X509Certificate<'_>,
-    label: &str,
-    issuer_label: &str,
-) -> Result<(), AttestationError> {
-    if cert.issuer() != issuer.subject() {
-        return Err(AttestationError::CertChain(format!(
-            "{label}: issuer does not match {issuer_label} subject"
-        )));
-    }
-    Ok(())
-}
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// High-level verification entry points
-// ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Extracts the `public_key` field from an NSM attestation document's CBOR payload.
 ///
@@ -920,10 +838,6 @@ pub fn verify_pcrs_only(
     Ok(parsed)
 }
 
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Private helpers
-// ──────────────────────────────────────────────────────────────────────────────────────
-
 fn check_pcr(
     parsed: &ParsedAttestationDoc,
     index: u8,
@@ -950,10 +864,6 @@ fn check_pcr(
     }
     Ok(())
 }
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Tests
-// ──────────────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -1158,13 +1068,9 @@ mod tests {
         ]
     }
 
-    // ──────────────────────────────────────────────────────────────────────────────────
-    // Generated chains
-    //
     // AWS only ever issues well-formed chains, so the fixtures above cannot exercise a
     // malformed one. These build chains with rcgen instead: no expiry to work around, and
     // the shape is ours to break.
-    // ──────────────────────────────────────────────────────────────────────────────────
 
     use rcgen::{
         BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair, KeyUsagePurpose,
@@ -1228,6 +1134,40 @@ mod tests {
         verify_cert_chain_against(&leaf, &cabundle, &root, gen_now()).unwrap();
     }
 
+    /// `webpki` never checks a trust anchor's own validity window, so an expired pinned root
+    /// has to be rejected by `check_root_validity` or it keeps validating chains forever.
+    #[test]
+    fn rejects_expired_root_anchor() {
+        let mut root = gen_cert("expired root", Some(BasicConstraints::Unconstrained), None);
+        root.params.not_before = rcgen::date_time_ymd(2000, 1, 1);
+        root.params.not_after = rcgen::date_time_ymd(2001, 1, 1);
+        root.der = root.params.self_signed(&root.key).unwrap().der().to_vec();
+
+        let inter = gen_cert(
+            "test intermediate",
+            Some(BasicConstraints::Constrained(0)),
+            Some(&root),
+        );
+        let leaf = gen_cert("test leaf", None, Some(&inter));
+        let cabundle = vec![root.der.clone(), inter.der];
+
+        let err =
+            verify_cert_chain_against(&leaf.der, &cabundle, &root.der, gen_now()).unwrap_err();
+        match err {
+            AttestationError::CertExpired(msg) => {
+                assert!(msg.contains("pinned root CA"), "got: {msg}")
+            }
+            other => panic!("expected CertExpired, got: {other:?}"),
+        }
+    }
+
+    /// The pinned AWS root must be inside its window at the timestamp the AWS fixtures use.
+    #[test]
+    fn pinned_aws_root_is_currently_valid() {
+        let root = aws_root_ca_der().unwrap();
+        check_root_validity(&root, gen_now()).unwrap();
+    }
+
     /// CVE-2021-3450 class: an end-entity cert must not be usable as an intermediate.
     #[test]
     fn rejects_leaf_used_as_intermediate() {
@@ -1240,7 +1180,7 @@ mod tests {
             verify_cert_chain_against(&leaf.der, &cabundle, &root.der, gen_now()).unwrap_err();
         match err {
             AttestationError::CertChain(msg) => {
-                assert!(msg.contains("CA is not TRUE"), "got: {msg}")
+                assert!(msg.contains("EndEntityUsedAsCa"), "got: {msg}")
             }
             other => panic!("expected CertChain, got: {other:?}"),
         }
@@ -1280,13 +1220,15 @@ mod tests {
         }
     }
 
+    /// The constraint sits on an intermediate because webpki does not carry the trust anchor's
+    /// own basicConstraints into validation. The real AWS root asserts no `pathLenConstraint`.
     #[test]
     fn rejects_path_len_exceeded() {
         // pathlen:0 permits no further CAs, but a second intermediate follows.
-        let root = gen_cert("test root", Some(BasicConstraints::Constrained(0)), None);
+        let root = gen_cert("test root", Some(BasicConstraints::Unconstrained), None);
         let a = gen_cert(
             "inter a",
-            Some(BasicConstraints::Unconstrained),
+            Some(BasicConstraints::Constrained(0)),
             Some(&root),
         );
         let b = gen_cert("inter b", Some(BasicConstraints::Unconstrained), Some(&a));
@@ -1301,7 +1243,7 @@ mod tests {
         .unwrap_err();
         match err {
             AttestationError::CertChain(msg) => {
-                assert!(msg.contains("pathLenConstraint"), "got: {msg}")
+                assert!(msg.contains("PathLenConstraintViolated"), "got: {msg}")
             }
             other => panic!("expected CertChain, got: {other:?}"),
         }
@@ -1340,7 +1282,7 @@ mod tests {
         .unwrap_err();
         match err {
             AttestationError::CertChain(msg) => {
-                assert!(msg.contains("signature algorithm"), "got: {msg}")
+                assert!(msg.contains("UnsupportedSignatureAlgorithm"), "got: {msg}")
             }
             other => panic!("expected CertChain, got: {other:?}"),
         }
@@ -1382,7 +1324,7 @@ mod tests {
         .unwrap_err();
         match err {
             AttestationError::CertChain(msg) => {
-                assert!(msg.contains("issuer does not match"), "got: {msg}")
+                assert!(msg.contains("UnknownIssuer"), "got: {msg}")
             }
             other => panic!("expected CertChain, got: {other:?}"),
         }
@@ -1421,10 +1363,8 @@ mod tests {
 
     /// AWS §3.2.3.3: the target certificate must carry no `pathLenConstraint`.
     ///
-    /// rcgen ties `pathLenConstraint` to `IsCa::Ca`, so the only chain it can build here also
-    /// asserts CA:TRUE and trips that check first. The `pathLenConstraint` branch of
-    /// `check_end_entity` is therefore not reachable from a generated chain — asserting the
-    /// CA rejection is what this can honestly cover.
+    /// rcgen ties `pathLenConstraint` to `IsCa::Ca`, so any chain it builds here trips
+    /// `CaUsedAsEndEntity` first. Asserting the CA rejection is what this can honestly cover.
     #[test]
     fn rejects_leaf_asserting_ca() {
         let root = gen_cert("test root", Some(BasicConstraints::Unconstrained), None);
@@ -1447,7 +1387,9 @@ mod tests {
         )
         .unwrap_err();
         match err {
-            AttestationError::CertChain(msg) => assert!(msg.contains("CA:TRUE"), "got: {msg}"),
+            AttestationError::CertChain(msg) => {
+                assert!(msg.contains("CaUsedAsEndEntity"), "got: {msg}")
+            }
             other => panic!("expected CertChain, got: {other:?}"),
         }
     }
@@ -1519,19 +1461,13 @@ mod tests {
         );
     }
 
-    /// The root stays in place here, so the anchor check passes and something further down
-    /// has to catch it. AWS's descending pathlen values make it pathLenConstraint.
+    /// webpki builds the path itself, so a swapped bundle still verifies. The pinned anchor is
+    /// what makes the chain trustworthy, not the ordering.
     #[test]
-    fn rejects_real_aws_chain_with_reordered_intermediates() {
+    fn verifies_real_aws_chain_with_reordered_intermediates() {
         let mut swapped = aws_cabundle();
         swapped.swap(1, 2);
-        let err = verify_cert_chain_at(AWS_LEAF, &swapped, AWS_CHAIN_VALID_AT).unwrap_err();
-        match err {
-            AttestationError::CertChain(msg) => {
-                assert!(msg.contains("pathLenConstraint"), "got: {msg}")
-            }
-            other => panic!("expected CertChain, got: {other:?}"),
-        }
+        verify_cert_chain_at(AWS_LEAF, &swapped, AWS_CHAIN_VALID_AT).unwrap();
     }
 
     #[test]
