@@ -186,6 +186,14 @@ pub struct WorkerArgs {
     )]
     sp1_aggregation_gas_limit: u64,
 
+    /// Maximum auction price in PROVE base units per PGU. Uses the SP1 Network default if omitted.
+    #[arg(
+        long,
+        env = "SP1_MAX_PRICE_PER_PGU",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    sp1_max_price_per_pgu: Option<u64>,
+
     /// Maximum number of jobs proved concurrently. One suits a local CPU prover; raise it for
     /// the Succinct proving network.
     #[arg(long, default_value_t = 1)]
@@ -312,10 +320,11 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
             run_worker(
                 &cli,
                 host,
-                NetworkSuccinctProver::from_connection_with_limits(
+                NetworkSuccinctProver::from_connection_with_request_config(
                     SP1ProofMode::Groth16,
                     connection,
                     limits,
+                    cli.sp1_max_price_per_pgu,
                 )
                 .await?,
             )
@@ -464,6 +473,7 @@ where
         sp1_range_gas_limit = cli.sp1_range_gas_limit,
         sp1_aggregation_cycle_limit = cli.sp1_aggregation_cycle_limit,
         sp1_aggregation_gas_limit = cli.sp1_aggregation_gas_limit,
+        sp1_max_price_per_pgu = ?cli.sp1_max_price_per_pgu,
         submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = cli.submit_proof_retry_max_delay_ms,
@@ -519,6 +529,7 @@ mod tests {
             cli.sp1_aggregation_gas_limit,
             DEFAULT_SP1_AGGREGATION_GAS_LIMIT
         );
+        assert_eq!(cli.sp1_max_price_per_pgu, None);
     }
 
     #[test]
@@ -540,6 +551,27 @@ mod tests {
         let cli = WorkerArgs::parse_from(args);
 
         assert!(cli.sp1_estimate_limits);
+    }
+
+    #[test]
+    fn parses_sp1_max_price_per_pgu() {
+        let mut args = base_args();
+        args.extend(["--sp1-max-price-per-pgu", "50000000"]);
+
+        let cli = WorkerArgs::parse_from(args);
+
+        assert_eq!(cli.sp1_max_price_per_pgu, Some(50_000_000));
+    }
+
+    #[test]
+    fn rejects_zero_sp1_max_price_per_pgu() {
+        let mut args = base_args();
+        args.extend(["--sp1-max-price-per-pgu", "0"]);
+
+        let error = WorkerArgs::try_parse_from(args)
+            .expect_err("zero max price per PGU should be rejected");
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
     }
 
     #[test]
