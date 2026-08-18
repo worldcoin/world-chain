@@ -522,6 +522,27 @@ fn verify_root_ca_against(
     Ok(())
 }
 
+/// Checks the pinned root's own validity window.
+fn check_root_validity(root_der: &[u8], now_secs: i64) -> Result<(), AttestationError> {
+    use x509_parser::prelude::{ASN1Time, FromDer as _, X509Certificate};
+
+    let (_, root) = X509Certificate::from_der(root_der)
+        .map_err(|e| AttestationError::CertChain(format!("pinned root CA parse: {e}")))?;
+
+    let now = ASN1Time::from_timestamp(now_secs).map_err(|e| {
+        AttestationError::CertExpired(format!("current time is unrepresentable: {e}"))
+    })?;
+
+    if !root.validity().is_valid_at(now) {
+        return Err(AttestationError::CertExpired(format!(
+            "pinned root CA outside its validity window (notBefore {}, notAfter {}, now {now_secs})",
+            root.validity().not_before.timestamp(),
+            root.validity().not_after.timestamp(),
+        )));
+    }
+    Ok(())
+}
+
 /// AWS signs every Nitro certificate with ecdsa-with-SHA384; naming only that pins the chain
 /// away from weaker primitives.
 static NITRO_SIG_ALGS: &[&dyn SignatureVerificationAlgorithm] = &[webpki::ring::ECDSA_P384_SHA384];
@@ -578,6 +599,7 @@ fn verify_cert_chain_against(
 ) -> Result<(), AttestationError> {
     // Shape check only: the anchor below comes from `expected_root`, never from the document.
     verify_root_ca_against(cabundle, expected_root)?;
+    check_root_validity(expected_root, now_secs)?;
 
     let root = CertificateDer::from(expected_root);
     let anchor = webpki::anchor_from_trusted_cert(&root)
@@ -1110,6 +1132,40 @@ mod tests {
     fn verifies_generated_chain() {
         let (root, cabundle, leaf) = gen_chain();
         verify_cert_chain_against(&leaf, &cabundle, &root, gen_now()).unwrap();
+    }
+
+    /// `webpki` never checks a trust anchor's own validity window, so an expired pinned root
+    /// has to be rejected by `check_root_validity` or it keeps validating chains forever.
+    #[test]
+    fn rejects_expired_root_anchor() {
+        let mut root = gen_cert("expired root", Some(BasicConstraints::Unconstrained), None);
+        root.params.not_before = rcgen::date_time_ymd(2000, 1, 1);
+        root.params.not_after = rcgen::date_time_ymd(2001, 1, 1);
+        root.der = root.params.self_signed(&root.key).unwrap().der().to_vec();
+
+        let inter = gen_cert(
+            "test intermediate",
+            Some(BasicConstraints::Constrained(0)),
+            Some(&root),
+        );
+        let leaf = gen_cert("test leaf", None, Some(&inter));
+        let cabundle = vec![root.der.clone(), inter.der];
+
+        let err =
+            verify_cert_chain_against(&leaf.der, &cabundle, &root.der, gen_now()).unwrap_err();
+        match err {
+            AttestationError::CertExpired(msg) => {
+                assert!(msg.contains("pinned root CA"), "got: {msg}")
+            }
+            other => panic!("expected CertExpired, got: {other:?}"),
+        }
+    }
+
+    /// The pinned AWS root must be inside its window at the timestamp the AWS fixtures use.
+    #[test]
+    fn pinned_aws_root_is_currently_valid() {
+        let root = aws_root_ca_der().unwrap();
+        check_root_validity(&root, gen_now()).unwrap();
     }
 
     /// CVE-2021-3450 class: an end-entity cert must not be usable as an intermediate.
