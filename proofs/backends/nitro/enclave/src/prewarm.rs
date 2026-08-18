@@ -99,16 +99,14 @@ pub fn parse_cert_signature(der: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
 ///
 /// # Errors
 ///
-/// Returns an error if the attestation document is malformed, carries no leaf certificate, or
-/// if its `cabundle` does not begin with the pinned AWS root CA (AWS orders `cabundle`
-/// root-first, and the on-chain walk depends on that ordering).
+/// Returns an error if the attestation document is malformed, or if its `cabundle` does not
+/// begin with the pinned AWS root CA (AWS orders `cabundle` root-first, and the on-chain walk
+/// depends on that ordering).
 pub fn build_prewarm_plan(attestation_doc: &[u8]) -> Result<Vec<ColdCert>> {
     let parsed = crate::attestation::parse_attestation_doc(attestation_doc)
         .map_err(|e| anyhow!("parsing attestation document: {e}"))?;
 
-    let leaf = parsed.certificate.ok_or_else(|| {
-        anyhow!("attestation document missing required `certificate` field (no leaf cert)")
-    })?;
+    let leaf = parsed.certificate;
     if parsed.cabundle.is_empty() {
         bail!("attestation document has an empty `cabundle`; cannot build a pre-warm plan");
     }
@@ -146,7 +144,7 @@ pub fn build_prewarm_plan(attestation_doc: &[u8]) -> Result<Vec<ColdCert>> {
             .with_context(|| format!("generating P-384 hints for cabundle[{i}]"))?;
 
         plan.push(ColdCert {
-            cert: cert.clone(),
+            cert: cert.to_vec(),
             parent_hash,
             cache_key,
             hints,
@@ -169,7 +167,7 @@ pub fn build_prewarm_plan(attestation_doc: &[u8]) -> Result<Vec<ColdCert>> {
 
     plan.push(ColdCert {
         cache_key: cert_cache_key(&leaf).context("computing cache key for the leaf cert")?,
-        cert: leaf,
+        cert: leaf.into_vec(),
         parent_hash,
         hints,
         is_ca: false,

@@ -196,49 +196,46 @@ mod tests {
         protocol::transition_commitment,
     };
 
-    /// Builds a minimal synthetic COSE_Sign1 attestation document suitable for unit tests.
-    /// The signature bytes are a 96-byte placeholder — no cryptographic verification is
-    /// performed by `parse_attestation_doc` / `parse_and_check_pcrs` (see the TODO in
-    /// `attestation.rs`).
+    /// Carries every field AWS declares mandatory, since `parse_attestation_doc` decodes into
+    /// their schema. The certificate and signature are placeholders: nothing here verifies them.
     fn make_attestation_doc(pcrs: &[[u8; PCR_LEN]; 3], user_data: &[u8]) -> Vec<u8> {
-        let pcr_map: Vec<(ciborium::value::Value, ciborium::value::Value)> = pcrs
+        use ciborium::value::Value as V;
+
+        let pcr_map: Vec<(V, V)> = pcrs
             .iter()
             .enumerate()
             .map(|(idx, bytes)| {
                 (
-                    ciborium::value::Value::Integer((idx as i128).try_into().unwrap()),
-                    ciborium::value::Value::Bytes(bytes.to_vec()),
+                    V::Integer((idx as i128).try_into().unwrap()),
+                    V::Bytes(bytes.to_vec()),
                 )
             })
             .collect();
 
-        let entries: Vec<(ciborium::value::Value, ciborium::value::Value)> = vec![
+        let entries: Vec<(V, V)> = vec![
+            (V::Text("pcrs".into()), V::Map(pcr_map)),
+            (V::Text("user_data".into()), V::Bytes(user_data.to_vec())),
+            (V::Text("module_id".into()), V::Text("test-enclave".into())),
+            (V::Text("digest".into()), V::Text("SHA384".into())),
             (
-                ciborium::value::Value::Text("pcrs".into()),
-                ciborium::value::Value::Map(pcr_map),
+                V::Text("timestamp".into()),
+                V::Integer(1_785_790_194_000u64.into()),
             ),
+            (V::Text("certificate".into()), V::Bytes(vec![0xBBu8; 64])),
             (
-                ciborium::value::Value::Text("user_data".into()),
-                ciborium::value::Value::Bytes(user_data.to_vec()),
-            ),
-            (
-                ciborium::value::Value::Text("module_id".into()),
-                ciborium::value::Value::Text("test-enclave".into()),
-            ),
-            (
-                ciborium::value::Value::Text("digest".into()),
-                ciborium::value::Value::Text("SHA384".into()),
+                V::Text("cabundle".into()),
+                V::Array(vec![V::Bytes(vec![0xAAu8; 64])]),
             ),
         ];
 
         let mut payload_bytes = Vec::new();
-        ciborium::into_writer(&ciborium::value::Value::Map(entries), &mut payload_bytes).unwrap();
+        ciborium::into_writer(&V::Map(entries), &mut payload_bytes).unwrap();
 
-        let cose = ciborium::value::Value::Array(vec![
-            ciborium::value::Value::Bytes(vec![]),
-            ciborium::value::Value::Map(vec![]),
-            ciborium::value::Value::Bytes(payload_bytes),
-            ciborium::value::Value::Bytes(vec![0u8; 96]),
+        let cose = V::Array(vec![
+            V::Bytes(vec![]),
+            V::Map(vec![]),
+            V::Bytes(payload_bytes),
+            V::Bytes(vec![0u8; 96]),
         ]);
         let mut out = Vec::new();
         ciborium::into_writer(&cose, &mut out).unwrap();
