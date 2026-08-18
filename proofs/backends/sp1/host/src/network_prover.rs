@@ -28,6 +28,7 @@ pub struct NetworkSuccinctProver {
     multi_block_vkey: [u32; 8],
     agg_mode: SP1ProofMode,
     limits: Option<NetworkProverLimits>,
+    max_price_per_pgu: Option<u64>,
 }
 
 /// Upper bounds supplied to SP1 Network instead of estimating them by executing guests locally.
@@ -141,15 +142,15 @@ impl NetworkSuccinctProver {
         agg_mode: SP1ProofMode,
         connection: NetworkConnection,
     ) -> anyhow::Result<Self> {
-        Self::from_connection_with_limits(agg_mode, connection, None).await
+        Self::from_connection_with_request_config(agg_mode, connection, None, None).await
     }
 
-    /// Creates the prover with optional explicit execution limits. Supplying limits skips SP1's
-    /// local guest execution before each network request.
-    pub async fn from_connection_with_limits(
+    /// Creates the prover with optional execution limits and auction price ceiling.
+    pub async fn from_connection_with_request_config(
         agg_mode: SP1ProofMode,
         connection: NetworkConnection,
         limits: Option<NetworkProverLimits>,
+        max_price_per_pgu: Option<u64>,
     ) -> anyhow::Result<Self> {
         let range_elf = world_chain_proof_sp1_elfs::range_elf();
         let agg_elf = world_chain_proof_sp1_elfs::aggregation_elf();
@@ -172,6 +173,7 @@ impl NetworkSuccinctProver {
             multi_block_vkey,
             agg_mode,
             limits,
+            max_price_per_pgu,
         })
     }
 
@@ -185,6 +187,9 @@ impl NetworkSuccinctProver {
                 .cycle_limit(limits.range.cycle_limit)
                 .gas_limit(limits.range.gas_limit)
                 .skip_simulation(true);
+        }
+        if let Some(max_price_per_pgu) = self.max_price_per_pgu {
+            proof_request = proof_request.max_price_per_pgu(max_price_per_pgu);
         }
 
         let backend_session_id = proof_request
@@ -218,6 +223,9 @@ impl NetworkSuccinctProver {
                 .cycle_limit(limits.aggregation.cycle_limit)
                 .gas_limit(limits.aggregation.gas_limit)
                 .skip_simulation(true);
+        }
+        if let Some(max_price_per_pgu) = self.max_price_per_pgu {
+            proof_request = proof_request.max_price_per_pgu(max_price_per_pgu);
         }
 
         let backend_session_id = proof_request
