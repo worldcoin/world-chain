@@ -190,7 +190,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     constructor(GameConfig memory config) {
         if (
             config.blockInterval == 0 || config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod
-                || config.proposerBond == 0 || config.challengerBond == 0 || config.proofThreshold == 0
+                || config.proposerBond == 0 || config.challengerBond == 0 || config.proofThreshold < 2
                 || config.proofThreshold > LibProof.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
                 || config.aggregationVKey == bytes32(0) || config.rangeVKeyCommitment == bytes32(0)
                 || config.teeImageId == bytes32(0) || address(config.anchorStateRegistry) == address(0)

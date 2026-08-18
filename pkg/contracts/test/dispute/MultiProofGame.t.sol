@@ -181,6 +181,16 @@ contract MultiProofGameTest is OPStackFixtures {
         new MultiProofGame(config);
 
         config = _gameConfig();
+        config.proofThreshold = 1;
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
+        config.proofThreshold = LibProof.PROOF_LANE_COUNT + 1;
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
         config.proofPeriod = config.challengePeriod;
         vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
