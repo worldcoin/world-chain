@@ -3,9 +3,23 @@ failure-output = "immediate-final"
 success-output = "never"
 slow-timeout = { period = "120s", terminate-after = 3 }
 
+# Each Docker-backed devnet test stands up a whole OP Stack (Anvil, sequencers, op-nodes,
+# conductors, batcher, proposer, prover-service + Postgres, observability). Two of those at once
+# oversubscribe the Docker daemon badly enough that both miss their deadlines, so they run strictly
+# one at a time. Other tests still use the remaining threads.
+[test-groups.devnet-stack]
+max-threads = 1
+
 [[profile.default.overrides]]
 filter = 'package(world-chain-tests)'
 threads-required = 4
+
+# `devnet_run_until_shutdown_uses_continuous_block_driver` is excluded: it builds `without_l1()`
+# fully in-process and needs no Docker, so serializing it behind the stack tests buys nothing.
+[[profile.default.overrides]]
+filter = 'test(/^it::devnet_/) - test(=it::devnet_smoke::devnet_run_until_shutdown_uses_continuous_block_driver)'
+test-group = "devnet-stack"
+slow-timeout = { period = "300s", terminate-after = 8 }
 
 [[profile.default.overrides]]
 filter = 'test(/acceptance_tests::/)'

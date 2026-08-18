@@ -1,28 +1,21 @@
-use std::time::{Duration, Instant};
-
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, B256, Bytes, U256, address, keccak256};
-use alloy_provider::{Provider, ProviderBuilder, ext::AnvilApi};
+use alloy_provider::Provider;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolValue, sol};
-use eyre::eyre::{OptionExt, bail, ensure};
-use url::Url;
-use world_chain_devnet::{
-    HaSequencerConfig, ObservabilityConfig, WorldDevnetBuilder, WorldDevnetPreset,
-    is_docker_unavailable,
-};
-use world_chain_proof_protocol::{
-    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, MULTI_PROOF_GAME_TYPE,
+use eyre::eyre::{OptionExt, ensure};
+use world_chain_devnet::SUPERCHAIN_GUARDIAN_PRIVATE_KEY;
+use world_chain_proof_protocol::MULTI_PROOF_GAME_TYPE;
+
+use crate::it::utils::devnet::{
+    GAME_DEFENDER_WINS, advance_to_timestamp, anchor_at, game_at, l1_contract, l1_rpc_url,
+    latest_timestamp, signing_provider, try_build_ha_devnet, wait_for_anchor_at_or_beyond,
+    wait_for_bond_unlock, wait_for_bond_withdrawal, wait_for_game_finality,
+    wait_for_multi_proof_game, wait_for_proof_lane, wait_for_status, weth_at,
 };
 
-const DEVNET_SIGNER_KEY: &str =
-    "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("4200000000000000000000000000000000000016");
-const GAME_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
-const GAME_IN_PROGRESS: u8 = 0;
-const GAME_DEFENDER_WINS: u8 = 2;
 
 sol! {
     struct WithdrawalTransaction {
@@ -85,54 +78,24 @@ struct InitiatedWithdrawal {
 async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let ha_config = HaSequencerConfig::default()
-        .with_sequencer_count(2)
-        .with_observability(ObservabilityConfig::default());
-    let devnet = match WorldDevnetBuilder::new()
-        .preset(WorldDevnetPreset::HaSequencer)
-        .ha_sequencer(ha_config)
-        .block_time(Duration::from_secs(1))
-        .build()
-        .await
-    {
-        Ok(devnet) => devnet,
-        Err(err) if is_docker_unavailable(&err) => {
-            eprintln!("skipping Portal withdrawal E2E because Docker is unavailable: {err:#}");
-            return Ok(());
-        }
-        Err(err) => return Err(err),
+    let Some(devnet) = try_build_ha_devnet("Portal withdrawal E2E").await? else {
+        return Ok(());
     };
 
-    let l1_rpc = devnet
-        .l1_rpc_url()
-        .ok_or_eyre("full-stack devnet missing L1 RPC")?;
-    let portal_address: Address = devnet
-        .optimism_portal()
-        .ok_or_eyre("full-stack devnet missing OptimismPortal")?
-        .parse()?;
-    let factory_address: Address = devnet
-        .dispute_game_factory()
-        .ok_or_eyre("full-stack devnet missing DisputeGameFactory")?
-        .parse()?;
-    let anchor_address: Address = devnet
-        .anchor_state_registry()
-        .ok_or_eyre("full-stack devnet missing AnchorStateRegistry")?
-        .parse()?;
+    let l1_rpc = l1_rpc_url(&devnet)?;
+    let portal_address = l1_contract(devnet.optimism_portal(), "OptimismPortal")?;
+    let factory_address = l1_contract(devnet.dispute_game_factory(), "DisputeGameFactory")?;
+    let anchor_address = l1_contract(devnet.anchor_state_registry(), "AnchorStateRegistry")?;
 
-    let signer: PrivateKeySigner = DEVNET_SIGNER_KEY.parse()?;
+    // Prefunded on both L1 and L2 in the devnet genesis, so one key covers the L2 withdrawal
+    // initiation and the L1 prove/finalize calls.
+    let signer: PrivateKeySigner = SUPERCHAIN_GUARDIAN_PRIVATE_KEY.parse()?;
     let withdrawal_sender = signer.address();
-    let l1_provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(signer.clone()))
-        .connect_http(Url::parse(l1_rpc)?);
-    let l2_provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(signer))
-        .connect_http(Url::parse(&devnet.l2_rpc_url())?);
+    let l1_provider = signing_provider(l1_rpc, signer.clone())?;
+    let l2_provider = signing_provider(&devnet.l2_rpc_url(), signer)?;
 
     let portal = OptimismPortal::new(portal_address, l1_provider.clone());
-    let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
-        anchor_address,
-        l1_provider.clone(),
-    );
+    let anchor = anchor_at(anchor_address, l1_provider.clone());
     ensure!(
         portal.version().call().await? == "5.6.1",
         "devnet Portal version does not match the pinned compatibility target"
@@ -152,8 +115,9 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
 
     let withdrawal = initiate_withdrawal(l2_provider.clone(), withdrawal_sender).await?;
     let (game_index, game_address, game_l2_block) =
-        wait_for_covering_game(l1_provider.clone(), factory_address, withdrawal.l2_block).await?;
-    let game = IMultiProofGame::IMultiProofGameInstance::new(game_address, l1_provider.clone());
+        wait_for_multi_proof_game(l1_provider.clone(), factory_address, withdrawal.l2_block)
+            .await?;
+    let game = game_at(game_address, l1_provider.clone());
     ensure!(
         game.wasRespectedGameTypeWhenCreated().call().await?,
         "covering WIP-1006 game was not respected when created"
@@ -162,7 +126,7 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
         anchor.isGameProper(game_address).call().await?,
         "covering WIP-1006 game is not proper"
     );
-    wait_for_initial_proof(l1_provider.clone(), game_address).await?;
+    wait_for_proof_lane(&game).await?;
 
     let (output_root_proof, withdrawal_proof) =
         build_withdrawal_proof(l2_provider, game_l2_block, withdrawal.hash).await?;
@@ -198,7 +162,7 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
     )
     .await?;
 
-    wait_for_defender_win(l1_provider.clone(), game_address).await?;
+    wait_for_status(&game, GAME_DEFENDER_WINS).await?;
     let finality_delay: u64 = portal
         .disputeGameFinalityDelaySeconds()
         .call()
@@ -210,7 +174,7 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
         resolved_at.saturating_add(finality_delay).saturating_add(1),
     )
     .await?;
-    wait_for_game_finality(l1_provider.clone(), anchor_address, game_address).await?;
+    wait_for_game_finality(&anchor, game_address).await?;
     ensure!(
         anchor.isGameClaimValid(game_address).call().await?,
         "resolved WIP-1006 game is not a valid Portal claim"
@@ -230,14 +194,13 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
         portal.finalizedWithdrawals(withdrawal.hash).call().await?,
         "Portal did not persist the finalized withdrawal"
     );
-    wait_for_anchor_at_or_beyond(l1_provider.clone(), anchor_address, game_l2_block).await?;
+    wait_for_anchor_at_or_beyond(&anchor, game_l2_block).await?;
 
     let proposer = game.gameCreator().call().await?;
-    let delayed_weth = game.weth().call().await?;
-    let unlock_at =
-        wait_for_bond_unlock(l1_provider.clone(), delayed_weth, game_address, proposer).await?;
+    let weth = weth_at(game.weth().call().await?, l1_provider.clone());
+    let unlock_at = wait_for_bond_unlock(&weth, game_address, proposer).await?;
     advance_to_timestamp(&l1_provider, unlock_at).await?;
-    wait_for_bond_withdrawal(l1_provider.clone(), delayed_weth, game_address, proposer).await?;
+    wait_for_bond_withdrawal(&weth, game_address, proposer).await?;
 
     Ok(())
 }
@@ -285,41 +248,6 @@ where
     })
 }
 
-async fn wait_for_covering_game<P>(
-    provider: P,
-    factory_address: Address,
-    withdrawal_block: u64,
-) -> eyre::Result<(u64, Address, u64)>
-where
-    P: Provider + Clone,
-{
-    let factory =
-        IDisputeGameFactory::IDisputeGameFactoryInstance::new(factory_address, provider.clone());
-    let started = Instant::now();
-
-    loop {
-        let game_count: u64 = factory.gameCount().call().await?.try_into()?;
-        for index in (0..game_count).rev() {
-            let entry = factory.gameAtIndex(U256::from(index)).call().await?;
-            if entry.gameType != MULTI_PROOF_GAME_TYPE {
-                continue;
-            }
-            let game = IMultiProofGame::IMultiProofGameInstance::new(entry.proxy, provider.clone());
-            let l2_block: u64 = game.l2SequenceNumber().call().await?.try_into()?;
-            if l2_block >= withdrawal_block {
-                return Ok((index, entry.proxy, l2_block));
-            }
-        }
-
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
-            bail!(
-                "timed out waiting for a respected WIP-1006 game covering withdrawal block {withdrawal_block}"
-            );
-        }
-        tokio::time::sleep(Duration::from_secs(2)).await;
-    }
-}
-
 async fn build_withdrawal_proof<P>(
     l2_provider: P,
     game_l2_block: u64,
@@ -355,173 +283,4 @@ where
         },
         storage_proof.proof.clone(),
     ))
-}
-
-async fn wait_for_initial_proof<P>(provider: P, game_address: Address) -> eyre::Result<()>
-where
-    P: Provider,
-{
-    let game = IMultiProofGame::IMultiProofGameInstance::new(game_address, provider);
-    let started = Instant::now();
-
-    loop {
-        if game.proofBitmap().call().await? != 0 {
-            return Ok(());
-        }
-        if game.status().call().await? != GAME_IN_PROGRESS {
-            bail!("game {game_address} resolved before receiving its initial proof");
-        }
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
-            bail!(
-                "timed out waiting for defender to submit an initial proof to game {game_address}"
-            );
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-}
-
-async fn wait_for_defender_win<P>(provider: P, game_address: Address) -> eyre::Result<()>
-where
-    P: Provider,
-{
-    let game = IMultiProofGame::IMultiProofGameInstance::new(game_address, provider);
-    let started = Instant::now();
-
-    loop {
-        let status = game.status().call().await?;
-        if status == GAME_DEFENDER_WINS {
-            return Ok(());
-        }
-        if status != GAME_IN_PROGRESS {
-            bail!("game {game_address} resolved with unexpected status {status}");
-        }
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
-            bail!("timed out waiting for game {game_address} to resolve");
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-}
-
-async fn wait_for_game_finality<P>(
-    provider: P,
-    anchor_address: Address,
-    game_address: Address,
-) -> eyre::Result<()>
-where
-    P: Provider,
-{
-    let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(anchor_address, provider);
-    let started = Instant::now();
-    loop {
-        if anchor.isGameFinalized(game_address).call().await? {
-            return Ok(());
-        }
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
-            bail!("timed out waiting for game {game_address} to pass the ASR finality airgap");
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-}
-
-async fn wait_for_anchor_at_or_beyond<P>(
-    provider: P,
-    anchor_address: Address,
-    game_l2_block: u64,
-) -> eyre::Result<()>
-where
-    P: Provider,
-{
-    let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(anchor_address, provider);
-    let started = Instant::now();
-    loop {
-        let anchor_root = anchor.getAnchorRoot().call().await?;
-        if anchor_root.l2SequenceNumber >= U256::from(game_l2_block) {
-            return Ok(());
-        }
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
-            bail!("timed out waiting for the ASR anchor to reach L2 block {game_l2_block}");
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-}
-
-async fn wait_for_bond_unlock<P>(
-    provider: P,
-    delayed_weth: Address,
-    game_address: Address,
-    proposer: Address,
-) -> eyre::Result<u64>
-where
-    P: Provider + Clone,
-{
-    let weth = IDelayedWETH::IDelayedWETHInstance::new(delayed_weth, provider);
-    let delay = weth.delay().call().await?;
-    let started = Instant::now();
-    loop {
-        let pending = weth.withdrawals(game_address, proposer).call().await?;
-        if !pending.amount.is_zero() {
-            let unlock_at: u64 = pending
-                .timestamp
-                .checked_add(delay)
-                .ok_or_eyre("DelayedWETH unlock timestamp overflow")?
-                .try_into()?;
-            return Ok(unlock_at);
-        }
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
-            bail!("timed out waiting for proposer bond credit to unlock");
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-}
-
-async fn wait_for_bond_withdrawal<P>(
-    provider: P,
-    delayed_weth: Address,
-    game_address: Address,
-    proposer: Address,
-) -> eyre::Result<()>
-where
-    P: Provider,
-{
-    let weth = IDelayedWETH::IDelayedWETHInstance::new(delayed_weth, provider);
-    let started = Instant::now();
-    loop {
-        if weth
-            .withdrawals(game_address, proposer)
-            .call()
-            .await?
-            .amount
-            .is_zero()
-        {
-            return Ok(());
-        }
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
-            bail!("timed out waiting for proposer bond withdrawal");
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-}
-
-async fn latest_timestamp<P>(provider: &P) -> eyre::Result<u64>
-where
-    P: Provider,
-{
-    Ok(provider
-        .get_block_by_number(BlockNumberOrTag::Latest)
-        .await?
-        .ok_or_eyre("latest L1 block missing")?
-        .header
-        .timestamp())
-}
-
-async fn advance_to_timestamp<P>(provider: &P, target: u64) -> eyre::Result<()>
-where
-    P: Provider,
-{
-    let current = latest_timestamp(provider).await?;
-    if target > current {
-        provider.anvil_increase_time(target - current).await?;
-    }
-    provider.evm_mine(None).await?;
-    Ok(())
 }

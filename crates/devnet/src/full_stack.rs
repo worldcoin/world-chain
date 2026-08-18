@@ -127,7 +127,11 @@ const WORLD_DEFENDER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
 
 const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
-const SUPERCHAIN_GUARDIAN_PRIVATE_KEY: &str =
+/// Superchain Guardian key (Anvil dev account 2, `0x3C44Cdd…4293BC`).
+///
+/// Registered as `SuperchainGuardian` in the op-deployer intent and prefunded in both the L1 and
+/// L2 genesis, so E2E tests can also use it as a general-purpose funded account on either chain.
+pub const SUPERCHAIN_GUARDIAN_PRIVATE_KEY: &str =
     "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
 const L1_PROXY_ADMIN_OWNER_PRIVATE_KEY: &str =
     "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a";
@@ -435,6 +439,20 @@ impl FullStackWorldDevnet {
         let topology = HaSequencerTopology::from_config(config.clone());
         let artifacts = generate_op_artifacts(&config, &hardforks).await?;
         let workdir_path = artifacts.workdir.path().to_path_buf();
+        // Doubles as the Docker network name and the naming prefix for every OP Stack container
+        // on it (op-node, op-conductor, op-batcher, op-proposer, op-challenger), so those
+        // containers reach each other by container-name DNS instead of bouncing through
+        // `host.docker.internal`. Derived from the workdir's unique suffix so concurrent devnet
+        // instances (e.g. parallel tests) never collide on the Docker daemon's global network
+        // and container namespaces. L1 (Anvil) and the L2 sequencer remain native host
+        // processes, so links to them still legitimately go through `host.docker.internal`.
+        let network = workdir_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| format!("{name}-net"))
+            .ok_or_else(|| {
+                eyre!("OP deployer workdir has no file name to derive a network id from")
+            })?;
 
         let mut l1_config = L1DevChainConfig {
             block_time_secs: block_time.as_secs().max(1),
@@ -510,6 +528,7 @@ impl FullStackWorldDevnet {
                 index,
                 port_mode,
                 &mut op_service_port_reservations,
+                &network,
             )?);
         }
 
@@ -534,7 +553,7 @@ impl FullStackWorldDevnet {
                 l1_slot_duration_secs,
                 &l1_internal_rpc,
                 &sequencers[index],
-                &conductor_plans[index].rpc_url,
+                &network,
             )
         }))
         .await?;
@@ -549,6 +568,7 @@ impl FullStackWorldDevnet {
                 &workdir_path,
                 &sequencers[0],
                 &conductor_plans[0],
+                &network,
             )
             .await?,
         );
@@ -573,6 +593,7 @@ impl FullStackWorldDevnet {
                     &workdir_path,
                     &sequencers[index],
                     &conductor_plans[index],
+                    &network,
                 )
                 .await?,
             );
@@ -589,7 +610,11 @@ impl FullStackWorldDevnet {
         )
         .await?;
 
-        let conductor_rpc_internal = host_internal_url(&conductors[0].rpc_url)?;
+        // op-conductor is a Docker container on the shared devnet network, so op-batcher,
+        // op-proposer, and op-challenger dial it directly by container name/internal port
+        // instead of bouncing through the host.
+        let conductor_rpc_internal =
+            format!("http://{network}-op-conductor-0:{CONDUCTOR_RPC_PORT}");
         let l2_rpc_internal = host_internal_url(&sequencers[0].rpc_url)?;
         let game_factory = l1_address(&artifacts.l1_addresses, "DisputeGameFactoryProxy")?;
         let optimism_portal = l1_address(&artifacts.l1_addresses, "OptimismPortalProxy")?;
@@ -600,12 +625,14 @@ impl FullStackWorldDevnet {
                     &config.images.op_batcher,
                     &l1_internal_rpc,
                     &conductor_rpc_internal,
+                    &network,
                 ),
                 start_proposer(
                     &config.images.op_proposer,
                     &l1_internal_rpc,
                     &conductor_rpc_internal,
                     &game_factory,
+                    &network,
                 ),
                 start_challenger(
                     &config.images.op_challenger,
@@ -614,6 +641,7 @@ impl FullStackWorldDevnet {
                     &l2_rpc_internal,
                     &conductor_rpc_internal,
                     &game_factory,
+                    &network,
                 ),
             )?;
             (Some(batcher), Some(proposer), Some(challenger))
@@ -623,12 +651,14 @@ impl FullStackWorldDevnet {
                     &config.images.op_batcher,
                     &l1_internal_rpc,
                     &conductor_rpc_internal,
+                    &network,
                 ),
                 start_proposer(
                     &config.images.op_proposer,
                     &l1_internal_rpc,
                     &conductor_rpc_internal,
                     &game_factory,
+                    &network,
                 ),
             )?;
             (Some(batcher), Some(proposer), None)
@@ -1191,8 +1221,6 @@ async fn deploy_world_proof_system(
             L1_PROXY_ADMIN_OWNER_PRIVATE_KEY,
         )
         .env("DGF_OWNER_KEY", L1_PROXY_ADMIN_OWNER_PRIVATE_KEY)
-        .env("GUARDIAN_KEY", SUPERCHAIN_GUARDIAN_PRIVATE_KEY)
-        .env("SET_RESPECTED_GAME_TYPE", "true")
         .env(
             "PROTOCOL_FEE_RECIPIENT",
             world_challenger_address()?.to_string(),
@@ -1273,7 +1301,84 @@ async fn deploy_world_proof_system(
         "World Chain proof-system contracts deployed"
     );
 
+    // `DeployProofSystem` only registers the WIP-1006 implementation on the factory; it never
+    // flips the AnchorStateRegistry's respected game type, so no WIP-1006 game is ever "proper"
+    // (`wasRespectedGameTypeWhenCreated`) or eligible to anchor Portal withdrawals until this
+    // runs. This mirrors what a real chain operator's guardian would do post-deployment.
+    activate_world_proof_system(
+        l1_rpc_url,
+        &contracts_dir,
+        &dispute_game_factory,
+        &anchor_state_registry,
+        &system_config,
+    )
+    .await?;
+
     Ok(deployment)
+}
+
+/// Flips the AnchorStateRegistry's respected game type to WIP-1006 via the guardian key, the
+/// activation step `DeployProofSystem.s.sol` deliberately leaves to a separate script (see
+/// `ActivateProofSystem.s.sol`'s header comment: it verifies wiring, bond, and anchor validity
+/// before activating, and never touches the ASR retirement timestamp).
+async fn activate_world_proof_system(
+    l1_rpc_url: &str,
+    contracts_dir: &Path,
+    dispute_game_factory: &str,
+    anchor_state_registry: &str,
+    system_config: &str,
+) -> Result<()> {
+    let output = Command::new("forge")
+        .current_dir(contracts_dir)
+        .arg("script")
+        .arg("scripts/devnet/ActivateProofSystem.s.sol:ActivateProofSystem")
+        .arg("--broadcast")
+        .arg("--rpc-url")
+        .arg(l1_rpc_url)
+        .arg("--private-key")
+        .arg(SUPERCHAIN_GUARDIAN_PRIVATE_KEY)
+        .arg("--slow")
+        .arg("--evm-version")
+        .arg("cancun")
+        .env("GUARDIAN_KEY", SUPERCHAIN_GUARDIAN_PRIVATE_KEY)
+        .env("DISPUTE_GAME_FACTORY", dispute_game_factory)
+        .env("ANCHOR_STATE_REGISTRY", anchor_state_registry)
+        .env("SYSTEM_CONFIG", system_config)
+        .output()
+        .await
+        .wrap_err("failed to spawn forge proof-system activation")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stdout.trim().is_empty() {
+        emit_command_logs(
+            "world-proof-system activate",
+            ProcessLogTarget::OpDeployer,
+            &stdout,
+        );
+    }
+    if !stderr.trim().is_empty() {
+        emit_command_logs(
+            "world-proof-system activate",
+            ProcessLogTarget::OpDeployer,
+            &stderr,
+        );
+    }
+    if !output.status.success() {
+        bail!(
+            "forge proof-system activation failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            stdout,
+            stderr
+        );
+    }
+
+    info!(
+        anchor = anchor_state_registry,
+        "World Chain proof-system WIP-1006 respected game type activated"
+    );
+
+    Ok(())
 }
 
 fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
@@ -1960,6 +2065,7 @@ fn plan_conductor(
     index: usize,
     port_mode: DevnetPortMode,
     reservations: &mut Vec<TcpListener>,
+    network: &str,
 ) -> Result<ConductorPlan> {
     let consensus_host_port = match port_mode {
         DevnetPortMode::Stable => 50_050 + index as u16,
@@ -1978,7 +2084,12 @@ fn plan_conductor(
         DevnetPortMode::Dynamic => reserve_host_port(reservations)?,
     };
     let server_id = format!("sequencer-{}", index + 1);
-    let consensus_advertised = format!("host.docker.internal:{consensus_host_port}");
+    // Raft consensus is exclusively container-to-container traffic (every op-conductor is a
+    // Docker container on the shared devnet network), so peers dial each other directly by
+    // container name/internal port rather than bouncing through the host. Bouncing through
+    // `host.docker.internal` for this link was a source of intermittent connection failures
+    // (unreachable IPv6 routes, dropped requests) that container-to-container DNS avoids.
+    let consensus_advertised = format!("{network}-op-conductor-{index}:{CONDUCTOR_CONSENSUS_PORT}");
 
     Ok(ConductorPlan {
         server_id,
@@ -2009,7 +2120,7 @@ fn plan_op_nodes(
         fs::write(workdir.join(&filename), &private_key)
             .wrap_err_with(|| format!("failed to write op-node P2P key {filename}"))?;
         plans.push(OpNodePlan {
-            rpc_host_port: 19_545 + index as u16,
+            rpc_host_port: reserve_host_port(reservations)?,
             metrics_host_port: reserve_host_port(reservations)?,
             p2p_host_port,
             bootnode: devnet_trusted_peer(&private_key, "host.docker.internal", p2p_host_port)?,
@@ -2065,8 +2176,11 @@ async fn start_conductor(
     workdir: &Path,
     sequencer: &SequencerService,
     plan: &ConductorPlan,
+    network: &str,
 ) -> Result<ConductorService> {
-    let node_rpc = format!("http://host.docker.internal:{}", 19_545 + index as u16);
+    // op-node is a Docker container on the same shared devnet network as op-conductor, so this
+    // dials it directly by container name/internal port instead of bouncing through the host.
+    let node_rpc = format!("http://{network}-op-node-{index}:{OP_NODE_RPC_PORT}");
     let execution_rpc = host_internal_url(&sequencer.rpc_url)?;
     let min_peer_count = sequencer_count.saturating_sub(1).max(1).to_string();
     let mut cmd = vec![
@@ -2126,6 +2240,8 @@ async fn start_conductor(
             format!("op-conductor-{index}"),
             ProcessLogTarget::OpConductor,
         ))
+        .with_container_name(format!("{network}-op-conductor-{index}"))
+        .with_network(network)
         .with_cmd(cmd)
         .with_startup_timeout(Duration::from_secs(90))
         .with_mount(Mount::bind_mount(
@@ -2170,9 +2286,13 @@ async fn start_op_node(
     l1_slot_duration_secs: u64,
     l1_rpc: &str,
     sequencer: &SequencerService,
-    conductor_rpc_url: &str,
+    network: &str,
 ) -> Result<OpNodeService> {
-    let conductor_rpc = host_internal_url(conductor_rpc_url)?;
+    // op-conductor is a Docker container on the same shared devnet network, so op-node dials it
+    // directly by container name/internal port instead of bouncing through the host. `network`
+    // doubles as the naming prefix for every container on it, keeping names unique per devnet
+    // instance so concurrent devnets (e.g. parallel tests) never collide on the Docker daemon.
+    let conductor_rpc = format!("http://{network}-op-conductor-{index}:{CONDUCTOR_RPC_PORT}");
     let l2_engine_rpc = host_internal_url(&sequencer.auth_url)?;
     let p2p_host_port = plan.p2p_host_port.to_string();
     let l1_slot_duration_secs = l1_slot_duration_secs.to_string();
@@ -2257,6 +2377,8 @@ async fn start_op_node(
             format!("op-node-{index}"),
             ProcessLogTarget::OpNode,
         ))
+        .with_container_name(format!("{network}-op-node-{index}"))
+        .with_network(network)
         .with_cmd(cmd)
         .with_startup_timeout(Duration::from_secs(120))
         .with_mount(Mount::bind_mount(
@@ -2506,6 +2628,7 @@ async fn start_batcher(
     image: &ContainerImage,
     l1_rpc: &str,
     conductor_rpc: &str,
+    network: &str,
 ) -> Result<ContainerService> {
     let cmd = vec![
         "--l1-eth-rpc".to_string(),
@@ -2551,6 +2674,7 @@ async fn start_batcher(
         image,
         cmd,
         None,
+        network,
     )
     .await
 }
@@ -2560,6 +2684,7 @@ async fn start_proposer(
     l1_rpc: &str,
     rollup_rpc: &str,
     game_factory: &str,
+    network: &str,
 ) -> Result<ContainerService> {
     let cmd = vec![
         "--l1-eth-rpc".to_string(),
@@ -2604,6 +2729,7 @@ async fn start_proposer(
         image,
         cmd,
         None,
+        network,
     )
     .await
 }
@@ -2615,6 +2741,7 @@ async fn start_challenger(
     l2_rpc: &str,
     rollup_rpc: &str,
     game_factory: &str,
+    network: &str,
 ) -> Result<ContainerService> {
     let cmd = vec![
         "--l1-eth-rpc".to_string(),
@@ -2659,6 +2786,7 @@ async fn start_challenger(
         image,
         cmd,
         Some(workdir),
+        network,
     )
     .await
 }
@@ -3146,6 +3274,7 @@ async fn start_aux_service(
     image: &ContainerImage,
     cmd: Vec<String>,
     mount: Option<&Path>,
+    network: &str,
 ) -> Result<ContainerService> {
     info!(
         id,
@@ -3154,6 +3283,10 @@ async fn start_aux_service(
         "starting OP Stack devnet service"
     );
 
+    // Attaches to the shared devnet network so this service can resolve op-conductor (and any
+    // other container it needs) by container name instead of bouncing through the host. This
+    // service isn't itself dialed by name from another container, so it doesn't need a stable
+    // `with_container_name` — testcontainers' generated name is fine.
     let mut request = GenericImage::new(image.repository.clone(), image.tag.clone())
         .with_entrypoint(id)
         .with_wait_for(WaitFor::seconds(3))
@@ -3163,6 +3296,7 @@ async fn start_aux_service(
             id.to_string(),
             service_log_target(id),
         ))
+        .with_network(network)
         .with_cmd(cmd)
         .with_startup_timeout(Duration::from_secs(90));
 
