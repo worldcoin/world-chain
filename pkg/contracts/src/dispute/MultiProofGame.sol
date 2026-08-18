@@ -473,6 +473,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @notice Proves the game through one of the proof lanes.
+    /// @dev The lane proof does not authenticate its reward recipient. Submissions claiming a
+    ///      lane reward should use a trusted private transaction path: public-mempool observers
+    ///      can copy the proof, replace the recipient, and capture the reward without affecting
+    ///      proof validity or game progress.
     /// @param proof A compact encoding of the lane id, the proof recipient, and the proof payload.
     function submitProofLane(bytes calldata proof) external returns (ProposalStatus) {
         // INVARIANT: Cannot prove if the game is already resolved.
