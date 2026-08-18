@@ -142,17 +142,7 @@ impl NetworkSuccinctProver {
         agg_mode: SP1ProofMode,
         connection: NetworkConnection,
     ) -> anyhow::Result<Self> {
-        Self::from_connection_with_limits(agg_mode, connection, None).await
-    }
-
-    /// Creates the prover with optional explicit execution limits. Supplying limits skips SP1's
-    /// local guest execution before each network request.
-    pub async fn from_connection_with_limits(
-        agg_mode: SP1ProofMode,
-        connection: NetworkConnection,
-        limits: Option<NetworkProverLimits>,
-    ) -> anyhow::Result<Self> {
-        Self::from_connection_with_request_config(agg_mode, connection, limits, None).await
+        Self::from_connection_with_request_config(agg_mode, connection, None, None).await
     }
 
     /// Creates the prover with optional execution limits and auction price ceiling.
