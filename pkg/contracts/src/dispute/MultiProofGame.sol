@@ -473,7 +473,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     /// @notice Proves the game through one of the proof lanes.
     /// @dev The lane proof does not commit to its reward recipient. Therefore proof submissions
-    ///             should be broadcasted via a private relay; To avoid the possibility of being front run.
+    ///      should be broadcasted via a private relay; To avoid the possibility of being front run.
     /// @param proof A compact encoding of the lane id, the proof recipient, and the proof payload.
     function submitProofLane(bytes calldata proof) external returns (ProposalStatus) {
         // INVARIANT: Cannot prove if the game is already resolved.
