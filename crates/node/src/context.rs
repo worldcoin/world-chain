@@ -628,10 +628,10 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
 #[cfg(test)]
 mod sentry_policy_tests {
     use super::*;
-    use world_chain_cli::cli::DEFAULT_FLASHBLOCKS_SENTRIES;
+    use world_chain_cli::cli::FLASHBLOCKS_MAINNET_SENTRIES;
 
     fn sentries() -> Vec<TrustedPeer> {
-        DEFAULT_FLASHBLOCKS_SENTRIES
+        FLASHBLOCKS_MAINNET_SENTRIES
             .split(',')
             .map(|sentry| sentry.parse().expect("valid default sentry"))
             .collect()

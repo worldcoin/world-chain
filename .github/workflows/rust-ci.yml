@@ -48,7 +48,9 @@ env:
 jobs:
   cargo-tests:
     runs-on: arc-public-8xlarge-amd64-runner
-    environment: dev
+    environment:
+      name: dev
+      deployment: false
     env:
       RUSTC_WRAPPER: sccache
       SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
@@ -92,7 +94,9 @@ jobs:
 
   cargo-clippy:
     runs-on: arc-public-8xlarge-amd64-runner
-    environment: dev
+    environment:
+      name: dev
+      deployment: false
     timeout-minutes: 20
     name: clippy
     env:
@@ -135,7 +139,9 @@ jobs:
 
   cargo-docs:
     runs-on: arc-public-8xlarge-amd64-runner
-    environment: dev
+    environment:
+      name: dev
+      deployment: false
     timeout-minutes: 20
     name: docs
     env:

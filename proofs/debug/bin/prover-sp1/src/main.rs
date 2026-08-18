@@ -1,10 +1,9 @@
-use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 
+#[cfg(test)]
 use alloy_primitives::B256;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
-use serde_json::json;
 use world_chain_proof_sp1_host::Sp1ProverKind;
 use world_chain_proof_sp1_types::RangeProofRequest;
 use world_chain_prover::{
@@ -218,42 +217,8 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
 }
 
 async fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
-    use anyhow::anyhow;
-    use sp1_sdk::{CpuProver, HashableKey, Prover, ProvingKey, env::EnvProver};
-    use world_chain_proof_core::types::u32_to_u8;
-    let range_elf_bytes = world_chain_proof_sp1_elfs::range_elf();
-    let agg_elf_bytes = world_chain_proof_sp1_elfs::aggregation_elf();
-
-    let range_elf_sha256 = hex::encode(Sha256::digest(&*range_elf_bytes));
-    let agg_elf_sha256 = hex::encode(Sha256::digest(&*agg_elf_bytes));
-
-    let (range_vkey_commitment, aggregation_vkey) = {
-        let client = EnvProver::Cpu(CpuProver::new().await);
-        let range_pk = client
-            .setup(range_elf_bytes)
-            .await
-            .map_err(|e| anyhow!("range setup failed: {e}"))?;
-        let agg_pk = client
-            .setup(agg_elf_bytes)
-            .await
-            .map_err(|e| anyhow!("aggregation setup failed: {e}"))?;
-        let range_vkey_commitment = B256::from(u32_to_u8(range_pk.verifying_key().hash_u32()));
-        let aggregation_vkey = agg_pk.verifying_key().bytes32();
-        anyhow::Ok((range_vkey_commitment, aggregation_vkey))
-    }?;
-
-    let out = serde_json::to_string_pretty(&json!({
-        "range_vkey_commitment": range_vkey_commitment,
-        "aggregation_vkey": aggregation_vkey,
-        "elfs": {
-            "world-chain-range-ethereum": {
-                "sha256": range_elf_sha256,
-            },
-            "world-chain-aggregation": {
-                "sha256": agg_elf_sha256,
-            },
-        },
-    }))?;
+    let manifest = world_chain_proof_sp1_host::vkeys::embedded_vkey_manifest().await?;
+    let out = serde_json::to_string_pretty(&manifest)?;
 
     match &args.output {
         Some(path) => {

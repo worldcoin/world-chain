@@ -708,6 +708,10 @@ a debug enclave is indistinguishable from a forged one.
 
 ### `nitro-worker` (Host Binary)
 
+For every leased job, the host reads the proof interval and immutable transition metadata from the
+job's `MultiProofGame`. It rejects queued root, block, L1 head, or rollup-config values that do not
+match the game before collecting a witness or contacting the enclave.
+
 | Flag / Env Var | Description | Default |
 |----------------|-------------|---------|
 | `--prover-service-url` / `PROVER_SERVICE_URL` | URL of the prover-service API | Required |
@@ -717,7 +721,6 @@ a debug enclave is indistinguishable from a forged one.
 | `--network` / `NETWORK` | `worldchain` or `worldchain-sepolia` | `worldchain` |
 | `--rollup-config` / `ROLLUP_CONFIG` | Path to rollup config JSON file | — |
 | `--rollup-config-hash` / `ROLLUP_CONFIG_HASH` | Rollup config hash override | — |
-| `--block-interval` / `BLOCK_INTERVAL` | L2 blocks per proof (must match contract) | Required |
 | `--enclave-cid` / `ENCLAVE_CID` | vsock CID of the enclave | `16` |
 | `--enclave-port` / `ENCLAVE_PORT` | vsock port the enclave listens on | `5005` |
 | `--pcr0` / `PCR0` | Expected PCR0 (hex, 48 bytes) | All zeros (placeholder) |

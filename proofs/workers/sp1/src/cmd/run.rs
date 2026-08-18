@@ -1,17 +1,22 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::{Address, B256, U256};
-use anyhow::{Context, Result, bail};
+use alloy_provider::ProviderBuilder;
+use anyhow::{Context, Result};
 use clap::Parser;
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host::online::{
     OnlineHostConfig, build_online_config, hardfork_config_from_chain_spec,
 };
+use world_chain_proof_protocol::AlloyProofGameProvider;
 use world_chain_proof_sp1_host::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
-    network_prover::{NetworkConnection, NetworkCreditClient, NetworkSuccinctProver},
+    network_prover::{
+        NetworkConnection, NetworkCreditClient, NetworkProverLimits, NetworkSuccinctProver,
+        ProofLimits,
+    },
 };
 use world_chain_proof_sp1_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
@@ -29,9 +34,12 @@ const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
 const DEFAULT_WORKER_HEARTBEAT_INTERVAL_SEC: u64 = 30;
 const DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES: u32 = 5;
-const DEFAULT_SP1_SESSION_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const SP1_NETWORK_BALANCE_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const MINIMUM_DEPOSIT_MULTIPLIER: u64 = 10;
+const DEFAULT_SP1_RANGE_CYCLE_LIMIT: u64 = 1_500_000_000_000;
+const DEFAULT_SP1_RANGE_GAS_LIMIT: u64 = 1_300_000_000_000;
+const DEFAULT_SP1_AGGREGATION_CYCLE_LIMIT: u64 = 7_000_000;
+const DEFAULT_SP1_AGGREGATION_GAS_LIMIT: u64 = 6_500_000;
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Network {
@@ -92,15 +100,6 @@ pub struct WorkerArgs {
     #[arg(long, env = "ROLLUP_CONFIG_HASH")]
     rollup_config_hash: Option<B256>,
 
-    /// L2 blocks between a proposal's parent and its claimed block (the proof system's
-    /// blockInterval domain constant).
-    #[arg(long, env = "BLOCK_INTERVAL")]
-    block_interval: u64,
-
-    /// Number of equal-length sub-ranges proved independently per job.
-    #[arg(long, default_value_t = 1)]
-    ranges: u64,
-
     /// Allow proving blocks newer than the finalized L2 head.
     #[arg(long)]
     allow_unfinalized: bool,
@@ -142,14 +141,58 @@ pub struct WorkerArgs {
     #[arg(long, default_value_t = 10)]
     poll_interval_seconds: u64,
 
-    /// Seconds to sleep between SP1 prover session status polls while a proof is running.
+    /// Execute each SP1 guest locally to estimate its cycle and gas limits before submitting it.
+    /// By default, the worker skips local execution and uses the configured fixed limits.
+    #[arg(long, env = "SP1_ESTIMATE_LIMITS")]
+    sp1_estimate_limits: bool,
+
+    /// Cycle limit for optimistic SP1 range-proof requests.
     #[arg(
         long,
-        env = "SP1_SESSION_POLL_INTERVAL_SECONDS",
-        default_value_t = DEFAULT_SP1_SESSION_POLL_INTERVAL.as_secs(),
+        env = "SP1_RANGE_CYCLE_LIMIT",
+        default_value_t = DEFAULT_SP1_RANGE_CYCLE_LIMIT,
+        conflicts_with = "sp1_estimate_limits",
         value_parser = clap::value_parser!(u64).range(1..)
     )]
-    sp1_session_poll_interval_seconds: u64,
+    sp1_range_cycle_limit: u64,
+
+    /// Gas limit in PGUs for optimistic SP1 range-proof requests.
+    #[arg(
+        long,
+        env = "SP1_RANGE_GAS_LIMIT",
+        default_value_t = DEFAULT_SP1_RANGE_GAS_LIMIT,
+        conflicts_with = "sp1_estimate_limits",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    sp1_range_gas_limit: u64,
+
+    /// Cycle limit for optimistic SP1 aggregation-proof requests.
+    #[arg(
+        long,
+        env = "SP1_AGGREGATION_CYCLE_LIMIT",
+        default_value_t = DEFAULT_SP1_AGGREGATION_CYCLE_LIMIT,
+        conflicts_with = "sp1_estimate_limits",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    sp1_aggregation_cycle_limit: u64,
+
+    /// Gas limit in PGUs for optimistic SP1 aggregation-proof requests.
+    #[arg(
+        long,
+        env = "SP1_AGGREGATION_GAS_LIMIT",
+        default_value_t = DEFAULT_SP1_AGGREGATION_GAS_LIMIT,
+        conflicts_with = "sp1_estimate_limits",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    sp1_aggregation_gas_limit: u64,
+
+    /// Maximum auction price in PROVE base units per PGU. Uses the SP1 Network default if omitted.
+    #[arg(
+        long,
+        env = "SP1_MAX_PRICE_PER_PGU",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    sp1_max_price_per_pgu: Option<u64>,
 
     /// Maximum number of jobs proved concurrently. One suits a local CPU prover; raise it for
     /// the Succinct proving network.
@@ -213,13 +256,6 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
         Duration::from_secs(cli.witness_timeout_seconds),
     )?;
 
-    // currently we don't support split_range != 1, therefore we ensure it's exactly 1
-    if cli.ranges != 1 {
-        bail!(
-            "Currently we don't support splitting the range proof into multiple ranges. Set `ranges` to 1."
-        )
-    }
-
     // ELFs are embedded at compile time via `sp1_sdk::include_elf!()`
     // (see `proofs/backends/sp1/elfs/build.rs`). Challenged roots are
     // defended on-chain; Groth16 keeps verification ~100k gas.
@@ -271,10 +307,26 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
             }
 
             monitor_network_balance(credit_client, minimum_balance, settlement.prove_decimals);
+            let limits = (!cli.sp1_estimate_limits).then_some(NetworkProverLimits {
+                range: ProofLimits {
+                    cycle_limit: cli.sp1_range_cycle_limit,
+                    gas_limit: cli.sp1_range_gas_limit,
+                },
+                aggregation: ProofLimits {
+                    cycle_limit: cli.sp1_aggregation_cycle_limit,
+                    gas_limit: cli.sp1_aggregation_gas_limit,
+                },
+            });
             run_worker(
                 &cli,
                 host,
-                NetworkSuccinctProver::from_connection(SP1ProofMode::Groth16, connection).await?,
+                NetworkSuccinctProver::from_connection_with_request_config(
+                    SP1ProofMode::Groth16,
+                    connection,
+                    limits,
+                    cli.sp1_max_price_per_pgu,
+                )
+                .await?,
             )
             .await
         }
@@ -375,14 +427,15 @@ async fn run_worker<P>(cli: &WorkerArgs, host: OnlineHostConfig, prover: P) -> R
 where
     P: WorldSuccinctProver + Send + Sync + 'static,
 {
+    let l1_rpc_url = cli.l1_rpc.parse().context("invalid L1 RPC URL")?;
+    let game_provider =
+        AlloyProofGameProvider::new(ProviderBuilder::new().connect_http(l1_rpc_url));
     let backend = Sp1Backend::new(
         host,
         prover,
+        game_provider,
         Sp1BackendConfig {
-            block_interval: cli.block_interval,
-            split_count: cli.ranges.max(1),
             allow_unfinalized: cli.allow_unfinalized,
-            session_poll_interval: Duration::from_secs(cli.sp1_session_poll_interval_seconds),
         },
     );
 
@@ -414,10 +467,13 @@ where
 
     tracing::info!(
         prover_service = %cli.prover_service_url,
-        block_interval = cli.block_interval,
-        ranges = cli.ranges.max(1),
         prover = %cli.prover,
-        sp1_session_poll_interval_seconds = cli.sp1_session_poll_interval_seconds,
+        sp1_estimate_limits = cli.sp1_estimate_limits,
+        sp1_range_cycle_limit = cli.sp1_range_cycle_limit,
+        sp1_range_gas_limit = cli.sp1_range_gas_limit,
+        sp1_aggregation_cycle_limit = cli.sp1_aggregation_cycle_limit,
+        sp1_aggregation_gas_limit = cli.sp1_aggregation_gas_limit,
+        sp1_max_price_per_pgu = ?cli.sp1_max_price_per_pgu,
         submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = cli.submit_proof_retry_max_delay_ms,
@@ -453,30 +509,67 @@ mod tests {
             "http://127.0.0.1:8545",
             "--l1-beacon-rpc",
             "http://127.0.0.1:5052",
-            "--block-interval",
-            "10",
             "--worker-id",
             "test",
         ]
     }
 
     #[test]
-    fn parses_sp1_session_poll_interval_seconds() {
-        let mut args = base_args();
-        args.extend(["--sp1-session-poll-interval-seconds", "3"]);
+    fn uses_optimistic_sp1_limits_by_default() {
+        let cli = WorkerArgs::parse_from(base_args());
 
-        let cli = WorkerArgs::parse_from(args);
-
-        assert_eq!(cli.sp1_session_poll_interval_seconds, 3);
+        assert!(!cli.sp1_estimate_limits);
+        assert_eq!(cli.sp1_range_cycle_limit, DEFAULT_SP1_RANGE_CYCLE_LIMIT);
+        assert_eq!(cli.sp1_range_gas_limit, DEFAULT_SP1_RANGE_GAS_LIMIT);
+        assert_eq!(
+            cli.sp1_aggregation_cycle_limit,
+            DEFAULT_SP1_AGGREGATION_CYCLE_LIMIT
+        );
+        assert_eq!(
+            cli.sp1_aggregation_gas_limit,
+            DEFAULT_SP1_AGGREGATION_GAS_LIMIT
+        );
+        assert_eq!(cli.sp1_max_price_per_pgu, None);
     }
 
     #[test]
-    fn rejects_zero_sp1_session_poll_interval_seconds() {
+    fn local_limit_estimation_conflicts_with_explicit_limits() {
         let mut args = base_args();
-        args.extend(["--sp1-session-poll-interval-seconds", "0"]);
+        args.extend(["--sp1-estimate-limits", "--sp1-range-cycle-limit", "1000"]);
 
-        let error =
-            WorkerArgs::try_parse_from(args).expect_err("zero poll interval should be rejected");
+        let error = WorkerArgs::try_parse_from(args)
+            .expect_err("local estimation and explicit limits should conflict");
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn local_limit_estimation_can_use_defaulted_limit_arguments() {
+        let mut args = base_args();
+        args.push("--sp1-estimate-limits");
+
+        let cli = WorkerArgs::parse_from(args);
+
+        assert!(cli.sp1_estimate_limits);
+    }
+
+    #[test]
+    fn parses_sp1_max_price_per_pgu() {
+        let mut args = base_args();
+        args.extend(["--sp1-max-price-per-pgu", "50000000"]);
+
+        let cli = WorkerArgs::parse_from(args);
+
+        assert_eq!(cli.sp1_max_price_per_pgu, Some(50_000_000));
+    }
+
+    #[test]
+    fn rejects_zero_sp1_max_price_per_pgu() {
+        let mut args = base_args();
+        args.extend(["--sp1-max-price-per-pgu", "0"]);
+
+        let error = WorkerArgs::try_parse_from(args)
+            .expect_err("zero max price per PGU should be rejected");
 
         assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
     }

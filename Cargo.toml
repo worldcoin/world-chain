@@ -31,6 +31,7 @@ members = [
     "proofs/it",
     "proofs/kona/client",
     "proofs/kona/host",
+    "proofs/backends/sp1/guest-builder",
     "proofs/backends/sp1/elfs",
     "proofs/backends/sp1/host",
     "proofs/backends/sp1/types",

@@ -27,6 +27,26 @@ pub struct NetworkSuccinctProver {
     agg_pk: SP1ProvingKey,
     multi_block_vkey: [u32; 8],
     agg_mode: SP1ProofMode,
+    limits: Option<NetworkProverLimits>,
+    max_price_per_pgu: Option<u64>,
+}
+
+/// Upper bounds supplied to SP1 Network instead of estimating them by executing guests locally.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProofLimits {
+    /// Maximum guest cycles accepted by the network request.
+    pub cycle_limit: u64,
+    /// Maximum prover gas units accepted by the network request.
+    pub gas_limit: u64,
+}
+
+/// Separate limits for the much larger range guest and the small aggregation guest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NetworkProverLimits {
+    /// Limits for the range guest.
+    pub range: ProofLimits,
+    /// Limits for the aggregation guest.
+    pub aggregation: ProofLimits,
 }
 
 /// Lightweight client for reading an account's SP1 Network credit balance.
@@ -122,6 +142,16 @@ impl NetworkSuccinctProver {
         agg_mode: SP1ProofMode,
         connection: NetworkConnection,
     ) -> anyhow::Result<Self> {
+        Self::from_connection_with_request_config(agg_mode, connection, None, None).await
+    }
+
+    /// Creates the prover with optional execution limits and auction price ceiling.
+    pub async fn from_connection_with_request_config(
+        agg_mode: SP1ProofMode,
+        connection: NetworkConnection,
+        limits: Option<NetworkProverLimits>,
+        max_price_per_pgu: Option<u64>,
+    ) -> anyhow::Result<Self> {
         let range_elf = world_chain_proof_sp1_elfs::range_elf();
         let agg_elf = world_chain_proof_sp1_elfs::aggregation_elf();
         let client =
@@ -142,6 +172,8 @@ impl NetworkSuccinctProver {
             agg_pk,
             multi_block_vkey,
             agg_mode,
+            limits,
+            max_price_per_pgu,
         })
     }
 
@@ -149,10 +181,18 @@ impl NetworkSuccinctProver {
         let mut stdin = SP1Stdin::new();
         stdin.write_vec(request.witness_rkyv);
 
-        let backend_session_id = self
-            .client
-            .prove(&self.range_pk, stdin)
-            .compressed()
+        let mut proof_request = self.client.prove(&self.range_pk, stdin).compressed();
+        if let Some(limits) = self.limits {
+            proof_request = proof_request
+                .cycle_limit(limits.range.cycle_limit)
+                .gas_limit(limits.range.gas_limit)
+                .skip_simulation(true);
+        }
+        if let Some(max_price_per_pgu) = self.max_price_per_pgu {
+            proof_request = proof_request.max_price_per_pgu(max_price_per_pgu);
+        }
+
+        let backend_session_id = proof_request
             .request()
             .await
             .context("request range proving failed")?;
@@ -177,10 +217,18 @@ impl NetworkSuccinctProver {
         stdin.write(&request.inputs);
         stdin.write_vec(request.l1_headers_cbor);
 
-        let backend_session_id = self
-            .client
-            .prove(&self.agg_pk, stdin)
-            .mode(self.agg_mode)
+        let mut proof_request = self.client.prove(&self.agg_pk, stdin).mode(self.agg_mode);
+        if let Some(limits) = self.limits {
+            proof_request = proof_request
+                .cycle_limit(limits.aggregation.cycle_limit)
+                .gas_limit(limits.aggregation.gas_limit)
+                .skip_simulation(true);
+        }
+        if let Some(max_price_per_pgu) = self.max_price_per_pgu {
+            proof_request = proof_request.max_price_per_pgu(max_price_per_pgu);
+        }
+
+        let backend_session_id = proof_request
             .request()
             .await
             .context("aggregation proving failed")?;

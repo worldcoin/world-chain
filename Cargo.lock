@@ -15261,9 +15261,9 @@ dependencies = [
 
 [[package]]
 name = "sp1-build"
-version = "6.2.3"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bb06355982a703c0839b6ca1dc69a50d56a3c85e55d0badc8c3b18ebe8c9fa6"
+checksum = "7321136acefff985b0fb201b84359d609451bbd0a63203d4b601eaabe28da14f"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -19172,6 +19172,7 @@ name = "world-chain-proof-nitro-worker"
 version = "2.4.2"
 dependencies = [
  "alloy-primitives",
+ "alloy-provider",
  "alloy-sol-types",
  "anyhow",
  "async-trait",
@@ -19186,6 +19187,7 @@ dependencies = [
  "world-chain-proof-kona-host",
  "world-chain-proof-metrics",
  "world-chain-proof-nitro-enclave",
+ "world-chain-proof-protocol",
  "world-chain-proof-worker",
  "world-chain-prover-service",
 ]
@@ -19198,13 +19200,16 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-sol-types",
+ "alloy-transport",
  "async-trait",
+ "backon",
  "futures-util",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
+ "tracing",
  "world-chain-proof-metrics",
 ]
 
@@ -19217,6 +19222,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-proof-sp1-guest-builder"
+version = "2.4.2"
+dependencies = [
+ "anyhow",
+ "sp1-build",
+]
+
+[[package]]
 name = "world-chain-proof-sp1-host"
 version = "2.4.2"
 dependencies = [
@@ -19225,9 +19238,11 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bincode 1.3.3",
+ "hex",
  "reqwest 0.12.28",
  "serde",
  "serde_cbor",
+ "sha2 0.10.9",
  "sp1-sdk",
  "strum 0.28.0",
  "thiserror 2.0.19",

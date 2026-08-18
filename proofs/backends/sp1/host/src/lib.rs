@@ -25,6 +25,8 @@ pub mod mock_prover;
 pub mod network_prover;
 #[cfg(feature = "sp1")]
 pub mod validity;
+#[cfg(feature = "sp1")]
+pub mod vkeys;
 
 /// Structured failures specific to all succinct provers; surfaced wrapped in
 /// [`anyhow::Error`] so callers can downcast when they need to match on them.
