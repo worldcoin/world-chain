@@ -48,10 +48,17 @@ the range and aggregation guests:
 | `SP1_RANGE_GAS_LIMIT` | `--sp1-range-gas-limit` | `1300000000000` PGUs |
 | `SP1_AGGREGATION_CYCLE_LIMIT` | `--sp1-aggregation-cycle-limit` | `7000000` |
 | `SP1_AGGREGATION_GAS_LIMIT` | `--sp1-aggregation-gas-limit` | `6500000` PGUs |
+| `SP1_MAX_PRICE_PER_PGU` | `--sp1-max-price-per-pgu` | SP1 Network default |
 
-These are safety ceilings, not requested billing amounts. To execute each guest locally and let the
-SP1 SDK estimate both limits instead, set `SP1_ESTIMATE_LIMITS=true` or pass
-`--sp1-estimate-limits`. Local estimation conflicts with explicitly configured limit flags.
+These are execution safety ceilings, not the final auction charge. The gas limit still affects the
+request's worst-case authorization and balance check because the network multiplies it by the
+maximum price per PGU. To execute each guest locally and let the SP1 SDK estimate both limits
+instead, set `SP1_ESTIMATE_LIMITS=true` or pass `--sp1-estimate-limits`. Local estimation conflicts
+with explicitly configured limit flags.
+
+`SP1_MAX_PRICE_PER_PGU` caps the auction price encoded in each range and aggregation request. The
+value uses PROVE base units (18 decimals) per PGU. For example, `50000000` is `0.05 PROVE/bPGU`.
+When omitted, the SP1 SDK uses the maximum price returned by the Succinct Network RPC.
 
 ## Deposit PROVE
 
