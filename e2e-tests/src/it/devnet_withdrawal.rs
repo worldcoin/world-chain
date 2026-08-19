@@ -87,8 +87,7 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
     let factory_address = l1_contract(devnet.dispute_game_factory(), "DisputeGameFactory")?;
     let anchor_address = l1_contract(devnet.anchor_state_registry(), "AnchorStateRegistry")?;
 
-    // Prefunded on both L1 and L2 in the devnet genesis, so one key covers the L2 withdrawal
-    // initiation and the L1 prove/finalize calls.
+    // Prefunded on both chains, so one key covers the L2 initiation and the L1 prove/finalize.
     let signer: PrivateKeySigner = SUPERCHAIN_GUARDIAN_PRIVATE_KEY.parse()?;
     let withdrawal_sender = signer.address();
     let l1_provider = signing_provider(l1_rpc, signer.clone())?;

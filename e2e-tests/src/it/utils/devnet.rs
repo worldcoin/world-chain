@@ -1,11 +1,7 @@
 //! Shared fixtures for the devnet E2E tests that drive the WIP-1006 proof system.
 //!
-//! [`devnet_challenge`](crate::it::devnet_challenge),
-//! [`devnet_proof_invariants`](crate::it::devnet_proof_invariants) and
-//! [`devnet_withdrawal`](crate::it::devnet_withdrawal) all stand up the same HA-sequencer full
-//! stack, talk to the same `MultiProofGame` instances, and poll the same on-chain state while the
-//! real in-process proposer/challenger/defender services race them. Everything they hold in common
-//! lives here; each test keeps only the setup and assertions specific to the property it exercises.
+//! These tests all stand up the same HA-sequencer stack and poll the same on-chain state while the
+//! real proposer/challenger/defender services race them.
 
 use std::{
     future::Future,
@@ -45,8 +41,7 @@ const GAME_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Builds the HA-sequencer full stack every proof-system test runs against.
 ///
-/// Returns `Ok(None)` — after printing `skip_label` — when Docker is unavailable, so a developer
-/// without a container runtime sees a skip rather than a failure.
+/// `Ok(None)` means Docker is unavailable — the caller should skip, not fail.
 pub(in crate::it) async fn try_build_ha_devnet(
     skip_label: &str,
 ) -> eyre::Result<Option<WorldDevnet>> {
@@ -70,7 +65,6 @@ pub(in crate::it) async fn try_build_ha_devnet(
     }
 }
 
-/// L1 RPC URL of a full-stack devnet.
 pub(in crate::it) fn l1_rpc_url(devnet: &WorldDevnet) -> eyre::Result<&str> {
     devnet
         .l1_rpc_url()
@@ -86,8 +80,8 @@ pub(in crate::it) fn l1_contract(address: Option<&str>, what: &str) -> eyre::Res
 
 /// Builds an HTTP provider that signs with `signer`.
 ///
-/// The wallet stays un-erased (no [`alloy_provider::DynProvider`]) because
-/// [`AlloyProofSystemClient`]'s proposer traits require [`WalletProvider`], which erasure drops.
+/// Not erased to `DynProvider`: [`AlloyProofSystemClient`]'s proposer traits need
+/// [`WalletProvider`], which erasure drops.
 pub(in crate::it) fn signing_provider(
     rpc: &str,
     signer: PrivateKeySigner,
@@ -97,11 +91,9 @@ pub(in crate::it) fn signing_provider(
         .connect_http(Url::parse(rpc)?))
 }
 
-/// Funds a fresh random account through Anvil's `anvil_setBalance` cheat and returns its address
-/// alongside a provider that signs with it.
+/// Funds a fresh random account via `anvil_setBalance` and returns it with a signing provider.
 ///
-/// Cheating balance in rather than adding the key to the devnet's L1 genesis keeps the shared
-/// devnet fixture unchanged for every other test.
+/// Cheating balance in leaves the shared devnet genesis untouched for every other test.
 pub(in crate::it) async fn funded_throwaway_provider(
     l1_rpc: &str,
 ) -> eyre::Result<(Address, impl Provider + WalletProvider + Clone + use<>)> {
@@ -115,7 +107,6 @@ pub(in crate::it) async fn funded_throwaway_provider(
     Ok((address, signing_provider(l1_rpc, signer)?))
 }
 
-/// Connects a proposer-side proof-system client to the devnet's factory.
 pub(in crate::it) async fn proof_system_client<P>(
     provider: P,
     factory_address: Address,
@@ -132,7 +123,6 @@ where
     .await?)
 }
 
-/// Binds the `MultiProofGame` at `address`.
 pub(in crate::it) fn game_at<P>(
     address: Address,
     provider: P,
@@ -143,7 +133,6 @@ where
     IMultiProofGame::IMultiProofGameInstance::new(address, provider)
 }
 
-/// Binds the `AnchorStateRegistry` at `address`.
 pub(in crate::it) fn anchor_at<P>(
     address: Address,
     provider: P,
@@ -154,7 +143,6 @@ where
     IAnchorStateRegistry::IAnchorStateRegistryInstance::new(address, provider)
 }
 
-/// Binds the `DelayedWETH` at `address`.
 pub(in crate::it) fn weth_at<P>(
     address: Address,
     provider: P,
@@ -167,10 +155,8 @@ where
 
 /// Polls `probe` until it yields a value, giving up after [`GAME_WAIT_TIMEOUT`].
 ///
-/// `Ok(None)` means "not yet, keep waiting". An `Err` aborts immediately, which is how callers
-/// surface terminal states — a game that resolved before it could be challenged is a failure worth
-/// reporting now, not after spinning out the full timeout. `what` completes the sentence
-/// "timed out after 300s waiting for …".
+/// `Ok(None)` means keep waiting; an `Err` aborts immediately, which is how callers fail fast on
+/// terminal states. `what` completes "timed out after 300s waiting for …".
 async fn poll_until<F, Fut, T>(what: &str, mut probe: F) -> eyre::Result<T>
 where
     F: FnMut() -> Fut,
@@ -200,8 +186,7 @@ where
         .timestamp())
 }
 
-/// Warps Anvil's clock to `target` (if it is in the future) and mines a block so the new timestamp
-/// is observable on-chain.
+/// Warps Anvil's clock forward to `target` and mines a block so it is observable on-chain.
 pub(in crate::it) async fn advance_to_timestamp<P>(provider: &P, target: u64) -> eyre::Result<()>
 where
     P: Provider,
@@ -214,10 +199,8 @@ where
     Ok(())
 }
 
-/// Waits for the newest WIP-1006 game whose L2 sequence number is at or beyond `min_l2_block`,
-/// returning its factory index, address, and L2 sequence number.
-///
-/// Pass `0` to wait for any WIP-1006 game at all.
+/// Waits for the newest WIP-1006 game at or beyond `min_l2_block`, returning its factory index,
+/// address, and L2 sequence number. Pass `0` for any game at all.
 pub(in crate::it) async fn wait_for_multi_proof_game<P>(
     provider: P,
     factory_address: Address,
@@ -324,9 +307,8 @@ where
 
 /// Like [`wait_for_status`], but resolves the game itself if nothing else has by the timeout.
 ///
-/// Necessary where no in-process service is guaranteed to be watching the game — a proposal the
-/// real challenger never discovers as challengeable will sit `InProgress` forever unless the test
-/// drives resolution. Either way, the resolved status must still be `expected`.
+/// Needed where no service is watching the game; it would sit `InProgress` forever otherwise. The
+/// final status must still be `expected`.
 pub(in crate::it) async fn wait_for_status_or_resolve<P>(
     game: &IMultiProofGame::IMultiProofGameInstance<P>,
     expected: u8,
@@ -355,8 +337,7 @@ where
     Ok(())
 }
 
-/// Calls `resolve()` unless another actor (e.g. the real challenger's resolution manager) already
-/// resolved the game first; either way is fine, these tests only care about the final outcome.
+/// Calls `resolve()` unless another actor already did; only the final outcome matters.
 pub(in crate::it) async fn resolve_if_still_in_progress<P>(
     game: &IMultiProofGame::IMultiProofGameInstance<P>,
 ) -> eyre::Result<()>

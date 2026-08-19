@@ -8,17 +8,13 @@ use crate::it::utils::devnet::{
     l1_rpc_url, proof_system_client, try_build_ha_devnet, wait_for_challenge, wait_for_status,
 };
 
-/// End-to-end test of the fault path: a dishonest proposer posts a root that disagrees with
-/// consensus, the real World Chain challenger (running in-process against the devnet, exactly
-/// as it would in production) detects and challenges it, the real defender correctly declines
-/// to defend the bad claim, and the game resolves `ChallengerWins` with the proposer's bond
-/// forfeited.
+/// End-to-end fault path: a dishonest proposer posts a root that disagrees with consensus, the
+/// real challenger detects and challenges it, the real defender declines to defend it, and the
+/// game resolves `ChallengerWins` with the proposer's bond forfeited.
 ///
-/// This is the fault-injection counterpart to `devnet_withdrawal`'s happy path: that test proves
-/// an honest root survives to finalization, this one proves a dishonest root does not survive
-/// challenge. Mirrors how Base/Optimism validate their fault-proof dispute game — via op-e2e
-/// style tests that submit an invalid claim and assert the challenger wins — but exercises World
-/// Chain's own proposer/challenger/defender services rather than op-challenger.
+/// The fault-injection counterpart to `devnet_withdrawal`'s happy path — that proves an honest root
+/// reaches finalization, this proves a dishonest one doesn't. Same shape as Optimism's op-e2e
+/// dispute-game tests, but exercising World Chain's own services rather than op-challenger.
 #[ignore = "requires Docker, Foundry, and the full local OP Stack"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn bad_root_proposal_is_challenged_and_invalidated() -> eyre::Result<()> {
@@ -35,10 +31,8 @@ async fn bad_root_proposal_is_challenged_and_invalidated() -> eyre::Result<()> {
     let (malicious_address, malicious_provider) = funded_throwaway_provider(l1_rpc).await?;
     let contracts = proof_system_client(malicious_provider.clone(), factory_address).await?;
 
-    // Race the honest in-process World Chain proposer to the very first proposal window. The
-    // honest proposer can't submit until at least `block_interval` L2 blocks are safe/finalized
-    // (several seconds away at devnet block time), so submitting immediately after devnet startup
-    // reliably wins the slot for the malicious claim instead.
+    // Wins the first proposal window: the honest proposer can't submit until `block_interval` L2
+    // blocks are safe, several seconds out at devnet block time.
     let anchor = contracts.lineage_anchor().await?;
     let registered = contracts.registered_lineage_config();
     let bad_root = B256::repeat_byte(0xba);
@@ -64,9 +58,7 @@ async fn bad_root_proposal_is_challenged_and_invalidated() -> eyre::Result<()> {
     let challenger = wait_for_challenge(&game).await?;
     println!("devnet challenge: challenged by {challenger}");
 
-    // The real World Chain defender must never submit a proof for a claim that doesn't match its
-    // own consensus-derived root. This is the key invariant: an honest defender does not
-    // "accidentally" rescue an invalid proposal.
+    // The key invariant: an honest defender never accidentally rescues an invalid proposal.
     ensure!(
         game.proofBitmap().call().await? == 0,
         "defender must not submit any proof lane for a bad root claim"

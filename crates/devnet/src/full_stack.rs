@@ -129,8 +129,7 @@ const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 /// Superchain Guardian key (Anvil dev account 2, `0x3C44Cdd…4293BC`).
 ///
-/// Registered as `SuperchainGuardian` in the op-deployer intent and prefunded in both the L1 and
-/// L2 genesis, so E2E tests can also use it as a general-purpose funded account on either chain.
+/// Prefunded in both the L1 and L2 genesis, so E2E tests can reuse it as a funded account.
 pub const SUPERCHAIN_GUARDIAN_PRIVATE_KEY: &str =
     "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
 const L1_PROXY_ADMIN_OWNER_PRIVATE_KEY: &str =
