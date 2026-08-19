@@ -23,6 +23,7 @@ members = [
     "crates/evm",
     "crates/pbh",
     "crates/commands",
+    "crates/kona",
     "crates/devnet",
     "crates/test-utils",
     "proofs/core",
@@ -97,6 +98,7 @@ world-chain-pool = { path = "crates/pool", default-features = false }
 world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
+world-chain-kona = { path = "crates/kona", default-features = false }
 world-chain-prover = { path = "proofs/debug/prover", default-features = false }
 world-chain-prover-sp1 = { path = "proofs/debug/bin/prover-sp1", default-features = false }
 world-chain-prover-nitro = { path = "proofs/debug/bin/prover-nitro", default-features = false }
@@ -189,6 +191,23 @@ reth-optimism-storage = { git = "https://github.com/ethereum-optimism/optimism",
 reth-optimism-exex = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", default-features = false }
 reth-optimism-flashblocks = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", default-features = false }
 reth-optimism-trie = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", default-features = false }
+
+# kona consensus-node crates (same optimism monorepo tag as op-alloy/reth-optimism)
+kona-engine = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1" }
+kona-node-service = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1" }
+kona-rpc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1" }
+kona-registry = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1" }
+kona-providers-alloy = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1" }
+kona-interop = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1" }
+kona-disc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1" }
+kona-gossip = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1" }
+kona-peers = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1" }
+kona-sources = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1" }
+kona-cli = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.1", default-features = false, features = ["secrets"] }
+
+discv5 = "0.10.2"
+libp2p = "0.56.0"
+k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 
 # alloy op
 op-alloy-consensus = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", default-features = false }
@@ -354,3 +373,12 @@ testcontainers-modules = { version = "0.15", features = ["postgres", "redis"] }
 tracing-test = { version = "0.2", features = ["no-env-filter"] }
 lazy_static = "1.4"
 proptest = "1.9.0"
+
+# TODO(kona-consensus): re-apply the ConsolidateTask fix on top of `op-reth/v2.4.1`.
+# The `0xOsiris/optimism@osiris/fix-kona` patch this branch carried is based on
+# `optimism@423d93e6`, which predates the `op-reth/v2.4.1` tag the workspace now pins, so
+# patching against it would drag the whole tree back to a pre-v2.4.1 reth. The fix (ConsolidateTask
+# reconciles to the safe head / EL-sync instead of `build_and_seal` when the local unsafe head has
+# diverged, so a node on an orphaned fork self-heals instead of crash-looping on
+# `UnsafeHeadChangedSinceBuild`) is *not* in v2.4.1 and must be re-forked off that tag before
+# this branch is deployed.

@@ -21,6 +21,7 @@ world-chain-cli.workspace = true
 world-chain-payload.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-evm.workspace = true
+world-chain-kona.workspace = true
 
 reth-node-builder.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
@@ -39,6 +40,8 @@ reth-optimism-forks.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-node-api.workspace = true
+reth-engine-primitives.workspace = true
+reth-tasks.workspace = true
 reth-network.workspace = true
 reth-network-peers.workspace = true
 reth-eth-wire-types.workspace = true
@@ -49,19 +52,18 @@ reth-rpc-eth-api.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-server-types.workspace = true
 reth-node-core.workspace = true
-reth-tasks.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs.workspace = true
 
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
-alloy-rpc-types-eth.workspace = true
-alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
-alloy-eips.workspace = true
 
 op-alloy-consensus.workspace = true
-op-alloy-rpc-types-engine.workspace = true
+kona-genesis.workspace = true
+
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 tokio.workspace = true
 eyre.workspace = true
@@ -69,6 +71,7 @@ futures-util.workspace = true
 tracing.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
+serde_json.workspace = true
 crossbeam-channel.workspace = true
 
 [build-dependencies]
@@ -82,3 +85,9 @@ reth-provider.workspace = true
 reth-node-api.workspace = true
 reth-node-builder.workspace = true
 reth-db.workspace = true
+alloy-eips.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-engine.workspace = true
+op-alloy-rpc-types-engine.workspace = true
+
+

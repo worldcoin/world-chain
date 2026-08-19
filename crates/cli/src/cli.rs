@@ -18,10 +18,12 @@ use world_chain_chainspec::{
 };
 
 pub mod builder;
+pub mod kona;
 pub mod p2p;
 pub mod pbh;
 
 pub use builder::*;
+pub use kona::*;
 pub use p2p::*;
 pub use pbh::*;
 
@@ -56,6 +58,10 @@ pub struct WorldChainArgs {
     /// Flashblock args
     #[command(flatten)]
     pub flashblocks: Option<FlashblocksArgs>,
+
+    /// Kona consensus node args
+    #[command(flatten)]
+    pub kona: Option<KonaArgs>,
 
     /// Witness oracle args
     #[command(flatten)]
@@ -678,6 +684,7 @@ mod tests {
                 block_uncompressed_size_limit: None,
             },
             flashblocks: None,
+            kona: None,
             witness: WitnessArgs::default(),
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,

@@ -26,8 +26,6 @@ reth-tracing.workspace = true
 # op-reth
 reth-optimism-consensus.workspace = true
 
-reth-provider.workspace = true
-
 # misc
 dotenvy.workspace = true
 clap.workspace = true

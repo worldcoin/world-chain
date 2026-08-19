@@ -16,9 +16,11 @@ macro_rules! emit_at_level {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ProcessLogTarget {
     L1DevChain,
+    /// The native monomorphic world-chain client: reth execution layer plus the
+    /// in-process kona consensus/sequencer. Its log stream carries both reth and
+    /// kona (op-node-style) output.
     WorldChainEl,
     OpDeployer,
-    OpNode,
     OpConductor,
     OpBatcher,
     OpProposer,
@@ -58,7 +60,6 @@ pub(crate) fn emit_process_log(target: ProcessLogTarget, process: &str, line: &s
         ProcessLogTarget::OpDeployer => {
             emit_at_level!("op_deployer", level, process, line.as_str())
         }
-        ProcessLogTarget::OpNode => emit_at_level!("op_node", level, process, line.as_str()),
         ProcessLogTarget::OpConductor => {
             emit_at_level!("op_conductor", level, process, line.as_str())
         }
@@ -78,7 +79,9 @@ pub(crate) fn emit_process_log(target: ProcessLogTarget, process: &str, line: &s
 }
 
 fn normalize_process_level(target: ProcessLogTarget, line: &str, level: Level) -> Level {
-    if matches!(target, ProcessLogTarget::OpNode)
+    // The in-process kona consensus engine emits an expected error-level reset
+    // signal at startup; it flows through the native monomorphic client stream.
+    if matches!(target, ProcessLogTarget::WorldChainEl)
         && matches!(level, Level::ERROR)
         && line.contains("Sequencer encountered reset signal, aborting work")
         && line.contains("cannot continue derivation until Engine has been reset")
@@ -210,10 +213,10 @@ mod tests {
     }
 
     #[test]
-    fn demotes_expected_op_node_startup_reset() {
+    fn demotes_expected_in_process_kona_startup_reset() {
         assert_eq!(
             normalize_process_level(
-                ProcessLogTarget::OpNode,
+                ProcessLogTarget::WorldChainEl,
                 r#"lvl=error msg="Sequencer encountered reset signal, aborting work" err="reset: cannot continue derivation until Engine has been reset""#,
                 Level::ERROR,
             ),
