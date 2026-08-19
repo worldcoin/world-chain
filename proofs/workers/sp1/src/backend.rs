@@ -311,10 +311,11 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
         request: RangeProofRequest,
         retrying_existing: bool,
     ) -> anyhow::Result<RangeProofArtifact> {
-        let mut resubmission = usize::from(retrying_existing);
-        loop {
-            self.wait_before_resubmission(SessionType::Stark, resubmission)
-                .await;
+        for (resubmission, delay) in network_request_attempts(retrying_existing) {
+            if let Some(delay) = delay {
+                self.wait_before_resubmission(SessionType::Stark, resubmission, delay)
+                    .await;
+            }
             let session_id = self
                 .submit_session(
                     job,
@@ -325,8 +326,12 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
             if let Some(artifact) = self.wait_for_range(job, session_id).await? {
                 return Ok(artifact);
             }
-            resubmission = next_resubmission(SessionType::Stark, resubmission)?;
         }
+        anyhow::bail!(
+            "{} proof exhausted {} SP1 Network resubmissions",
+            SessionType::Stark.as_str(),
+            NETWORK_REQUEST_RETRY_BACKOFFS.len()
+        );
     }
 
     async fn submit_aggregation_with_retries(
@@ -335,10 +340,11 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
         request: AggregationSessionRequest,
         retrying_existing: bool,
     ) -> anyhow::Result<AggregationProofArtifact> {
-        let mut resubmission = usize::from(retrying_existing);
-        loop {
-            self.wait_before_resubmission(SessionType::Snark, resubmission)
-                .await;
+        for (resubmission, delay) in network_request_attempts(retrying_existing) {
+            if let Some(delay) = delay {
+                self.wait_before_resubmission(SessionType::Snark, resubmission, delay)
+                    .await;
+            }
             let session_id = self
                 .submit_session(
                     job,
@@ -349,15 +355,20 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
             if let Some(artifact) = self.wait_for_aggregation(job, session_id).await? {
                 return Ok(artifact);
             }
-            resubmission = next_resubmission(SessionType::Snark, resubmission)?;
         }
+        anyhow::bail!(
+            "{} proof exhausted {} SP1 Network resubmissions",
+            SessionType::Snark.as_str(),
+            NETWORK_REQUEST_RETRY_BACKOFFS.len()
+        );
     }
 
-    async fn wait_before_resubmission(&self, session_type: SessionType, resubmission: usize) {
-        if resubmission == 0 {
-            return;
-        }
-        let delay = NETWORK_REQUEST_RETRY_BACKOFFS[resubmission - 1];
+    async fn wait_before_resubmission(
+        &self,
+        session_type: SessionType,
+        resubmission: usize,
+        delay: Duration,
+    ) {
         tracing::warn!(
             session_type = session_type.as_str(),
             resubmission,
@@ -450,15 +461,15 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
     }
 }
 
-fn next_resubmission(session_type: SessionType, current: usize) -> anyhow::Result<usize> {
-    if current >= NETWORK_REQUEST_RETRY_BACKOFFS.len() {
-        anyhow::bail!(
-            "{} proof exhausted {} SP1 Network resubmissions",
-            session_type.as_str(),
-            NETWORK_REQUEST_RETRY_BACKOFFS.len()
-        );
-    }
-    Ok(current + 1)
+fn network_request_attempts(
+    retrying_existing: bool,
+) -> impl Iterator<Item = (usize, Option<Duration>)> {
+    let first_resubmission = usize::from(retrying_existing);
+    std::iter::once(None)
+        .chain(NETWORK_REQUEST_RETRY_BACKOFFS.into_iter().map(Some))
+        .skip(first_resubmission)
+        .enumerate()
+        .map(move |(offset, delay)| (first_resubmission + offset, delay))
 }
 
 /// A proof artifact whose committed outputs do not defend the requested root.
@@ -523,14 +534,23 @@ mod tests {
     }
 
     #[test]
-    fn both_session_types_allow_three_resubmissions() {
-        for session_type in [SessionType::Stark, SessionType::Snark] {
-            let mut resubmission = 0;
-            for expected in 1..=NETWORK_REQUEST_RETRY_BACKOFFS.len() {
-                resubmission = next_resubmission(session_type.clone(), resubmission).unwrap();
-                assert_eq!(resubmission, expected);
-            }
-            assert!(next_resubmission(session_type, resubmission).is_err());
-        }
+    fn request_attempts_are_finite_and_skip_completed_initial_attempt() {
+        assert_eq!(
+            network_request_attempts(false).collect::<Vec<_>>(),
+            vec![
+                (0, None),
+                (1, Some(Duration::from_secs(60))),
+                (2, Some(Duration::from_secs(120))),
+                (3, Some(Duration::from_secs(300))),
+            ]
+        );
+        assert_eq!(
+            network_request_attempts(true).collect::<Vec<_>>(),
+            vec![
+                (1, Some(Duration::from_secs(60))),
+                (2, Some(Duration::from_secs(120))),
+                (3, Some(Duration::from_secs(300))),
+            ]
+        );
     }
 }
