@@ -11,8 +11,8 @@ use world_chain_proof_kona_host::online::{
 };
 use world_chain_proof_protocol::ProofGameProvider;
 use world_chain_proof_sp1_host::{
-    SP1ProofWithPublicValues, SuccinctProverError, WorldSuccinctProver,
-    aggregation_artifact_from_sp1_proof, range_artifact_from_sp1_proof,
+    SuccinctProverError, WorldSuccinctProver, aggregation_artifact_from_sp1_proof,
+    range_artifact_from_sp1_proof,
 };
 use world_chain_proof_sp1_types::{AggregationSessionRequest, RangeProofRequest, Sp1ProofRequest};
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
@@ -76,12 +76,7 @@ where
         let retrying_aggregation =
             if let Some(snark_session) = self.get_session(&job, SessionType::Snark).await? {
                 match self
-                    .wait_for_artifact(
-                        &job,
-                        SessionType::Snark,
-                        snark_session.backend_session_id,
-                        aggregation_artifact_from_sp1_proof,
-                    )
+                    .wait_for_aggregation(&job, snark_session.backend_session_id)
                     .await
                     .context("failed to resume aggregation proof")?
                 {
@@ -97,12 +92,7 @@ where
 
         let range = if let Some(stark_session) = self.get_session(&job, SessionType::Stark).await? {
             match self
-                .wait_for_artifact(
-                    &job,
-                    SessionType::Stark,
-                    stark_session.backend_session_id,
-                    range_artifact_from_sp1_proof,
-                )
+                .wait_for_range(&job, stark_session.backend_session_id)
                 .await
                 .context("failed to resume range proof")?
             {
@@ -224,20 +214,42 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
         Ok(session_id)
     }
 
-    async fn wait_for_artifact<T>(
+    async fn wait_for_range(
         &self,
         job: &ProofJob,
-        session_type: SessionType,
         session_id: String,
-        decode: impl FnOnce(&SP1ProofWithPublicValues) -> anyhow::Result<T>,
-    ) -> anyhow::Result<Option<T>> {
-        let result = self
-            .prover
-            .wait(&session_id)
-            .await
-            .and_then(|proof| decode(&proof));
-        match result {
-            Ok(artifact) => {
+    ) -> anyhow::Result<Option<RangeProofArtifact>> {
+        let session_type = SessionType::Stark;
+        match self.prover.wait(&session_id).await {
+            Ok(proof) => {
+                let artifact = range_artifact_from_sp1_proof(&proof)?;
+                self.record_session(
+                    job,
+                    session_type,
+                    &session_id,
+                    BackendSessionStatus::Completed,
+                    None,
+                )
+                .await?;
+                Ok(Some(artifact))
+            }
+            Err(error) => {
+                self.handle_wait_error(job, session_type, &session_id, error)
+                    .await?;
+                Ok(None)
+            }
+        }
+    }
+
+    async fn wait_for_aggregation(
+        &self,
+        job: &ProofJob,
+        session_id: String,
+    ) -> anyhow::Result<Option<AggregationProofArtifact>> {
+        let session_type = SessionType::Snark;
+        match self.prover.wait(&session_id).await {
+            Ok(proof) => {
+                let artifact = aggregation_artifact_from_sp1_proof(&proof)?;
                 self.record_session(
                     job,
                     session_type,
@@ -311,15 +323,7 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
                     Sp1ProofRequest::Range(request.clone()),
                 )
                 .await?;
-            if let Some(artifact) = self
-                .wait_for_artifact(
-                    job,
-                    SessionType::Stark,
-                    session_id,
-                    range_artifact_from_sp1_proof,
-                )
-                .await?
-            {
+            if let Some(artifact) = self.wait_for_range(job, session_id).await? {
                 return Ok(artifact);
             }
             resubmission = next_resubmission(SessionType::Stark, resubmission)?;
@@ -343,15 +347,7 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
                     Sp1ProofRequest::Aggregation(request.clone()),
                 )
                 .await?;
-            if let Some(artifact) = self
-                .wait_for_artifact(
-                    job,
-                    SessionType::Snark,
-                    session_id,
-                    aggregation_artifact_from_sp1_proof,
-                )
-                .await?
-            {
+            if let Some(artifact) = self.wait_for_aggregation(job, session_id).await? {
                 return Ok(artifact);
             }
             resubmission = next_resubmission(SessionType::Snark, resubmission)?;

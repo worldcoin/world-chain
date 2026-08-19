@@ -8,9 +8,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "sp1")]
-use sp1_sdk::SP1Proof;
-#[cfg(feature = "sp1")]
-pub use sp1_sdk::SP1ProofWithPublicValues;
+use sp1_sdk::{SP1Proof, SP1ProofWithPublicValues};
 use strum::EnumString;
 #[cfg(feature = "sp1")]
 use world_chain_proof_core::{
