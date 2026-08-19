@@ -19674,6 +19674,7 @@ dependencies = [
  "world-chain-p2p",
  "world-chain-primitives",
  "world-chain-proof-protocol",
+ "world-chain-proposer",
  "world-chain-test-utils",
  "world-chain-validator",
 ]
