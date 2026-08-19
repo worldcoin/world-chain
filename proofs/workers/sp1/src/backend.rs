@@ -11,17 +11,20 @@ use world_chain_proof_kona_host::online::{
 };
 use world_chain_proof_protocol::ProofGameProvider;
 use world_chain_proof_sp1_host::{
-    WorldSuccinctProver, aggregation_artifact_from_sp1_proof, range_artifact_from_sp1_proof,
+    SP1ProofWithPublicValues, SuccinctProverError, WorldSuccinctProver,
+    aggregation_artifact_from_sp1_proof, range_artifact_from_sp1_proof,
 };
-use world_chain_proof_sp1_types::{
-    AggregationSessionRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
-};
+use world_chain_proof_sp1_types::{AggregationSessionRequest, RangeProofRequest, Sp1ProofRequest};
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_prover_service::{
     BackendSession, BackendSessionStatus, ProofBackend, ProofData, ProofRequest, SessionType,
 };
 
-const SP1_SESSION_POLL_INTERVAL: Duration = Duration::from_secs(10);
+const NETWORK_REQUEST_RETRY_BACKOFFS: [Duration; 3] = [
+    Duration::from_secs(60),
+    Duration::from_secs(120),
+    Duration::from_secs(300),
+];
 
 /// Configuration for [`Sp1Backend`].
 #[derive(Clone, Copy, Debug)]
@@ -70,37 +73,57 @@ where
         let request = &job.request;
         let start_block = self.start_block(request).await?;
 
-        if let Some(snark_session) = self.get_session(&job, SessionType::Snark).await? {
-            let agg = self
-                .wait_and_download_aggregation(&job, snark_session.backend_session_id)
-                .await
-                .context("failed to resume aggregation proof")?;
-
-            check_artifact(request, &agg)?;
-
-            return Ok(proof_data_from_aggregation(agg));
-        }
+        let retrying_aggregation =
+            if let Some(snark_session) = self.get_session(&job, SessionType::Snark).await? {
+                match self
+                    .wait_for_artifact(
+                        &job,
+                        SessionType::Snark,
+                        snark_session.backend_session_id,
+                        aggregation_artifact_from_sp1_proof,
+                    )
+                    .await
+                    .context("failed to resume aggregation proof")?
+                {
+                    Some(agg) => {
+                        check_artifact(request, &agg)?;
+                        return Ok(proof_data_from_aggregation(agg));
+                    }
+                    None => true,
+                }
+            } else {
+                false
+            };
 
         let range = if let Some(stark_session) = self.get_session(&job, SessionType::Stark).await? {
-            self.wait_and_download_range(&job, stark_session.backend_session_id)
+            match self
+                .wait_for_artifact(
+                    &job,
+                    SessionType::Stark,
+                    stark_session.backend_session_id,
+                    range_artifact_from_sp1_proof,
+                )
                 .await
                 .context("failed to resume range proof")?
+            {
+                Some(range) => range,
+                None => {
+                    let range_request = self
+                        .build_range_request(start_block, request)
+                        .await
+                        .context("failed to rebuild range proof request")?;
+                    self.submit_range_with_retries(&job, range_request, true)
+                        .await
+                        .context("failed to resubmit range proof")?
+                }
+            }
         } else {
             let range_request = self
                 .build_range_request(start_block, request)
                 .await
                 .context("failed to build range proof request")?;
 
-            let session_id = self
-                .submit_session(
-                    &job,
-                    SessionType::Stark,
-                    Sp1ProofRequest::Range(range_request),
-                )
-                .await
-                .context("failed to submit range proof")?;
-
-            self.wait_and_download_range(&job, session_id)
+            self.submit_range_with_retries(&job, range_request, false)
                 .await
                 .context("failed to complete range proof")?
         };
@@ -112,17 +135,8 @@ where
             .await
             .context("failed to build aggregation proof request")?;
 
-        let snark_session_id = self
-            .submit_session(
-                &job,
-                SessionType::Snark,
-                Sp1ProofRequest::Aggregation(aggregation_request),
-            )
-            .await
-            .context("failed to submit aggregation proof")?;
-
         let agg = self
-            .wait_and_download_aggregation(&job, snark_session_id)
+            .submit_aggregation_with_retries(&job, aggregation_request, retrying_aggregation)
             .await
             .context("failed to complete aggregation proof")?;
 
@@ -132,7 +146,7 @@ where
     }
 }
 
-impl<P: WorldSuccinctProver, G: ProofGameProvider> Sp1Backend<P, G> {
+impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G> {
     async fn start_block(&self, request: &ProofRequest) -> anyhow::Result<u64> {
         let context = self
             .game_provider
@@ -210,98 +224,152 @@ impl<P: WorldSuccinctProver, G: ProofGameProvider> Sp1Backend<P, G> {
         Ok(session_id)
     }
 
-    async fn wait_and_download_range(
+    async fn wait_for_artifact<T>(
         &self,
         job: &ProofJob,
+        session_type: SessionType,
         session_id: String,
-    ) -> anyhow::Result<RangeProofArtifact> {
-        let session_type = SessionType::Stark;
-        let session_label = session_type.as_str();
-        loop {
-            match self.prover.poll(&session_id).await? {
-                Sp1SessionStatus::Running => {
-                    tokio::time::sleep(SP1_SESSION_POLL_INTERVAL).await;
-                }
-                Sp1SessionStatus::Completed => {
-                    let proof = self.prover.download(&session_id).await?;
-                    let artifact = range_artifact_from_sp1_proof(&proof)?;
-                    let empty_failure_reason = None;
-
-                    self.record_session(
-                        job,
-                        session_type.clone(),
-                        &session_id,
-                        BackendSessionStatus::Completed,
-                        empty_failure_reason,
-                    )
+        decode: impl FnOnce(&SP1ProofWithPublicValues) -> anyhow::Result<T>,
+    ) -> anyhow::Result<Option<T>> {
+        let result = self
+            .prover
+            .wait(&session_id)
+            .await
+            .and_then(|proof| decode(&proof));
+        match result {
+            Ok(artifact) => {
+                self.record_session(
+                    job,
+                    session_type,
+                    &session_id,
+                    BackendSessionStatus::Completed,
+                    None,
+                )
+                .await?;
+                Ok(Some(artifact))
+            }
+            Err(error) => {
+                self.handle_wait_error(job, session_type, &session_id, error)
                     .await?;
-
-                    return Ok(artifact);
-                }
-                Sp1SessionStatus::Failed(reason) => {
-                    self.record_session(
-                        job,
-                        session_type.clone(),
-                        &session_id,
-                        BackendSessionStatus::Failed,
-                        Some(reason.clone()),
-                    )
-                    .await?;
-
-                    anyhow::bail!("{session_label} proof session {session_id} failed: {reason}");
-                }
-                Sp1SessionStatus::NotFound => {
-                    anyhow::bail!("{session_label} proof session {session_id} not found by prover");
-                }
+                Ok(None)
             }
         }
     }
 
-    async fn wait_and_download_aggregation(
+    async fn handle_wait_error(
         &self,
         job: &ProofJob,
-        session_id: String,
-    ) -> anyhow::Result<AggregationProofArtifact> {
-        let session_type = SessionType::Snark;
-        let session_label = session_type.as_str();
-        loop {
-            match self.prover.poll(&session_id).await? {
-                Sp1SessionStatus::Running => {
-                    tokio::time::sleep(SP1_SESSION_POLL_INTERVAL).await;
-                }
-                Sp1SessionStatus::Completed => {
-                    let proof = self.prover.download(&session_id).await?;
-                    let artifact = aggregation_artifact_from_sp1_proof(&proof)?;
-                    let empty_failure_reason = None;
-
-                    self.record_session(
-                        job,
-                        session_type.clone(),
-                        &session_id,
-                        BackendSessionStatus::Completed,
-                        empty_failure_reason,
-                    )
-                    .await?;
-
-                    return Ok(artifact);
-                }
-                Sp1SessionStatus::Failed(reason) => {
-                    self.record_session(
-                        job,
-                        session_type.clone(),
-                        &session_id,
-                        BackendSessionStatus::Failed,
-                        Some(reason.clone()),
-                    )
-                    .await?;
-
-                    anyhow::bail!("{session_label} proof session {session_id} failed: {reason}");
-                }
-                Sp1SessionStatus::NotFound => {
-                    anyhow::bail!("{session_label} proof session {session_id} not found by prover");
-                }
-            }
+        session_type: SessionType,
+        session_id: &str,
+        error: anyhow::Error,
+    ) -> anyhow::Result<()> {
+        let Some(session_error) = error.downcast_ref::<SuccinctProverError>() else {
+            return Err(error);
+        };
+        if !session_error.is_terminal_session() {
+            return Err(error);
         }
+
+        let should_resubmit = session_error.should_resubmit();
+        let reason = session_error.to_string();
+        self.record_session(
+            job,
+            session_type.clone(),
+            session_id,
+            BackendSessionStatus::Failed,
+            Some(reason.clone()),
+        )
+        .await?;
+
+        if !should_resubmit {
+            return Err(error);
+        }
+
+        tracing::warn!(
+            session_type = session_type.as_str(),
+            backend_session_id = session_id,
+            reason,
+            "SP1 Network request timed out; scheduling a replacement request"
+        );
+        Ok(())
+    }
+
+    async fn submit_range_with_retries(
+        &self,
+        job: &ProofJob,
+        request: RangeProofRequest,
+        retrying_existing: bool,
+    ) -> anyhow::Result<RangeProofArtifact> {
+        let mut resubmission = usize::from(retrying_existing);
+        loop {
+            self.wait_before_resubmission(SessionType::Stark, resubmission)
+                .await;
+            let session_id = self
+                .submit_session(
+                    job,
+                    SessionType::Stark,
+                    Sp1ProofRequest::Range(request.clone()),
+                )
+                .await?;
+            if let Some(artifact) = self
+                .wait_for_artifact(
+                    job,
+                    SessionType::Stark,
+                    session_id,
+                    range_artifact_from_sp1_proof,
+                )
+                .await?
+            {
+                return Ok(artifact);
+            }
+            resubmission = next_resubmission(SessionType::Stark, resubmission)?;
+        }
+    }
+
+    async fn submit_aggregation_with_retries(
+        &self,
+        job: &ProofJob,
+        request: AggregationSessionRequest,
+        retrying_existing: bool,
+    ) -> anyhow::Result<AggregationProofArtifact> {
+        let mut resubmission = usize::from(retrying_existing);
+        loop {
+            self.wait_before_resubmission(SessionType::Snark, resubmission)
+                .await;
+            let session_id = self
+                .submit_session(
+                    job,
+                    SessionType::Snark,
+                    Sp1ProofRequest::Aggregation(request.clone()),
+                )
+                .await?;
+            if let Some(artifact) = self
+                .wait_for_artifact(
+                    job,
+                    SessionType::Snark,
+                    session_id,
+                    aggregation_artifact_from_sp1_proof,
+                )
+                .await?
+            {
+                return Ok(artifact);
+            }
+            resubmission = next_resubmission(SessionType::Snark, resubmission)?;
+        }
+    }
+
+    async fn wait_before_resubmission(&self, session_type: SessionType, resubmission: usize) {
+        if resubmission == 0 {
+            return;
+        }
+        let delay = NETWORK_REQUEST_RETRY_BACKOFFS[resubmission - 1];
+        tracing::warn!(
+            session_type = session_type.as_str(),
+            resubmission,
+            delay_seconds = delay.as_secs(),
+            "waiting before resubmitting SP1 Network request"
+        );
+        tokio::time::sleep(delay).await;
     }
 
     async fn build_aggregation_request(
@@ -387,6 +455,17 @@ impl<P: WorldSuccinctProver, G: ProofGameProvider> Sp1Backend<P, G> {
     }
 }
 
+fn next_resubmission(session_type: SessionType, current: usize) -> anyhow::Result<usize> {
+    if current >= NETWORK_REQUEST_RETRY_BACKOFFS.len() {
+        anyhow::bail!(
+            "{} proof exhausted {} SP1 Network resubmissions",
+            session_type.as_str(),
+            NETWORK_REQUEST_RETRY_BACKOFFS.len()
+        );
+    }
+    Ok(current + 1)
+}
+
 /// A proof artifact whose committed outputs do not defend the requested root.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 enum ArtifactMismatch {
@@ -429,5 +508,34 @@ fn proof_data_from_aggregation(artifact: AggregationProofArtifact) -> ProofData 
     ProofData::Sp1 {
         proof: artifact.proof.into(),
         public_values: artifact.public_values.abi_encode().into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_request_resubmissions_use_fixed_conservative_backoff() {
+        assert_eq!(
+            NETWORK_REQUEST_RETRY_BACKOFFS,
+            [
+                Duration::from_secs(60),
+                Duration::from_secs(120),
+                Duration::from_secs(300),
+            ]
+        );
+    }
+
+    #[test]
+    fn both_session_types_allow_three_resubmissions() {
+        for session_type in [SessionType::Stark, SessionType::Snark] {
+            let mut resubmission = 0;
+            for expected in 1..=NETWORK_REQUEST_RETRY_BACKOFFS.len() {
+                resubmission = next_resubmission(session_type.clone(), resubmission).unwrap();
+                assert_eq!(resubmission, expected);
+            }
+            assert!(next_resubmission(session_type, resubmission).is_err());
+        }
     }
 }

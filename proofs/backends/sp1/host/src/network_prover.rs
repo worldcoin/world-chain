@@ -1,6 +1,8 @@
 //! Range proofs are produced in `Compressed` mode so the aggregation guest can recursively
 //! verify them; the aggregation proof mode is configurable (Groth16 for on-chain verification).
 
+use std::time::Duration;
+
 use crate::{SuccinctProverError, WorldSuccinctProver};
 use alloy_primitives::{B256, U256};
 use anyhow::{Context, bail};
@@ -10,7 +12,7 @@ use sp1_sdk::{
     HashableKey, NetworkProver, ProveRequest, Prover, ProvingKey, SP1Proof,
     SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
     network::{
-        NetworkClient, NetworkMode, get_default_rpc_url_for_mode,
+        Error as NetworkError, NetworkClient, NetworkMode, get_default_rpc_url_for_mode,
         proto::{GetProofRequestStatusResponse, types::FulfillmentStatus},
         signer::NetworkSigner,
     },
@@ -29,6 +31,8 @@ pub struct NetworkSuccinctProver {
     agg_mode: SP1ProofMode,
     limits: Option<NetworkProverLimits>,
     max_price_per_pgu: Option<u64>,
+    auction_timeout: Option<Duration>,
+    proof_timeout: Option<Duration>,
 }
 
 /// Upper bounds supplied to SP1 Network instead of estimating them by executing guests locally.
@@ -47,6 +51,19 @@ pub struct NetworkProverLimits {
     pub range: ProofLimits,
     /// Limits for the aggregation guest.
     pub aggregation: ProofLimits,
+}
+
+/// Optional request settings forwarded to the SP1 Network SDK.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NetworkProofRequestConfig {
+    /// Guest execution limits. When absent, the SDK estimates them locally.
+    pub limits: Option<NetworkProverLimits>,
+    /// Maximum auction price in PROVE base units per PGU.
+    pub max_price_per_pgu: Option<u64>,
+    /// Maximum time a request may remain unassigned. The SDK default applies when absent.
+    pub auction_timeout: Option<Duration>,
+    /// Overall proof-generation deadline. The SDK-derived default applies when absent.
+    pub proof_timeout: Option<Duration>,
 }
 
 /// Lightweight client for reading an account's SP1 Network credit balance.
@@ -142,16 +159,26 @@ impl NetworkSuccinctProver {
         agg_mode: SP1ProofMode,
         connection: NetworkConnection,
     ) -> anyhow::Result<Self> {
-        Self::from_connection_with_request_config(agg_mode, connection, None, None).await
+        Self::from_connection_with_network_config(
+            agg_mode,
+            connection,
+            NetworkProofRequestConfig::default(),
+        )
+        .await
     }
 
-    /// Creates the prover with optional execution limits and auction price ceiling.
-    pub async fn from_connection_with_request_config(
+    /// Creates the prover with optional SP1 Network request settings.
+    pub async fn from_connection_with_network_config(
         agg_mode: SP1ProofMode,
         connection: NetworkConnection,
-        limits: Option<NetworkProverLimits>,
-        max_price_per_pgu: Option<u64>,
+        request_config: NetworkProofRequestConfig,
     ) -> anyhow::Result<Self> {
+        let NetworkProofRequestConfig {
+            limits,
+            max_price_per_pgu,
+            auction_timeout,
+            proof_timeout,
+        } = request_config;
         let range_elf = world_chain_proof_sp1_elfs::range_elf();
         let agg_elf = world_chain_proof_sp1_elfs::aggregation_elf();
         let client =
@@ -174,6 +201,8 @@ impl NetworkSuccinctProver {
             agg_mode,
             limits,
             max_price_per_pgu,
+            auction_timeout,
+            proof_timeout,
         })
     }
 
@@ -190,6 +219,9 @@ impl NetworkSuccinctProver {
         }
         if let Some(max_price_per_pgu) = self.max_price_per_pgu {
             proof_request = proof_request.max_price_per_pgu(max_price_per_pgu);
+        }
+        if let Some(proof_timeout) = self.proof_timeout {
+            proof_request = proof_request.timeout(proof_timeout);
         }
 
         let backend_session_id = proof_request
@@ -226,6 +258,9 @@ impl NetworkSuccinctProver {
         }
         if let Some(max_price_per_pgu) = self.max_price_per_pgu {
             proof_request = proof_request.max_price_per_pgu(max_price_per_pgu);
+        }
+        if let Some(proof_timeout) = self.proof_timeout {
+            proof_request = proof_request.timeout(proof_timeout);
         }
 
         let backend_session_id = proof_request
@@ -296,6 +331,75 @@ impl WorldSuccinctProver for NetworkSuccinctProver {
             }
         }
     }
+
+    async fn wait(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
+        let proof_id = parse_proof_id(session_id)?;
+        let result = self
+            .client
+            // The request carries its immutable network deadline. Passing no additional local
+            // timeout keeps restart recovery anchored to that original deadline.
+            .wait_proof(proof_id, None, self.auction_timeout)
+            .await;
+
+        match result {
+            Ok(proof) => Ok(proof),
+            Err(error)
+                if matches!(
+                    error.downcast_ref::<NetworkError>(),
+                    Some(NetworkError::RequestTimedOut { .. })
+                ) =>
+            {
+                // SP1 v6.1.0 checks the deadline before FULFILLED. Re-read once so a proof that
+                // completed near its deadline is not replaced. This was reordered upstream in
+                // https://github.com/succinctlabs/sp1/pull/2737.
+                let (status, proof) = self
+                    .client
+                    .get_proof_status(proof_id)
+                    .await
+                    .context("rechecking SP1 Network request after timeout")?;
+                if matches!(
+                    FulfillmentStatus::try_from(status.fulfillment_status()),
+                    Ok(FulfillmentStatus::Fulfilled)
+                ) {
+                    return proof.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "network proof {session_id} is fulfilled but no proof was returned"
+                        )
+                    });
+                }
+                Err(map_network_wait_error(error, session_id))
+            }
+            Err(error) => Err(map_network_wait_error(error, session_id)),
+        }
+    }
+}
+
+fn map_network_wait_error(error: anyhow::Error, session_id: &str) -> anyhow::Error {
+    let Some(network_error) = error.downcast_ref::<NetworkError>() else {
+        return error.context(format!("waiting for SP1 Network request {session_id}"));
+    };
+
+    match network_error {
+        NetworkError::RequestAuctionTimedOut { .. } => {
+            SuccinctProverError::RequestAuctionTimedOut {
+                session_id: session_id.to_string(),
+            }
+            .into()
+        }
+        NetworkError::RequestTimedOut { .. } => SuccinctProverError::RequestTimedOut {
+            session_id: session_id.to_string(),
+        }
+        .into(),
+        NetworkError::RequestUnexecutable { .. } => SuccinctProverError::RequestUnexecutable {
+            session_id: session_id.to_string(),
+        }
+        .into(),
+        NetworkError::RequestUnfulfillable { .. } => SuccinctProverError::RequestUnfulfillable {
+            session_id: session_id.to_string(),
+        }
+        .into(),
+        _ => error.context(format!("waiting for SP1 Network request {session_id}")),
+    }
 }
 
 /// Parse a network proof ID from its hex string representation.
@@ -320,5 +424,38 @@ fn sp1_status(status: &GetProofRequestStatusResponse) -> Sp1SessionStatus {
             "unknown network proof fulfillment status: {}",
             status.fulfillment_status()
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_sdk_auction_timeout_to_resubmittable_error() {
+        let error = anyhow::Error::new(NetworkError::RequestAuctionTimedOut {
+            request_id: vec![1; 32],
+        });
+
+        let mapped = map_network_wait_error(error, "0x01");
+        let mapped = mapped
+            .downcast_ref::<SuccinctProverError>()
+            .expect("SDK timeout should map to a structured prover error");
+
+        assert!(matches!(
+            mapped,
+            SuccinctProverError::RequestAuctionTimedOut { session_id } if session_id == "0x01"
+        ));
+        assert!(mapped.should_resubmit());
+    }
+
+    #[test]
+    fn preserves_non_terminal_sdk_errors() {
+        let error = anyhow::Error::new(NetworkError::SimulationFailed);
+
+        let mapped = map_network_wait_error(error, "0x02");
+
+        assert!(mapped.downcast_ref::<NetworkError>().is_some());
+        assert!(mapped.downcast_ref::<SuccinctProverError>().is_none());
     }
 }

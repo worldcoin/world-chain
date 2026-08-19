@@ -1,7 +1,5 @@
 //! End-to-end validity proof helper built on the generic succinct prover session API.
 
-use std::time::Duration;
-
 use crate::{
     WorldSuccinctProver, aggregation_artifact_from_sp1_proof, range_artifact_from_sp1_proof,
 };
@@ -13,9 +11,7 @@ use world_chain_proof_kona_host::online::{
     OnlineHostConfig, RangeMetadata, RangeWitnessRequest, build_range_input,
     fetch_l1_header_by_hash,
 };
-use world_chain_proof_sp1_types::{
-    AggregationSessionRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
-};
+use world_chain_proof_sp1_types::{AggregationSessionRequest, RangeProofRequest, Sp1ProofRequest};
 
 /// Request for proving one contiguous L2 validity range and aggregating it into a final proof.
 #[derive(Clone, Debug)]
@@ -164,23 +160,10 @@ async fn wait_and_download_proof<P>(
 where
     P: WorldSuccinctProver + Sync,
 {
-    loop {
-        match prover.poll(&session_id).await? {
-            Sp1SessionStatus::Running => tokio::time::sleep(Duration::from_secs(10)).await,
-            Sp1SessionStatus::Completed => {
-                return prover
-                    .download(&session_id)
-                    .await
-                    .with_context(|| format!("failed to download {session_label} proof"));
-            }
-            Sp1SessionStatus::Failed(reason) => {
-                bail!("{session_label} proof session {session_id} failed: {reason}");
-            }
-            Sp1SessionStatus::NotFound => {
-                bail!("{session_label} proof session {session_id} not found by prover");
-            }
-        }
-    }
+    prover
+        .wait(&session_id)
+        .await
+        .with_context(|| format!("failed to wait for {session_label} proof"))
 }
 
 fn validate_range_artifact(

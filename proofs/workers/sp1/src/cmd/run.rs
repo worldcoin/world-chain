@@ -14,8 +14,8 @@ use world_chain_proof_sp1_host::{
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
     network_prover::{
-        NetworkConnection, NetworkCreditClient, NetworkProverLimits, NetworkSuccinctProver,
-        ProofLimits,
+        NetworkConnection, NetworkCreditClient, NetworkProofRequestConfig, NetworkProverLimits,
+        NetworkSuccinctProver, ProofLimits,
     },
 };
 use world_chain_proof_sp1_worker::{
@@ -194,6 +194,23 @@ pub struct WorkerArgs {
     )]
     sp1_max_price_per_pgu: Option<u64>,
 
+    /// Maximum seconds a network request may remain unassigned. Uses the SP1 SDK default if
+    /// omitted.
+    #[arg(
+        long,
+        env = "SP1_AUCTION_TIMEOUT_SECONDS",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    sp1_auction_timeout_seconds: Option<u64>,
+
+    /// Overall network proof deadline in seconds. Uses the SP1 SDK default if omitted.
+    #[arg(
+        long,
+        env = "SP1_PROOF_TIMEOUT_SECONDS",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    sp1_proof_timeout_seconds: Option<u64>,
+
     /// Maximum number of jobs proved concurrently. One suits a local CPU prover; raise it for
     /// the Succinct proving network.
     #[arg(long, default_value_t = 1)]
@@ -320,11 +337,15 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
             run_worker(
                 &cli,
                 host,
-                NetworkSuccinctProver::from_connection_with_request_config(
+                NetworkSuccinctProver::from_connection_with_network_config(
                     SP1ProofMode::Groth16,
                     connection,
-                    limits,
-                    cli.sp1_max_price_per_pgu,
+                    NetworkProofRequestConfig {
+                        limits,
+                        max_price_per_pgu: cli.sp1_max_price_per_pgu,
+                        auction_timeout: cli.sp1_auction_timeout_seconds.map(Duration::from_secs),
+                        proof_timeout: cli.sp1_proof_timeout_seconds.map(Duration::from_secs),
+                    },
                 )
                 .await?,
             )
@@ -474,6 +495,8 @@ where
         sp1_aggregation_cycle_limit = cli.sp1_aggregation_cycle_limit,
         sp1_aggregation_gas_limit = cli.sp1_aggregation_gas_limit,
         sp1_max_price_per_pgu = ?cli.sp1_max_price_per_pgu,
+        sp1_auction_timeout_seconds = ?cli.sp1_auction_timeout_seconds,
+        sp1_proof_timeout_seconds = ?cli.sp1_proof_timeout_seconds,
         submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = cli.submit_proof_retry_max_delay_ms,
@@ -530,6 +553,8 @@ mod tests {
             DEFAULT_SP1_AGGREGATION_GAS_LIMIT
         );
         assert_eq!(cli.sp1_max_price_per_pgu, None);
+        assert_eq!(cli.sp1_auction_timeout_seconds, None);
+        assert_eq!(cli.sp1_proof_timeout_seconds, None);
     }
 
     #[test]
@@ -572,6 +597,38 @@ mod tests {
             .expect_err("zero max price per PGU should be rejected");
 
         assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn parses_sp1_network_timeouts() {
+        let mut args = base_args();
+        args.extend([
+            "--sp1-auction-timeout-seconds",
+            "120",
+            "--sp1-proof-timeout-seconds",
+            "28800",
+        ]);
+
+        let cli = WorkerArgs::parse_from(args);
+
+        assert_eq!(cli.sp1_auction_timeout_seconds, Some(120));
+        assert_eq!(cli.sp1_proof_timeout_seconds, Some(28_800));
+    }
+
+    #[test]
+    fn rejects_zero_sp1_network_timeouts() {
+        for argument in [
+            "--sp1-auction-timeout-seconds",
+            "--sp1-proof-timeout-seconds",
+        ] {
+            let mut args = base_args();
+            args.extend([argument, "0"]);
+
+            let error = WorkerArgs::try_parse_from(args)
+                .expect_err("zero SP1 Network timeout should be rejected");
+
+            assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+        }
     }
 
     #[test]

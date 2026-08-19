@@ -468,6 +468,73 @@ async fn record_and_get_proof_session_round_trips() {
         .expect("session recorded");
     assert_eq!(session.backend_session_id, backend_session_id(1));
     assert_eq!(session.status, BackendSessionStatus::Running);
+
+    service
+        .record_proof_session(record_proof_session_request(
+            id,
+            SessionType::Stark,
+            locked.lock_id,
+            backend_session_id(1),
+            BackendSessionStatus::Failed,
+            Some("auction timed out".to_string()),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        service
+            .get_proof_session(get_proof_session_request(id, SessionType::Stark))
+            .await
+            .unwrap()
+            .session
+            .is_none()
+    );
+
+    service
+        .record_proof_session(record_proof_session_request(
+            id,
+            SessionType::Stark,
+            locked.lock_id,
+            backend_session_id(2),
+            BackendSessionStatus::Running,
+            None,
+        ))
+        .await
+        .unwrap();
+    let replacement = service
+        .get_proof_session(get_proof_session_request(id, SessionType::Stark))
+        .await
+        .unwrap()
+        .session
+        .expect("replacement session recorded");
+    assert_eq!(replacement.backend_session_id, backend_session_id(2));
+    assert_eq!(replacement.status, BackendSessionStatus::Running);
+
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        r#"
+        SELECT backend_session_id, status
+        FROM proof_sessions
+        WHERE proof_id = $1 AND session_type = $2
+        ORDER BY id
+        "#,
+    )
+    .bind(id.0.as_slice().to_vec())
+    .bind(SessionType::Stark.as_str())
+    .fetch_all(service.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                backend_session_id(1),
+                BackendSessionStatus::Failed.as_str().to_string()
+            ),
+            (
+                backend_session_id(2),
+                BackendSessionStatus::Running.as_str().to_string()
+            ),
+        ]
+    );
 }
 
 #[tokio::test]
