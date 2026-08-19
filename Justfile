@@ -110,7 +110,7 @@ proof-vkeys *args='':
     cargo run --release -p world-chain-prover-sp1 -- vkeys $@
 
 # Recompute vkeys from the embedded ELFs and update proofs/backends/sp1/elfs/vkeys.json.
-# Requires Docker and the SP1 toolchain (sp1up v6.1.0) for reproducible ELF builds.
+# Requires Docker and the SP1 toolchain (sp1up v6.3.1) for reproducible ELF builds.
 update-proof-vkeys:
     cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-update.json
     jq -S . /tmp/vkeys-update.json > proofs/backends/sp1/elfs/vkeys.json
