@@ -295,8 +295,6 @@ impl WorldSuccinctProver for NetworkSuccinctProver {
 
     async fn wait(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
         let proof_id = parse_proof_id(session_id)?;
-        // SP1 6.1.0 can misclassify a fulfilled proof polled after its deadline as timed out.
-        // This accepted limitation is fixed by upgrading to SP1 6.2.0 or newer (#2737).
         self.client
             // The request carries its immutable network deadline. Passing no additional local
             // timeout keeps restart recovery anchored to that original deadline.

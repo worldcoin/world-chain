@@ -60,7 +60,8 @@ with explicitly configured limit flags.
 
 `SP1_MAX_PRICE_PER_PGU` caps the auction price encoded in each range and aggregation request. The
 value uses PROVE base units (18 decimals) per PGU. For example, `50000000` is `0.05 PROVE/bPGU`.
-When omitted, the SP1 SDK uses the maximum price returned by the Succinct Network RPC.
+When omitted, the SP1 SDK applies its default 20% buffer to the market-based maximum price
+returned by the Succinct Network RPC.
 
 The auction timeout limits how long a request may remain unassigned. The proof timeout sets the
 request's overall network deadline and may be longer than four hours when configured explicitly;

@@ -9,8 +9,8 @@
 //!
 //! Behaviour:
 //! - Uses `docker: true` by default with the pinned SP1 toolchain image
-//!   (matches the `=6.1.0` version of `sp1-sdk` / `sp1-zkvm` the workspace
-//!   pins to) for bit-for-bit reproducible ELFs. This is the ecosystem
+//!   (matches the `=6.1.0` version of `sp1-zkvm` the guest workspace pins to)
+//!   for bit-for-bit reproducible ELFs. This is the ecosystem
 //!   standard used by op-succinct, sp1-helios, and all other SP1 adopters.
 //!   Docker provides reproducibility by fixing the build environment path
 //!   layout inside the container.
