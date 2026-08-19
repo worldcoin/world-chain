@@ -334,43 +334,14 @@ impl WorldSuccinctProver for NetworkSuccinctProver {
 
     async fn wait(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
         let proof_id = parse_proof_id(session_id)?;
-        let result = self
-            .client
+        // SP1 6.1.0 can misclassify a fulfilled proof polled after its deadline as timed out.
+        // This accepted limitation is fixed by upgrading to SP1 6.2.0 or newer (#2737).
+        self.client
             // The request carries its immutable network deadline. Passing no additional local
             // timeout keeps restart recovery anchored to that original deadline.
             .wait_proof(proof_id, None, self.auction_timeout)
-            .await;
-
-        match result {
-            Ok(proof) => Ok(proof),
-            Err(error)
-                if matches!(
-                    error.downcast_ref::<NetworkError>(),
-                    Some(NetworkError::RequestTimedOut { .. })
-                ) =>
-            {
-                // SP1 v6.1.0 checks the deadline before FULFILLED. Re-read once so a proof that
-                // completed near its deadline is not replaced. This was reordered upstream in
-                // https://github.com/succinctlabs/sp1/pull/2737.
-                let (status, proof) = self
-                    .client
-                    .get_proof_status(proof_id)
-                    .await
-                    .context("rechecking SP1 Network request after timeout")?;
-                if matches!(
-                    FulfillmentStatus::try_from(status.fulfillment_status()),
-                    Ok(FulfillmentStatus::Fulfilled)
-                ) {
-                    return proof.ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "network proof {session_id} is fulfilled but no proof was returned"
-                        )
-                    });
-                }
-                Err(map_network_wait_error(error, session_id))
-            }
-            Err(error) => Err(map_network_wait_error(error, session_id)),
-        }
+            .await
+            .map_err(|error| map_network_wait_error(error, session_id))
     }
 }
 
