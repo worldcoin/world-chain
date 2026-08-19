@@ -200,14 +200,13 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
         request: Sp1ProofRequest,
     ) -> anyhow::Result<String> {
         let session_id = self.prover.submit(request).await?;
-        let empty_failure_reason = None;
 
         self.record_session(
             job,
             session_type,
             &session_id,
             BackendSessionStatus::Running,
-            empty_failure_reason,
+            None,
         )
         .await?;
 

@@ -116,10 +116,6 @@ impl MockSuccinctProver {
 
 #[async_trait]
 impl WorldSuccinctProver for MockSuccinctProver {
-    fn supports_persistent_sessions(&self) -> bool {
-        false
-    }
-
     async fn submit(&self, request: Sp1ProofRequest) -> anyhow::Result<String> {
         let (prefix, proof) = match request {
             Sp1ProofRequest::Range(range_request) => {

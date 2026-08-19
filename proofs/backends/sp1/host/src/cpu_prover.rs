@@ -115,10 +115,6 @@ impl CpuSuccinctProver {
 
 #[async_trait]
 impl WorldSuccinctProver for CpuSuccinctProver {
-    fn supports_persistent_sessions(&self) -> bool {
-        false
-    }
-
     async fn submit(&self, request: Sp1ProofRequest) -> anyhow::Result<String> {
         let (prefix, proof) = match request {
             Sp1ProofRequest::Range(range_request) => {

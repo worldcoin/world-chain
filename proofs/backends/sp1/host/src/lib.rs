@@ -78,7 +78,9 @@ impl SuccinctProverError {
 #[cfg(feature = "sp1")]
 #[async_trait]
 pub trait WorldSuccinctProver {
-    fn supports_persistent_sessions(&self) -> bool;
+    fn supports_persistent_sessions(&self) -> bool {
+        false
+    }
 
     async fn submit(
         &self,
