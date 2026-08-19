@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::{SuccinctProverError, WorldSuccinctProver};
 use alloy_primitives::{B256, U256};
-use anyhow::{Context, bail};
+use anyhow::Context;
 use async_trait::async_trait;
 pub use sp1_sdk::SP1ProofMode;
 use sp1_sdk::{
@@ -13,14 +13,11 @@ use sp1_sdk::{
     SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
     network::{
         Error as NetworkError, NetworkClient, NetworkMode, get_default_rpc_url_for_mode,
-        proto::{GetProofRequestStatusResponse, types::FulfillmentStatus},
         signer::NetworkSigner,
     },
 };
 use world_chain_proof_core::types::AggregationInputs;
-use world_chain_proof_sp1_types::{
-    AggregationProofRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
-};
+use world_chain_proof_sp1_types::{AggregationProofRequest, RangeProofRequest, Sp1ProofRequest};
 
 /// [`WorldSuccinctProver`] network implementation over the sp1-sdk network prover.
 pub struct NetworkSuccinctProver {
@@ -270,21 +267,6 @@ impl NetworkSuccinctProver {
 
         Ok(backend_session_id.to_string())
     }
-
-    /// Fetch the network session state and any proof returned by the SP1 Network.
-    pub async fn get_network_proof_status(
-        &self,
-        backend_session_id: &str,
-    ) -> anyhow::Result<(Sp1SessionStatus, Option<SP1ProofWithPublicValues>)> {
-        let proof_id = parse_proof_id(backend_session_id)?;
-        let (status, proof) = self
-            .client
-            .get_proof_status(proof_id)
-            .await
-            .context("failed to get network proof status")?;
-        let sp1_status = sp1_status(&status);
-        Ok((sp1_status, proof))
-    }
 }
 
 #[async_trait]
@@ -307,27 +289,6 @@ impl WorldSuccinctProver for NetworkSuccinctProver {
                     range_proofs: session_request.range_proofs,
                 };
                 self.request_aggregation_proof(agg_request).await
-            }
-        }
-    }
-
-    async fn poll(&self, session_id: &str) -> anyhow::Result<Sp1SessionStatus> {
-        let (sp1_status, _maybe_proof) = self.get_network_proof_status(session_id).await?;
-        Ok(sp1_status)
-    }
-
-    async fn download(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
-        let (sp1_status, maybe_proof) = self.get_network_proof_status(session_id).await?;
-        match sp1_status {
-            Sp1SessionStatus::Completed => maybe_proof.ok_or_else(|| {
-                anyhow::anyhow!("network proof {session_id} is fulfilled but no proof was returned")
-            }),
-            Sp1SessionStatus::Running => {
-                bail!("network proof {session_id} is not fulfilled yet");
-            }
-            Sp1SessionStatus::Failed(reason) => bail!("{reason}"),
-            Sp1SessionStatus::NotFound => {
-                bail!("network proof {session_id} was not found");
             }
         }
     }
@@ -378,24 +339,6 @@ fn parse_proof_id(proof_id: &str) -> anyhow::Result<B256> {
     proof_id
         .parse::<B256>()
         .map_err(|e| anyhow::anyhow!("invalid network proof ID: {e}"))
-}
-
-/// Map an SP1 Network proof status response to the sp1 session status.
-fn sp1_status(status: &GetProofRequestStatusResponse) -> Sp1SessionStatus {
-    match FulfillmentStatus::try_from(status.fulfillment_status()) {
-        Ok(FulfillmentStatus::Fulfilled) => Sp1SessionStatus::Completed,
-        Ok(FulfillmentStatus::Unfulfillable) => Sp1SessionStatus::Failed(format!(
-            "proof unfulfillable, execution_status={}",
-            status.execution_status()
-        )),
-        Ok(FulfillmentStatus::Assigned)
-        | Ok(FulfillmentStatus::Requested)
-        | Ok(FulfillmentStatus::UnspecifiedFulfillmentStatus) => Sp1SessionStatus::Running,
-        Err(_) => Sp1SessionStatus::Failed(format!(
-            "unknown network proof fulfillment status: {}",
-            status.fulfillment_status()
-        )),
-    }
 }
 
 #[cfg(test)]

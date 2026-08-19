@@ -1,6 +1,6 @@
 //! Host-side helpers for preparing World Chain OP Succinct Lite proof requests.
 
-use std::{fmt, time::Duration};
+use std::fmt;
 
 #[cfg(feature = "sp1")]
 use anyhow::Context;
@@ -85,35 +85,8 @@ pub trait WorldSuccinctProver {
         request: world_chain_proof_sp1_types::Sp1ProofRequest,
     ) -> anyhow::Result<String>;
 
-    async fn poll(
-        &self,
-        session_id: &str,
-    ) -> anyhow::Result<world_chain_proof_sp1_types::Sp1SessionStatus>;
-
-    async fn download(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues>;
-
     /// Waits for a submitted session and returns its proof.
-    ///
-    /// Network provers override this to use the SDK's auction cancellation and request-deadline
-    /// handling. Local provers use the generic poll-and-download loop.
-    async fn wait(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
-        loop {
-            match self.poll(session_id).await? {
-                world_chain_proof_sp1_types::Sp1SessionStatus::Running => {
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                }
-                world_chain_proof_sp1_types::Sp1SessionStatus::Completed => {
-                    return self.download(session_id).await;
-                }
-                world_chain_proof_sp1_types::Sp1SessionStatus::Failed(reason) => {
-                    anyhow::bail!("proof session {session_id} failed: {reason}");
-                }
-                world_chain_proof_sp1_types::Sp1SessionStatus::NotFound => {
-                    anyhow::bail!("proof session {session_id} was not found");
-                }
-            }
-        }
-    }
+    async fn wait(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues>;
 }
 
 /// Converts a raw compressed SP1 range proof into the artifact consumed by aggregation.

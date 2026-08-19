@@ -17,9 +17,7 @@ use std::{
     },
 };
 use world_chain_proof_core::types::AggregationInputs;
-use world_chain_proof_sp1_types::{
-    AggregationProofRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
-};
+use world_chain_proof_sp1_types::{AggregationProofRequest, RangeProofRequest, Sp1ProofRequest};
 
 /// [`WorldSuccinctProver`] CPU-local implementation over the sp1-sdk local prover.
 pub struct CpuSuccinctProver {
@@ -149,20 +147,7 @@ impl WorldSuccinctProver for CpuSuccinctProver {
         Ok(session_id)
     }
 
-    async fn poll(&self, session_id: &str) -> anyhow::Result<Sp1SessionStatus> {
-        let proofs = self
-            .proofs
-            .lock()
-            .map_err(|_| anyhow::anyhow!("mutex lock poisoned"))?;
-        if proofs.contains_key(session_id) {
-            // CPU prover immediately returns completed status if the entry exists in the hashmap.
-            Ok(Sp1SessionStatus::Completed)
-        } else {
-            Ok(Sp1SessionStatus::NotFound)
-        }
-    }
-
-    async fn download(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
+    async fn wait(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
         let proofs = self
             .proofs
             .lock()
