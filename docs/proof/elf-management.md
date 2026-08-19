@@ -35,7 +35,7 @@ embedded bytes (`just proof-vkeys`), which is pinned in the `MultiProofGame` imp
 
 ## Reproducibility
 
-`sp1_build::build_program_with_args` uses Docker by default with the SP1 v6.1.0 linux/amd64
+`sp1_build::build_program_with_args` uses Docker by default with the SP1 v6.3.1 linux/amd64
 image pinned by digest. A `cargo build -p world-chain-prover-sp1` from a clean checkout therefore
 produces bit-for-bit identical ELFs and vkeys regardless of host toolchain.
 
@@ -62,15 +62,15 @@ cargo build -p world-chain-proof-sp1-worker   # likewise
 just proof-vkeys                         # prints the on-chain vkey commitments
 ```
 
-The first build runs each guest build inside the digest-pinned SP1 v6.1.0 image (a few minutes).
+The first build runs each guest build inside the digest-pinned SP1 v6.3.1 image (a few minutes).
 Subsequent builds reuse the cached ELFs unless the guest source or SP1 image reference changes —
 `sp1-build` calls `cargo:rerun-if-changed` on every dependency of the program
 crate, so any meaningful source edit invalidates the cache.
 
 Requirements:
 
-- Docker (default reproducibility mode pulls the digest-pinned `succinctlabs/sp1:v6.1.0`), or
-- The SP1 toolchain on `PATH` (`curl -L https://sp1.succinct.xyz | bash && sp1up --version v6.1.0`)
+- Docker (default reproducibility mode pulls the digest-pinned `succinctlabs/sp1:v6.3.1`), or
+- The SP1 toolchain on `PATH` (`curl -L https://sp1.succinct.xyz | bash && sp1up --version v6.3.1`)
   with `SP1_BUILD_DOCKER=false` for non-production iteration only.
 
 Build the production worker with its dedicated target:
