@@ -54,6 +54,7 @@ use full_stack::FullStackWorldDevnet;
 pub use component::{
     ContainerImage, DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetEndpoint,
 };
+pub use full_stack::SUPERCHAIN_GUARDIAN_PRIVATE_KEY;
 pub use hardforks::{WORLD_CHAIN_DEVNET_HARDFORK_ORDER, WorldChainHardforkConfig};
 pub use l1::{L1DevChain, L1DevChainConfig};
 pub use observability::{MetricsTarget, ObservabilityConfig, ObservabilityStack};
