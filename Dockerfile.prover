@@ -29,7 +29,7 @@ ENV CARGO_HOME=/usr/local/cargo \
 # Canonical SP1 guest builder. This is the same linux/amd64 image and `/root/program`
 # workspace layout used by sp1-build's reproducible Docker mode. The digest is the
 # governance boundary: changing it intentionally rotates the ELF hashes and vkeys.
-FROM --platform=${SP1_GUEST_PLATFORM} ghcr.io/succinctlabs/sp1:v6.1.0@sha256:c90d0a816ca40357346e8ad5b53178bc8f4b3fc2b8dd6bfc061f60d92cb61953 AS sp1-guests
+FROM --platform=${SP1_GUEST_PLATFORM} ghcr.io/succinctlabs/sp1:v6.3.1@sha256:7c1c8201de6f63e3f1fb9075bd9a67a4c5fc8c2d546d11a5ff71587bb51e6eb3 AS sp1-guests
 WORKDIR /root/program
 
 COPY . .
