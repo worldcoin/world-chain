@@ -485,12 +485,12 @@ previously a manual `cast` sequence:
 
 The command is **idempotent**: if the key is already registered it logs and exits 0. It is
 also available on the long-running worker as `world-chain-proof-nitro-worker register` and as
-a startup hook (`... run --auto-register`); the `just proof-register-key <env>` recipe in the
-[crypto-apps](https://github.com/worldcoin/crypto-apps) repo wraps the in-pod invocation.
+a startup hook (`... run --auto-register`); the infrastructure repo's `proof-register-key <env>`
+recipe wraps the in-pod invocation.
 
 > **Prerequisites:** CertManager must be pre-warmed and the enclave PCR set approved on
-> `NitroAttestationVerifier` — `just proof-setup <env>` in crypto-apps drives both, delegating
-> the contract phases back to the `just proof-deploy-*` recipes here. `registerKey`
+> `NitroAttestationVerifier` — `just proof-setup <env>` in the infrastructure repo drives both,
+> delegating the contract phases back to the `just proof-deploy-*` recipes here. `registerKey`
 > is **not** owner-gated — any funded L1 key can call it; authorization is enforced
 > cryptographically via the attestation + the owner-approved PCR allowlist.
 

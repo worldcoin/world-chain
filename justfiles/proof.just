@@ -6,15 +6,15 @@
 # here talks to Kubernetes.
 #
 # The cluster-side phases — measuring the running Nitro enclave, fetching its
-# attestation, and registering its signing key — live in the crypto-apps repo
-# under `justfiles/proof.just`, because they require an authenticated
-# kubecontext and vsock access from inside the worker pod:
+# attestation, and registering its signing key — are not in this repo. They
+# require an authenticated kubecontext and vsock access from inside the worker
+# pod, so they live with the deployment topology in the infrastructure repo:
 #
-#   crypto-apps: proof-pcrs, proof-attestation, proof-chain-id,
-#                proof-verify-pcrs, proof-register-key, proof-setup
+#   proof-pcrs, proof-attestation, proof-chain-id,
+#   proof-verify-pcrs, proof-register-key, proof-setup
 #
-# `just proof-setup <env>` in crypto-apps orchestrates both sides: it reads the
-# cluster, then delegates each phase below via $WORLD_CHAIN_REPO.
+# `just proof-setup <env>` there orchestrates both sides: it reads the cluster,
+# then delegates each phase below via $WORLD_CHAIN_REPO.
 #
 # Workflow phases owned by this repo:
 #   Phase 0a  proof-rollup-config-hash   – Compute rollup config hash from an L2 RPC
@@ -32,7 +32,7 @@
 #   CERT_MANAGER_ADDRESS, NITRO_ATTESTATION_VERIFIER
 #
 # PCR0/PCR1/PCR2 are inputs here, not discovered: measure the running enclave
-# with `just proof-pcrs <env>` in crypto-apps.
+# with `just proof-pcrs <env>` in the infrastructure repo.
 #
 # Simulation mode (no on-chain broadcast):
 #   dry_run=true   Simulate without broadcasting (all other steps still run)
@@ -80,8 +80,8 @@ verify-proof-vkeys:
 #   L2_RPC_URL        – op-node RPC endpoint (port 9545, NOT the execution client on 8545)
 #   ROLLUP_CONFIG_URL – URL to download the rollup config JSON from
 #   ROLLUP_CONFIG     – local file path to an existing rollup config JSON
-# For a deployed environment, `just proof-rollup-config-hash <env>` in crypto-apps
-# port-forwards to the op-node and calls this recipe with L2_RPC_URL set.
+# For a deployed environment, the infrastructure repo's `proof-rollup-config-hash`
+# recipe port-forwards to the op-node and calls this one with L2_RPC_URL set.
 [doc("Phase 0a - Compute the rollup config hash from an L2 RPC or config file.")]
 [group('proof')]
 proof-rollup-config-hash env="alphanet":
@@ -99,7 +99,7 @@ proof-rollup-config-hash env="alphanet":
         cargo run -p world-chain-prover-nitro -- hash-rollup-config --rollup-config "$ROLLUP_CONFIG"
     else
         echo "Error: set one of L2_RPC_URL, ROLLUP_CONFIG_URL or ROLLUP_CONFIG." >&2
-        echo "  For a deployed env, run 'just proof-rollup-config-hash {{env}}' in crypto-apps," >&2
+        echo "  For a deployed env, use the infrastructure repo's 'proof-rollup-config-hash {{env}}'," >&2
         echo "  which port-forwards to the op-node and sets L2_RPC_URL for you." >&2
         exit 1
     fi
@@ -237,8 +237,9 @@ proof-activate-system env="alphanet":
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
 #
-# ATTESTATION_HEX is an input: fetch it with `just proof-attestation <env>` in
-# crypto-apps, which execs into the worker pod (the only place with vsock access).
+# ATTESTATION_HEX is an input: fetch it with the infrastructure repo's
+# `proof-attestation <env>` recipe, which execs into the worker pod (the only
+# place with vsock access).
 # ATTESTATION_FILE is accepted as an alternative, since the hex is large.
 [doc("Phase 3a - Pre-warm CertManager with the AWS Nitro CA cert chain.")]
 [group('proof')]
@@ -263,7 +264,7 @@ proof-certmanager-prewarm env="alphanet":
     fi
     if [ -z "${ATTESTATION_HEX:-}" ]; then
         echo "Error: ATTESTATION_HEX (or ATTESTATION_FILE) is required." >&2
-        echo "  Fetch it with: just proof-attestation {{env}}   (in crypto-apps)" >&2
+        echo "  Fetch it with the infrastructure repo's 'proof-attestation {{env}}' recipe." >&2
         exit 1
     fi
     echo "Generating pre-warm plan…"
