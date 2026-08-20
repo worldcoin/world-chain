@@ -1,0 +1,58 @@
+# Isolated workspace for the crates that define what the proof system measures.
+#
+# The enclave EIF (PCR0/PCR2) and the SP1 guest vkeys are hashes over binaries built from
+# these crates. Pinning their dependencies here, rather than inheriting the root
+# `[workspace.dependencies]`, keeps unrelated root churn — reth, revm, jsonrpsee, tokio
+# bumps for the node side — from rotating those measurements. Bumping a pin below *will*
+# rotate them, so treat it as a release event (`just proof-release`).
+#
+# Consumed by path from the root workspace and from the standalone enclave and SP1 guest
+# workspaces. Types still cross that boundary, so the alloy/kona/revm pins here must stay
+# semver-compatible with root's.
+
+[workspace]
+resolver = "3"
+members = ["core", "kona-client"]
+
+[workspace.package]
+version = "2.4.2"
+edition = "2024"
+rust-version = "1.95.0"
+license = "MIT"
+homepage = "https://world.org/world-chain"
+repository = "https://github.com/worldcoin/world-chain/"
+
+# Mirrors the root workspace so the inherited `[lints] workspace = true` behaves identically.
+[workspace.lints.rust]
+semicolon_in_expressions_from_macros = "allow"
+
+[workspace.dependencies]
+world-chain-proof-core = { path = "core", default-features = false }
+alloy-consensus = { version = "=2.1.1", default-features = false }
+alloy-eips = { version = "=2.1.1", default-features = false, features = ["serde"] }
+alloy-evm = { version = "0.37.0", default-features = false }
+alloy-op-evm = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", default-features = false }
+alloy-primitives = { version = "1.6.0", default-features = false, features = ["std", "map-foldhash"] }
+alloy-rlp = { version = "0.3.16", default-features = false, features = ["derive"] }
+alloy-sol-types = "1.6.0"
+anyhow = { version = "1.0.86", default-features = false }
+async-trait = "0.1.88"
+kona-derive = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", default-features = false }
+kona-driver = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2" }
+kona-executor = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2" }
+kona-genesis = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", default-features = false }
+kona-preimage = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", features = ["rkyv", "serde"] }
+kona-proof = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2" }
+kona-protocol = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", default-features = false }
+kzg-rs = { version = "0.2.8", features = ["rkyv", "serde"] }
+op-alloy-consensus = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", default-features = false }
+op-revm = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2", default-features = false }
+revm = { version = "41.0.0", default-features = false }
+revm-precompile = { version = "41.0.0", default-features = false }
+rkyv = { version = "0.8", features = ["hashbrown-0_15", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10.9"
+spin = "0.10"
+thiserror = "2"
+tracing = "0.1"

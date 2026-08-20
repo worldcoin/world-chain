@@ -59,8 +59,8 @@ implementation pinned to the new values, plus PCR approval and enclave key regis
 `proofs/backends/nitro/enclave` is a standalone cargo workspace with its own `Cargo.lock`
 (excluded from the root workspace), so root `Cargo.lock` churn cannot shift the EIF
 measurements. PCRs change only when one of the enclave's actual inputs changes: its own
-sources and lockfile, its path deps (`proofs/core`, `proofs/kona/client`,
-`proofs/services/tx-signer`), root `[workspace.dependencies]` feeding those manifests, the
+sources and lockfile, its path deps in `proofs/measured` (`core`, `kona-client`) together
+with that workspace's own `[workspace.dependencies]` and lockfile, the
 pinned base images / apt snapshot in its Dockerfile, or the pinned nitro-cli version in
 `scripts/build-eif.sh`.
 

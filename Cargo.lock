@@ -19118,11 +19118,7 @@ dependencies = [
 name = "world-chain-proof-nitro-enclave"
 version = "1.0.0"
 dependencies = [
- "alloy-contract",
  "alloy-primitives",
- "alloy-provider",
- "alloy-signer 2.1.1",
- "alloy-signer-local 2.1.1",
  "alloy-sol-types",
  "anyhow",
  "aws-nitro-enclaves-nsm-api",
@@ -19146,11 +19142,30 @@ dependencies = [
  "tokio-vsock",
  "tracing",
  "tracing-subscriber 0.3.23",
- "url",
  "world-chain-proof-core",
  "world-chain-proof-kona-client",
- "world-chain-proof-tx-signer",
  "x509-parser",
+]
+
+[[package]]
+name = "world-chain-proof-nitro-register"
+version = "2.4.2"
+dependencies = [
+ "alloy-contract",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer 2.1.1",
+ "alloy-signer-local 2.1.1",
+ "alloy-sol-types",
+ "anyhow",
+ "ciborium",
+ "hex",
+ "sha2 0.10.9",
+ "tokio",
+ "tracing",
+ "url",
+ "world-chain-proof-nitro-enclave",
+ "world-chain-proof-tx-signer",
 ]
 
 [[package]]
@@ -19173,6 +19188,7 @@ dependencies = [
  "world-chain-proof-kona-host",
  "world-chain-proof-metrics",
  "world-chain-proof-nitro-enclave",
+ "world-chain-proof-nitro-register",
  "world-chain-proof-protocol",
  "world-chain-proof-worker",
  "world-chain-prover-service",
@@ -19398,6 +19414,7 @@ dependencies = [
  "tokio",
  "tracing-subscriber 0.3.23",
  "world-chain-proof-nitro-enclave",
+ "world-chain-proof-nitro-register",
  "world-chain-prover",
 ]
 
