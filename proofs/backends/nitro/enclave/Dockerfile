@@ -89,5 +89,6 @@ ENTRYPOINT ["/usr/local/bin/world-chain-proof-nitro-enclave"]
 ARG SOURCE_DATE_EPOCH=1780272000
 RUN rm -rf /var/log/apt /var/log/dpkg.log /var/log/alternatives.log \
     && find / -xdev \
+        \( -path /proc -o -path /sys -o -path /dev \) -prune -o \
         ! -path /etc/hostname ! -path /etc/hosts ! -path /etc/resolv.conf \
         -exec touch --no-dereference --date="@${SOURCE_DATE_EPOCH}" {} +
