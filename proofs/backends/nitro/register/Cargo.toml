@@ -22,9 +22,13 @@ alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 alloy-sol-types.workspace = true
 anyhow.workspace = true
+hex.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
 world-chain-proof-nitro-enclave = { workspace = true, features = ["enclave"] }
 world-chain-proof-tx-signer.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+ciborium = "0.2"

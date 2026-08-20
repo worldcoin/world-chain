@@ -19158,6 +19158,8 @@ dependencies = [
  "alloy-signer-local 2.1.1",
  "alloy-sol-types",
  "anyhow",
+ "ciborium",
+ "hex",
  "sha2 0.10.9",
  "tokio",
  "tracing",
