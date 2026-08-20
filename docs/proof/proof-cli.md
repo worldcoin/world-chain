@@ -484,12 +484,13 @@ previously a manual `cast` sequence:
    `NitroEnclaveKeyRegistry` and confirm `isSignerRegistered` afterwards.
 
 The command is **idempotent**: if the key is already registered it logs and exits 0. It is
-also available on the long-running worker as `nitro-worker register` and as a startup hook
-(`nitro-worker run --auto-register`); the `just proof-register-key <env>` recipe wraps the
-in-pod invocation.
+also available on the long-running worker as `world-chain-proof-nitro-worker register` and as
+a startup hook (`... run --auto-register`); the infrastructure repo's `proof-register-key <env>`
+recipe wraps the in-pod invocation.
 
 > **Prerequisites:** CertManager must be pre-warmed and the enclave PCR set approved on
-> `NitroAttestationVerifier` (see the `just proof-setup` / `just proof-*` recipes). `registerKey`
+> `NitroAttestationVerifier` — `just proof-setup <env>` in the infrastructure repo drives both,
+> delegating the contract phases back to the `just proof-deploy-*` recipes here. `registerKey`
 > is **not** owner-gated — any funded L1 key can call it; authorization is enforced
 > cryptographically via the attestation + the owner-approved PCR allowlist.
 
