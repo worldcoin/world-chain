@@ -95,6 +95,9 @@ jobs:
       # so --workspace does not cover it.
       - name: tests (nitro enclave workspace)
         run: mold -run cargo nextest run --manifest-path proofs/backends/nitro/enclave/Cargo.toml --locked
+      # Likewise for the measured crates, which pin their own deps (proofs/measured/Cargo.toml).
+      - name: tests (measured workspace)
+        run: mold -run cargo nextest run --manifest-path proofs/measured/Cargo.toml --workspace --locked
 
   cargo-clippy:
     runs-on: arc-public-8xlarge-amd64-runner
@@ -145,6 +148,11 @@ jobs:
         run: cargo +nightly-2026-07-01 fmt --manifest-path proofs/backends/nitro/enclave/Cargo.toml --all -- --check
       - name: clippy (nitro enclave workspace)
         run: cargo +nightly-2026-07-01 clippy --manifest-path proofs/backends/nitro/enclave/Cargo.toml --all-targets --all-features -- -D warnings
+      # The measured crates pin their own deps, so --workspace does not cover them either.
+      - name: fmt (measured workspace)
+        run: cargo +nightly-2026-07-01 fmt --manifest-path proofs/measured/Cargo.toml --all -- --check
+      - name: clippy (measured workspace)
+        run: cargo +nightly-2026-07-01 clippy --manifest-path proofs/measured/Cargo.toml --workspace --all-targets --all-features -- -D warnings
 
   cargo-docs:
     runs-on: arc-public-8xlarge-amd64-runner

@@ -48,8 +48,11 @@ jobs:
           fi
 
   # Cheap merge-base diff so the expensive EIF rebuild only runs when one of
-  # the enclave's actual measurement inputs changed. The input set is
-  # enumerable because the enclave is a standalone workspace with its own lock.
+  # the enclave's actual measurement inputs changed. The input set is enumerable
+  # because every crate in the measured graph lives in a standalone workspace
+  # with its own lock: the enclave itself and `proofs/measured`. The root
+  # `Cargo.toml` is deliberately absent — nothing measured inherits from it, and
+  # that is the property `proofs/measured` exists to guarantee.
   changes:
     name: detect enclave input changes
     runs-on: ubuntu-latest
@@ -68,7 +71,7 @@ jobs:
           base=$(git merge-base "origin/$BASE_REF" HEAD)
           changed=$(git diff --name-only "$base" HEAD)
           echo "Changed files:"; echo "$changed"
-          if grep -qE '^(proofs/backends/nitro/enclave/|proofs/core/|proofs/kona/client/|proofs/services/tx-signer/|proof-releases\.lock$|scripts/build-eif\.sh$|Cargo\.toml$)' <<< "$changed"; then
+          if grep -qE '^(proofs/backends/nitro/enclave/|proofs/measured/|proof-releases\.lock$|scripts/build-eif\.sh$)' <<< "$changed"; then
             echo "eif=true" >> "$GITHUB_OUTPUT"
           else
             echo "eif=false" >> "$GITHUB_OUTPUT"

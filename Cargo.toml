@@ -25,11 +25,9 @@ members = [
     "crates/commands",
     "crates/devnet",
     "crates/test-utils",
-    "proofs/core",
     "proofs/protocol",
     "proofs/metrics",
     "proofs/it",
-    "proofs/kona/client",
     "proofs/kona/host",
     "proofs/backends/sp1/guest-builder",
     "proofs/backends/sp1/elfs",
@@ -54,6 +52,7 @@ members = [
 
 exclude = [
     "proofs/backends/sp1/programs",
+    "proofs/measured",
     "proofs/backends/nitro/enclave",
     "proofs/backends/nitro/fuzz",
 ]
@@ -104,8 +103,8 @@ world-chain-test-utils = { path = "crates/test-utils", default-features = false 
 world-chain-prover = { path = "proofs/debug/prover", default-features = false }
 world-chain-prover-sp1 = { path = "proofs/debug/bin/prover-sp1", default-features = false }
 world-chain-prover-nitro = { path = "proofs/debug/bin/prover-nitro", default-features = false }
-world-chain-proof-core = { path = "proofs/core", default-features = false }
-world-chain-proof-kona-client = { path = "proofs/kona/client", default-features = false }
+world-chain-proof-core = { path = "proofs/measured/core", default-features = false }
+world-chain-proof-kona-client = { path = "proofs/measured/kona-client", default-features = false }
 world-chain-proof-kona-host = { path = "proofs/kona/host", default-features = false }
 world-chain-proof-sp1-elfs = { path = "proofs/backends/sp1/elfs" }
 world-chain-proof-sp1-host = { path = "proofs/backends/sp1/host", default-features = false }
