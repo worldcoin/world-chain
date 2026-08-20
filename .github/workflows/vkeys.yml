@@ -1,14 +1,7 @@
-# Staged CI workflow — copy to .github/workflows/vkeys.yml to activate.
-#
-# Verifies that proofs/backends/sp1/elfs/vkeys.json matches the vkeys derived from
-# the current SP1 guest programs. Runs on PRs that touch proof program sources
-# or the committed vkeys.json itself.
-#
-# Prerequisites in the repo:
-#   - `just verify-proof-vkeys` recipe in Justfile (already added)
-#   - proofs/backends/sp1/elfs/vkeys.json committed (already added)
-#
-# Uses the `world-chain-prover-sp1` package for the `vkeys` subcommand.
+# Verifies that the SP1 measurements built from current source match the
+# registry's current release entry (proof-releases.lock). Runs on PRs
+# that touch proof program sources or the registry itself: measurement changes
+# cannot merge without a new release entry (`just proof-release --version X.Y.Z`).
 name: verify-vkeys
 
 on:
@@ -16,7 +9,7 @@ on:
     paths:
       - 'proofs/backends/sp1/programs/**'
       - 'proofs/backends/sp1/elfs/**'
-      - 'proofs/backends/sp1/elfs/vkeys.json'
+      - 'proof-releases.lock'
       - 'proofs/core/**'
       - 'proofs/kona/client/**'
       - 'proofs/protocol/**'
@@ -26,7 +19,7 @@ on:
 
 jobs:
   verify-vkeys:
-    name: verify vkeys match source
+    name: verify vkeys match registry
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

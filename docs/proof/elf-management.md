@@ -29,8 +29,8 @@ We use the OP Succinct upstream pattern (see [succinctlabs/op-succinct/utils/bui
 
 Net effect: the ELFs are never on disk for the host crate to find — they're statically baked
 into every binary that links `world-chain-proof-sp1-elfs` (e.g. `world-chain-proof-sp1-worker`).
-There is no committed ELF blob. The derived vkeys and ELF SHA-256s are recorded in
-`proofs/backends/sp1/elfs/vkeys.json`. The on-chain governance anchor is the SP1 vkey computed from the
+There is no committed ELF blob. The derived vkeys and ELF SHA-256s are recorded in the release
+registry (`proof-releases.lock`). The on-chain governance anchor is the SP1 vkey computed from the
 embedded bytes (`just proof-vkeys`), which is pinned in the `MultiProofGame` implementation.
 
 ## Reproducibility
@@ -49,8 +49,8 @@ SP1 image and `/root/program` layout as the default local build. The
 build and local build share Succinct's compiler flags instead of maintaining a second compilation
 recipe. The image then copies those exact ELFs into the host builder and sets
 `SP1_SKIP_PROGRAM_BUILD=true`, so the worker embeds them without a second compilation. The image
-build fails unless the ELF hashes and vkeys computed from the final worker binary match
-`vkeys.json`.
+build fails unless the ELF hashes and vkeys computed from the final worker binary match the
+registry's current release entry (`vkeys --check-registry proof-releases.lock`).
 
 ## Local development
 
@@ -113,7 +113,7 @@ The workflow is just normal source-control:
 
 The `vkeys.yml` workflow recomputes the manifest through the canonical Docker path. The
 `docker-proof.yml` SP1 worker job uses the dedicated `sp1-worker` target and runs
-`world-chain-proof-sp1-worker vkeys --check` against the linked binary before publishing it.
+`world-chain-proof-sp1-worker vkeys --check-registry` against the linked binary before publishing it.
 
 ## Comparison with op-succinct
 
@@ -121,8 +121,8 @@ The `vkeys.yml` workflow recomputes the manifest through the canonical Docker pa
 proof system that World Chain's proof system is based on. It uses exactly the same pattern:
 `sp1_build::build_program_with_args` in `build.rs` compiles the guest ELF at host `cargo build`
 time, and `sp1_sdk::include_elf!()` embeds it into the host binary. No ELF binaries are committed
-to source control; the derived vkeys and hashes in `vkeys.json` can be reproduced with the pinned
-`cargo-prove` toolchain.
+to source control; the derived vkeys and hashes in the release registry can be reproduced with the
+pinned `cargo-prove` toolchain.
 
 World Chain follows this pattern directly:
 
@@ -145,7 +145,7 @@ avoids carrying any ELF artifacts (committed bytes or committed SHA-256s) in sou
 | `proofs/backends/sp1/elfs/build.rs` | Invokes `sp1_build::build_program_with_args` for each guest crate |
 | `proofs/backends/sp1/guest-builder` | Invokes the same pinned `sp1-build` compiler recipe inside the production guest-builder image |
 | `proofs/backends/sp1/elfs/src/lib.rs` | `range_elf()` / `aggregation_elf()` via `include_elf!()` |
-| `proofs/backends/sp1/elfs/vkeys.json` | Derived SP1 vkeys and ELF SHA-256s |
+| `proof-releases.lock` | Derived SP1 vkeys and ELF SHA-256s, per release |
 | `proofs/backends/sp1/host/src/*_prover.rs` | CPU, mock, and network provers over the embedded ELFs |
 | `proofs/backends/sp1/programs/range-ethereum/` | Range guest source |
 | `proofs/backends/sp1/programs/aggregation/`    | Aggregation guest source |

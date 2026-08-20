@@ -1,0 +1,245 @@
+# Proof release pipeline: binds git sha → SP1 vkeys → EIF PCRs → tee_image_id →
+# image digests under one proofs/vX.Y.Z tag, verified against the committed
+# registry (proof-releases.lock) before anything is published.
+#
+# Triggered by proofs/v* tag pushes, or dispatched on a proofs/v* tag ref by
+# proof-release-tag.yml when a merge to main advances proof-releases.lock.
+# Fails unless the tagged commit's registry entry matches the measurements
+# rebuilt from source at that tag. Produces a DRAFT GitHub release — measurement
+# review and publishing stay human steps.
+
+name: release-proof
+
+on:
+  push:
+    tags: ["proofs/v*"]
+  workflow_dispatch: {}
+
+concurrency:
+  group: release-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ${{ github.repository }}
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  resolve:
+    name: resolve release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+      tag: ${{ steps.parse.outputs.tag }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - name: Install pycryptodome
+        run: pip install pycryptodome==3.23.0
+      - name: Parse tag and validate registry
+        id: parse
+        run: |
+          if [[ "$GITHUB_REF" != refs/tags/proofs/v* ]]; then
+            echo "::error::release-proof must run on a proofs/vX.Y.Z tag ref (got $GITHUB_REF)." >&2
+            exit 1
+          fi
+          version="${GITHUB_REF#refs/tags/proofs/v}"
+          python3 scripts/check-proof-releases.py
+          python3 scripts/check-proof-releases.py --get "$version" > /dev/null
+          current=$(python3 scripts/check-proof-releases.py --current | jq -r .version)
+          if [[ "$current" != "$version" ]]; then
+            echo "::error::tag proofs/v$version is not the registry's current release (latest_rc/latest_stable = $current)." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=proofs/v$version" >> "$GITHUB_OUTPUT"
+
+  # Rebuild the SP1 guest ELFs reproducibly and require their measurements to
+  # match the registry entry. (resolve asserts the tag is the registry's current
+  # release, so checking against the current entry checks the tagged entry.)
+  verify-vkeys:
+    name: verify vkeys against registry
+    needs: resolve
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install SP1 toolchain
+        run: |
+          curl -L https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up --version v6.1.0
+          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Verify vkeys match registry
+        env:
+          SP1_BUILD_DOCKER: "true"
+        run: just verify-proof-vkeys
+
+  # Build the EIF from source at the tag and require its PCRs to match the
+  # registry entry BEFORE any proofs-vX.Y.Z image tag is pushed.
+  build-eif:
+    name: build EIF and verify PCRs
+    needs: resolve
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - name: Install pycryptodome
+        run: pip install pycryptodome==3.23.0
+      - name: Build EIF
+        run: scripts/build-eif.sh target/eif
+      - name: Verify PCRs match registry entry
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          entry=$(python3 scripts/check-proof-releases.py --get "$VERSION")
+          jq -n --argjson entry "$entry" --slurpfile pcrs target/eif/pcrs.json '
+            [
+              { field: "pcr0", built: $pcrs[0].PCR0, registry: $entry.pcr0 },
+              { field: "pcr1", built: $pcrs[0].PCR1, registry: $entry.pcr1 },
+              { field: "pcr2", built: $pcrs[0].PCR2, registry: $entry.pcr2 }
+            ] | map(select(.built != .registry))
+          ' > /tmp/pcr-mismatches.json
+          if [[ $(jq length /tmp/pcr-mismatches.json) -ne 0 ]]; then
+            echo "::error::EIF PCRs built from source do not match proof-releases.lock entry $VERSION:" >&2
+            jq . /tmp/pcr-mismatches.json >&2
+            exit 1
+          fi
+      - name: Upload EIF
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-eif
+          path: target/eif/world-chain-proof-nitro-enclave.eif
+          if-no-files-found: error
+          retention-days: 1
+
+  # Reuse the nightly image pipeline verbatim so release images are built the
+  # same way, tagged proofs-vX.Y.Z. Gated on measurement verification above.
+  images:
+    name: build release images
+    needs: [resolve, verify-vkeys, build-eif]
+    uses: ./.github/workflows/docker-proof.yml
+    with:
+      ref: ${{ needs.resolve.outputs.tag }}
+      image_tag: proofs-v${{ needs.resolve.outputs.version }}
+    secrets: inherit
+
+  release:
+    name: draft GitHub release
+    needs: [resolve, verify-vkeys, build-eif, images]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - name: Install pycryptodome
+        run: pip install pycryptodome==3.23.0
+      - name: Cross-check carrier image PCRs
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          PCR0: ${{ needs.images.outputs.pcr0 }}
+          PCR1: ${{ needs.images.outputs.pcr1 }}
+          PCR2: ${{ needs.images.outputs.pcr2 }}
+        run: |
+          entry=$(python3 scripts/check-proof-releases.py --get "$VERSION")
+          for i in 0 1 2; do
+            built=$(eval "echo \$PCR$i")
+            expected=$(jq -r ".pcr$i" <<< "$entry")
+            if [[ "$built" != "$expected" ]]; then
+              echo "::error::EIF carrier image PCR$i ($built) differs from registry ($expected) — EIF build is not reproducible." >&2
+              exit 1
+            fi
+          done
+      - name: Download EIF
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4
+        with:
+          name: release-eif
+          path: release-assets
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Assemble manifest.json
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          GIT_SHA: ${{ needs.images.outputs.git_sha }}
+        run: |
+          entry=$(python3 scripts/check-proof-releases.py --get "$VERSION")
+          images="{}"
+          for svc in sp1-worker proposer challenger defender prover-service nitro-worker nitro-enclave nitro-enclave-eif; do
+            ref="$REGISTRY/$IMAGE_NAME-$svc:proofs-v$VERSION"
+            digest=$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest.Digest}}' | jq -r .)
+            images=$(jq --arg svc "$svc" --arg d "$REGISTRY/$IMAGE_NAME-$svc@$digest" '. + {($svc): $d}' <<< "$images")
+          done
+          jq -n --argjson entry "$entry" --argjson images "$images" --arg sha "$GIT_SHA" \
+            '$entry + { git_sha: $sha, images: $images }' > release-assets/manifest.json
+          jq . release-assets/manifest.json
+      - name: Write release notes
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          entry=$(python3 scripts/check-proof-releases.py --get "$VERSION")
+          prev_tag=$(git tag -l 'proofs/v*' --sort=-v:refname | grep -vx "$TAG" | head -n1 || true)
+          {
+            echo "## Measurements"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            for f in aggregation_vkey range_vkey_commitment aggregation_elf_sha256 range_elf_sha256 pcr0 pcr1 pcr2 tee_image_id; do
+              echo "| $f | \`$(jq -r ".$f" <<< "$entry")\` |"
+            done
+            echo ""
+            if [[ -n "$prev_tag" ]]; then
+              prev_version="${prev_tag#proofs/v}"
+              prev=$(python3 scripts/check-proof-releases.py --get "$prev_version" 2>/dev/null || echo '{}')
+              changed=$(jq -n --argjson a "$entry" --argjson b "$prev" '
+                ["aggregation_vkey","range_vkey_commitment","pcr0","pcr1","pcr2","tee_image_id"]
+                  | map(select($a[.] != $b[.]))')
+              if [[ $(jq length <<< "$changed") -ne 0 ]]; then
+                echo "## ⚠️ Governance required (vs $prev_tag)"
+                echo ""
+                echo "Changed measurements: $(jq -r 'join(", ")' <<< "$changed")."
+                echo "Activation requires a new game implementation pinned to these values"
+                echo "(and PCR approval + enclave key registration if the tee_image_id changed)."
+              else
+                echo "Measurements unchanged since $prev_tag — no governance action required."
+              fi
+            else
+              echo "Initial proof release — governance must register these measurements before activation."
+            fi
+          } > notes.md
+          cat notes.md
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --draft \
+            --title "$TAG" \
+            --notes-file notes.md \
+            release-assets/manifest.json \
+            release-assets/world-chain-proof-nitro-enclave.eif

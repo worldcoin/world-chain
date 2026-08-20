@@ -2793,7 +2793,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
 dependencies = [
- "bit-vec 0.8.0",
+ "bit-vec",
 ]
 
 [[package]]
@@ -2801,15 +2801,6 @@ name = "bit-vec"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
-
-[[package]]
-name = "bit-vec"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "bitcoin-consensus-encoding"
@@ -9501,7 +9492,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
 dependencies = [
  "bit-set",
- "bit-vec 0.8.0",
+ "bit-vec",
  "bitflags 2.13.1",
  "num-traits",
  "rand 0.9.5",
@@ -9993,19 +9984,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f87cc11a0140b4b0da0ffc889885760c61b13672d80a908920b2c0df078fa14"
 dependencies = [
  "rayon",
-]
-
-[[package]]
-name = "rcgen"
-version = "0.14.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57f6d249aad744e274e682777a50283a225a32705394ee6d5fcc01efa25e4055"
-dependencies = [
- "ring",
- "rustls-pki-types",
- "time",
- "x509-parser",
- "yasna",
 ]
 
 [[package]]
@@ -19128,7 +19106,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-nitro-enclave"
-version = "2.4.2"
+version = "1.0.0"
 dependencies = [
  "alloy-contract",
  "alloy-primitives",
@@ -19146,12 +19124,9 @@ dependencies = [
  "num-bigint 0.4.8",
  "num-traits",
  "p384",
- "rand 0.8.7",
- "rcgen",
  "rkyv",
  "serde",
  "serde_bytes",
- "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.19",
  "tokio",
@@ -19245,6 +19220,7 @@ dependencies = [
  "strum 0.28.0",
  "thiserror 2.0.19",
  "tokio",
+ "toml",
  "tracing",
  "world-chain-proof-core",
  "world-chain-proof-kona-host",
@@ -19833,16 +19809,6 @@ name = "yansi"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
-
-[[package]]
-name = "yasna"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5f6765e852b9b4dc8e2a76843e4d64d1cea8e79bcde0b6901aea8e7c7f08282"
-dependencies = [
- "bit-vec 0.9.1",
- "time",
-]
 
 [[package]]
 name = "yoke"

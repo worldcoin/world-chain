@@ -2,11 +2,30 @@ name: docker-proof
 
 # Image-only path for the prover deployables: builds and pushes the prover docker
 # images to ghcr on merge to main (tag `nightly`) or via manual dispatch with a
-# chosen `image_tag` (e.g. `alpha-v0.1.0`). It does NOT cut a release — versioned
-# releases (manifest.json, signed binaries, EIF, vkeys) are cut by release-proof.yml
-# on `proof/v*` tag pushes once the services are ready.
-
 on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to build.
+        required: false
+        default: main
+        type: string
+      image_tag:
+        description: Image tag to publish.
+        required: false
+        default: nightly
+        type: string
+    outputs:
+      git_sha:
+        value: ${{ jobs.resolve-sha.outputs.full }}
+      short_sha:
+        value: ${{ jobs.resolve-sha.outputs.short }}
+      pcr0:
+        value: ${{ jobs.build-nitro-enclave-eif-image.outputs.pcr0 }}
+      pcr1:
+        value: ${{ jobs.build-nitro-enclave-eif-image.outputs.pcr1 }}
+      pcr2:
+        value: ${{ jobs.build-nitro-enclave-eif-image.outputs.pcr2 }}
   workflow_dispatch:
     inputs:
       ref:
@@ -21,6 +40,7 @@ on:
     branches: [main]
     paths:
       - "proofs/**"
+      - "proof-releases.lock"
       - "crates/chainspec/**"
       - "Cargo.toml"
       - "Cargo.lock"

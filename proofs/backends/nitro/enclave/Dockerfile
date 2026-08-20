@@ -43,11 +43,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
+# Build from the enclave's standalone workspace so its own Cargo.lock (not the
+# root workspace lock) pins every dependency version in the measured binary.
 RUN cargo build \
         --release \
         --locked \
+        --manifest-path proofs/backends/nitro/enclave/Cargo.toml \
         --bin world-chain-proof-nitro-enclave \
-        -p world-chain-proof-nitro-enclave \
         --features enclave
 
 # ---- runtime image (kept minimal so PCR0 stays stable) ---------------------
@@ -63,7 +65,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /src/target/release/world-chain-proof-nitro-enclave \
+COPY --from=builder /src/proofs/backends/nitro/enclave/target/release/world-chain-proof-nitro-enclave \
      /usr/local/bin/world-chain-proof-nitro-enclave
 
 ENV RUST_LOG=info
