@@ -2,7 +2,7 @@
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use alloy_primitives::B256;
+use alloy_primitives::{B256, keccak256};
 use alloy_provider::ProviderBuilder;
 use anyhow::{Context, Result};
 use backon::{ExponentialBuilder, Retryable};
@@ -280,6 +280,7 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
         args.pcr1.as_deref(),
         args.pcr2.as_deref(),
     )?;
+    let tee_image_id = keccak256(expected_pcrs.pcr0);
 
     // Self-register the enclave's generated signing key on-chain before leasing any jobs:
     // proofs signed by an unregistered key do not verify, so an unregistered worker must not
@@ -330,6 +331,7 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
     info!(
         prover_service = %args.prover_service_url,
         enclave_cid = args.enclave_cid,
+        %tee_image_id,
         submit_proof_retry_max_retries = args.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = args.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = args.submit_proof_retry_max_delay_ms,

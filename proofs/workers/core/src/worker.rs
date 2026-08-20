@@ -177,6 +177,8 @@ async fn run_worker<Q, B>(
             claimed = queue.get_next_proof(GetNextProofRequest {
                 backend: lane,
                 worker_id: config.worker_id.clone(),
+                verifier_id: backend.verifier_id(),
+                range_vkey_commitment: backend.range_vkey_commitment(),
             }) => claimed,
         };
 

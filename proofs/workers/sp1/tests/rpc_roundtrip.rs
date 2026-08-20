@@ -23,6 +23,14 @@ impl ClaimedProofJobHandler for MockBackend {
         ProofBackend::Sp1
     }
 
+    fn verifier_id(&self) -> B256 {
+        B256::repeat_byte(0xa1)
+    }
+
+    fn range_vkey_commitment(&self) -> Option<B256> {
+        Some(B256::repeat_byte(0xa2))
+    }
+
     async fn handle_claimed_job(&self, _job: ProofJob) -> anyhow::Result<ProofData> {
         Ok(ProofData::Sp1 {
             proof: Bytes::from_static(&[0xaa, 0xbb]),
@@ -74,6 +82,8 @@ async fn worker_completes_requested_proof_over_rpc() {
         root_claim: B256::repeat_byte(0x07),
         l2_block_number: 1_200,
         l1_head: B256::repeat_byte(0x11),
+        verifier_id: B256::repeat_byte(0xa1),
+        range_vkey_commitment: Some(B256::repeat_byte(0xa2)),
     };
     let response = requester
         .request_proof(request.clone())

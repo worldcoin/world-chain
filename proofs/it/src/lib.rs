@@ -689,6 +689,17 @@ impl ClaimedProofJobHandler for FakeProofBackend {
         self.lane
     }
 
+    fn verifier_id(&self) -> B256 {
+        match self.lane {
+            ProofBackend::Sp1 => AGGREGATION_VKEY,
+            ProofBackend::Nitro => TEE_IMAGE_ID,
+        }
+    }
+
+    fn range_vkey_commitment(&self) -> Option<B256> {
+        (self.lane == ProofBackend::Sp1).then_some(RANGE_VKEY_COMMITMENT)
+    }
+
     async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
         let request = &job.request;
         let id = request.id();

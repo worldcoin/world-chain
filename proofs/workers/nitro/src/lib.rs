@@ -22,7 +22,7 @@
 
 #![cfg(target_os = "linux")]
 
-use alloy_primitives::Bytes;
+use alloy_primitives::{B256, Bytes, keccak256};
 use alloy_sol_types::SolValue;
 use anyhow::{Context, Result, bail};
 use tracing::{debug, info};
@@ -70,6 +70,10 @@ where
 {
     fn lane(&self) -> ProofBackend {
         ProofBackend::Nitro
+    }
+
+    fn verifier_id(&self) -> B256 {
+        keccak256(self.config.expected_pcrs.pcr0)
     }
 
     async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {

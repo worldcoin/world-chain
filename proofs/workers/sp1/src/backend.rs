@@ -31,6 +31,10 @@ const NETWORK_REQUEST_RETRY_BACKOFFS: [Duration; 3] = [
 pub struct Sp1BackendConfig {
     /// Allow proving blocks newer than the finalized L2 head.
     pub allow_unfinalized: bool,
+    /// Aggregation-program verification key embedded in this worker.
+    pub aggregation_vkey: B256,
+    /// Range-program verification-key commitment embedded in this worker.
+    pub range_vkey_commitment: B256,
 }
 
 /// [`ClaimedProofJobHandler`] for the [`ProofBackend::Sp1`] lane: builds witnesses over RPC
@@ -67,6 +71,14 @@ where
 {
     fn lane(&self) -> ProofBackend {
         ProofBackend::Sp1
+    }
+
+    fn verifier_id(&self) -> B256 {
+        self.config.aggregation_vkey
+    }
+
+    fn range_vkey_commitment(&self) -> Option<B256> {
+        Some(self.config.range_vkey_commitment)
     }
 
     async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {

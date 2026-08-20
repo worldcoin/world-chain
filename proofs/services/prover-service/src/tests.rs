@@ -1,8 +1,8 @@
 use crate::{
     GetNextProofRequest, GetProofSessionRequest, LockId, ProofBackend, ProofData, ProofJobQueue,
-    ProofJobQueueError, ProofRequest, ProofRequestId, ProofRequester, ProofResponse, ProofStatus,
-    ProverService, ProverServiceConfig, RecordProofSessionRequest, RpcProverServiceClient,
-    SubmitProofRequest, SucceededProofResponse, start_rpc_server,
+    ProofJobQueueError, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
+    ProofResponse, ProofStatus, ProverService, ProverServiceConfig, RecordProofSessionRequest,
+    RpcProverServiceClient, SubmitProofRequest, SucceededProofResponse, start_rpc_server,
     types::{BackendSessionStatus, SessionType},
 };
 use alloy_primitives::{Address, B256, Bytes};
@@ -74,6 +74,9 @@ fn request(backend: ProofBackend, seed: u8) -> ProofRequest {
         root_claim: B256::with_last_byte(seed),
         l2_block_number: u64::from(seed) * 100,
         l1_head: B256::with_last_byte(seed.wrapping_add(1)),
+        verifier_id: B256::with_last_byte(seed.wrapping_add(2)),
+        range_vkey_commitment: (backend == ProofBackend::Sp1)
+            .then(|| B256::with_last_byte(seed.wrapping_add(3))),
     }
 }
 
@@ -103,10 +106,12 @@ fn worker_id() -> String {
     "test-worker".to_string()
 }
 
-fn get_next_proof_request(backend: ProofBackend) -> GetNextProofRequest {
+fn get_next_proof_request_for(request: &ProofRequest) -> GetNextProofRequest {
     GetNextProofRequest {
-        backend,
+        backend: request.backend,
         worker_id: worker_id(),
+        verifier_id: request.verifier_id,
+        range_vkey_commitment: request.range_vkey_commitment,
     }
 }
 
@@ -157,6 +162,11 @@ fn request_id_is_deterministic() {
     let mut different_l1_head = sp1.clone();
     different_l1_head.l1_head = B256::with_last_byte(0xff);
     assert_ne!(sp1.id(), different_l1_head.id());
+
+    let mut different_verifier_values = sp1.clone();
+    different_verifier_values.verifier_id = B256::with_last_byte(0xfe);
+    different_verifier_values.range_vkey_commitment = Some(B256::with_last_byte(0xfd));
+    assert_eq!(sp1.id(), different_verifier_values.id());
 }
 
 #[tokio::test]
@@ -180,7 +190,7 @@ async fn full_lifecycle_succeeds() {
     ));
 
     let locked = service
-        .get_next_proof(get_next_proof_request(ProofBackend::Nitro))
+        .get_next_proof(get_next_proof_request_for(&req))
         .await
         .unwrap()
         .locked_request
@@ -230,14 +240,95 @@ async fn duplicate_request_is_deduplicated() {
 }
 
 #[tokio::test]
+async fn worker_claims_only_matching_verifier_values() {
+    let Some(ctx) = service(test_config()).await else {
+        return;
+    };
+    let service = ctx.service;
+    let old = request(ProofBackend::Sp1, 1);
+    let new = request(ProofBackend::Sp1, 2);
+    service.request_proof(old.clone()).await.unwrap();
+    service.request_proof(new.clone()).await.unwrap();
+
+    let locked = service
+        .get_next_proof(get_next_proof_request_for(&new))
+        .await
+        .unwrap()
+        .locked_request
+        .expect("matching job");
+
+    assert_eq!(locked.request, new);
+}
+
+#[tokio::test]
+async fn sp1_range_vkey_commitment_must_match() {
+    let Some(ctx) = service(test_config()).await else {
+        return;
+    };
+    let service = ctx.service;
+    let req = request(ProofBackend::Sp1, 1);
+    service.request_proof(req.clone()).await.unwrap();
+    let mut worker = get_next_proof_request_for(&req);
+    worker.range_vkey_commitment = Some(B256::with_last_byte(0xff));
+
+    assert!(
+        service
+            .get_next_proof(worker)
+            .await
+            .unwrap()
+            .locked_request
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn nitro_image_id_must_match() {
+    let Some(ctx) = service(test_config()).await else {
+        return;
+    };
+    let service = ctx.service;
+    let req = request(ProofBackend::Nitro, 1);
+    service.request_proof(req.clone()).await.unwrap();
+    let mut worker = get_next_proof_request_for(&req);
+    worker.verifier_id = B256::with_last_byte(0xff);
+
+    assert!(
+        service
+            .get_next_proof(worker)
+            .await
+            .unwrap()
+            .locked_request
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn immutable_verifier_values_cannot_change_for_existing_request() {
+    let Some(ctx) = service(test_config()).await else {
+        return;
+    };
+    let service = ctx.service;
+    let req = request(ProofBackend::Sp1, 1);
+    let id = service.request_proof(req.clone()).await.unwrap().proof_id;
+    let mut mismatched = req;
+    mismatched.verifier_id = B256::with_last_byte(0xff);
+
+    assert!(matches!(
+        service.request_proof(mismatched).await,
+        Err(ProofRequestError::RequestMismatch(request_id)) if request_id == id
+    ));
+}
+
+#[tokio::test]
 async fn get_next_proof_on_empty_queue_returns_none() {
     let Some(ctx) = service(test_config()).await else {
         return;
     };
     let service = ctx.service;
+    let req = request(ProofBackend::Sp1, 0);
     assert!(
         service
-            .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
+            .get_next_proof(get_next_proof_request_for(&req))
             .await
             .unwrap()
             .locked_request
@@ -255,7 +346,7 @@ async fn stale_lock_is_rejected_and_reclaim_succeeds() {
     let id = service.request_proof(req.clone()).await.unwrap().proof_id;
 
     let first = service
-        .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
+        .get_next_proof(get_next_proof_request_for(&req))
         .await
         .unwrap()
         .locked_request
@@ -264,7 +355,7 @@ async fn stale_lock_is_rejected_and_reclaim_succeeds() {
     // Let the first lock expire so the job can be reclaimed.
     expire_proof_lock(&service, id, first.lock_id).await;
     let second = service
-        .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
+        .get_next_proof(get_next_proof_request_for(&req))
         .await
         .unwrap()
         .locked_request
@@ -299,7 +390,7 @@ async fn submit_proof_with_wrong_backend_is_rejected() {
     let req = request(ProofBackend::Sp1, 4);
     let id = service.request_proof(req.clone()).await.unwrap().proof_id;
     let locked = service
-        .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
+        .get_next_proof(get_next_proof_request_for(&req))
         .await
         .unwrap()
         .locked_request
@@ -335,10 +426,10 @@ async fn status_poller_marks_expired_exhausted_jobs_failed() {
     };
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 5);
-    let id = service.request_proof(req).await.unwrap().proof_id;
+    let id = service.request_proof(req.clone()).await.unwrap().proof_id;
 
     let first = service
-        .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
+        .get_next_proof(get_next_proof_request_for(&req))
         .await
         .unwrap()
         .locked_request
@@ -346,7 +437,7 @@ async fn status_poller_marks_expired_exhausted_jobs_failed() {
     expire_proof_lock(&service, id, first.lock_id).await;
 
     let second = service
-        .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
+        .get_next_proof(get_next_proof_request_for(&req))
         .await
         .unwrap()
         .locked_request
@@ -383,7 +474,7 @@ async fn status_poller_marks_expired_exhausted_jobs_failed() {
     // without status poller, this job is not claimable
     assert!(
         service
-            .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
+            .get_next_proof(get_next_proof_request_for(&req))
             .await
             .unwrap()
             .locked_request
@@ -433,7 +524,7 @@ async fn record_and_get_proof_session_round_trips() {
     let req = request(ProofBackend::Sp1, 5);
     let id = service.request_proof(req.clone()).await.unwrap().proof_id;
     let locked = service
-        .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
+        .get_next_proof(get_next_proof_request_for(&req))
         .await
         .unwrap()
         .locked_request
@@ -553,7 +644,7 @@ async fn rpc_end_to_end() {
     assert_eq!(client.proof_status(id).await.unwrap(), ProofStatus::Created);
 
     let locked = client
-        .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
+        .get_next_proof(get_next_proof_request_for(&req))
         .await
         .unwrap()
         .locked_request

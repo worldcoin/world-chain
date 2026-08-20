@@ -1,6 +1,7 @@
 //! `prover-cli`: submit ad-hoc test `prover_requestProof` calls against a running
-//! `prover-service`, for manually exercising a nitro-worker (or sp1-worker) deployment
-//! end to end without wiring up a full defender/challenger.
+//! `prover-service`, for manually exercising a nitro-worker deployment end to end without
+//! wiring up a full defender/challenger. This debug tool intentionally submits only Nitro jobs;
+//! SP1 queue requests are exercised through the defender and integration tests.
 //!
 //! Given an L2 RPC URL and an L1 RPC URL, this tool automatically computes:
 //! - the pre-state output root (informational; logged for context, not submitted), at
@@ -91,6 +92,10 @@ struct Cli {
     /// `WorldChainProofSystemGame` contract address the request nominally defends.
     #[arg(long, default_value = DEFAULT_GAME_ADDRESS)]
     game_address: Address,
+
+    /// Nitro PCR0 image identifier pinned by the target game.
+    #[arg(long, env = "TEE_IMAGE_ID")]
+    tee_image_id: B256,
 
     /// Poll `prover_getProof` until the request succeeds or fails.
     #[arg(long)]
@@ -188,6 +193,8 @@ async fn run(cli: Cli) -> Result<()> {
         root_claim,
         l2_block_number,
         l1_head,
+        verifier_id: cli.tee_image_id,
+        range_vkey_commitment: None,
     };
 
     let client = RpcProverServiceClient::new(&cli.prover_service_url)

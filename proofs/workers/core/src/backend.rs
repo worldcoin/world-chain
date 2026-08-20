@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use alloy_primitives::B256;
 use async_trait::async_trait;
 use world_chain_prover_service::{
     BackendSession, BackendSessionStatus, GetProofSessionRequest, LockId, ProofBackend, ProofData,
@@ -114,6 +115,14 @@ pub struct ProofJob {
 pub trait ClaimedProofJobHandler: Send + Sync + 'static {
     /// The queue lane this handler claims jobs from.
     fn lane(&self) -> ProofBackend;
+
+    /// Game-pinned verifier identifier supported by this handler.
+    fn verifier_id(&self) -> B256;
+
+    /// SP1 range-program vkey commitment supported by this handler.
+    fn range_vkey_commitment(&self) -> Option<B256> {
+        None
+    }
 
     /// Returns whether this worker should attempt to claim a job now.
     ///
