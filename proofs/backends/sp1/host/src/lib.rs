@@ -35,25 +35,60 @@ pub enum SuccinctProverError {
     /// Aggregation requires compressed range proofs for recursive verification.
     #[error("range proof was not in compressed mode")]
     NotCompressed,
+
+    /// The network request expired before a prover accepted it.
+    #[error("SP1 Network request {session_id} timed out during the auction")]
+    RequestAuctionTimedOut { session_id: String },
+
+    /// The network request exceeded its proof-generation deadline.
+    #[error("SP1 Network request {session_id} timed out")]
+    RequestTimedOut { session_id: String },
+
+    /// The network determined that the request cannot be executed.
+    #[error("SP1 Network request {session_id} is unexecutable")]
+    RequestUnexecutable { session_id: String },
+
+    /// The network determined that the request cannot be fulfilled.
+    #[error("SP1 Network request {session_id} is unfulfillable")]
+    RequestUnfulfillable { session_id: String },
+}
+
+impl SuccinctProverError {
+    /// Whether a fresh SP1 Network request may recover from this terminal session failure.
+    pub const fn should_resubmit(&self) -> bool {
+        matches!(
+            self,
+            Self::RequestAuctionTimedOut { .. } | Self::RequestTimedOut { .. }
+        )
+    }
+
+    /// Whether the external proving session has reached a terminal state.
+    pub const fn is_terminal_session(&self) -> bool {
+        matches!(
+            self,
+            Self::RequestAuctionTimedOut { .. }
+                | Self::RequestTimedOut { .. }
+                | Self::RequestUnexecutable { .. }
+                | Self::RequestUnfulfillable { .. }
+        )
+    }
 }
 
 /// Interface expected from a concrete SP1 prover backend.
 #[cfg(feature = "sp1")]
 #[async_trait]
 pub trait WorldSuccinctProver {
-    fn supports_persistent_sessions(&self) -> bool;
+    fn supports_persistent_sessions(&self) -> bool {
+        false
+    }
 
     async fn submit(
         &self,
         request: world_chain_proof_sp1_types::Sp1ProofRequest,
     ) -> anyhow::Result<String>;
 
-    async fn poll(
-        &self,
-        session_id: &str,
-    ) -> anyhow::Result<world_chain_proof_sp1_types::Sp1SessionStatus>;
-
-    async fn download(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues>;
+    /// Waits for a submitted session and returns its proof.
+    async fn wait(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues>;
 }
 
 /// Converts a raw compressed SP1 range proof into the artifact consumed by aggregation.
@@ -127,5 +162,40 @@ impl Sp1ProverKind {
 impl fmt::Display for Sp1ProverKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+#[cfg(all(test, feature = "sp1"))]
+mod tests {
+    use super::SuccinctProverError;
+
+    #[test]
+    fn only_network_timeouts_are_resubmitted() {
+        for error in [
+            SuccinctProverError::RequestAuctionTimedOut {
+                session_id: "auction".to_string(),
+            },
+            SuccinctProverError::RequestTimedOut {
+                session_id: "proof".to_string(),
+            },
+        ] {
+            assert!(error.is_terminal_session());
+            assert!(error.should_resubmit());
+        }
+
+        for error in [
+            SuccinctProverError::RequestUnexecutable {
+                session_id: "unexecutable".to_string(),
+            },
+            SuccinctProverError::RequestUnfulfillable {
+                session_id: "unfulfillable".to_string(),
+            },
+        ] {
+            assert!(error.is_terminal_session());
+            assert!(!error.should_resubmit());
+        }
+
+        assert!(!SuccinctProverError::NotCompressed.is_terminal_session());
+        assert!(!SuccinctProverError::NotCompressed.should_resubmit());
     }
 }
