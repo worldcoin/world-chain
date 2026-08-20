@@ -18,9 +18,10 @@
 #
 # REPRODUCIBILITY: the PCR measurements are a hash of the EIF contents, so this
 # build must be bit-for-bit reproducible for anyone to re-derive the registered
-# PCRs from source. Base images are pinned by digest and apt packages come from
-# a fixed snapshot.debian.org timestamp. When bumping either pin, expect the
-# PCRs to change and re-register them.
+# PCRs from source. Base images are pinned by digest, apt packages come from a
+# fixed snapshot.debian.org timestamp, and the final layer normalises file
+# timestamps and drops the timestamped apt/dpkg logs. When bumping any of those
+# pins, expect the PCRs to change and re-register them.
 
 # rust:1.95.0-bookworm
 FROM rust@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1 AS builder
@@ -77,3 +78,16 @@ ENV RUST_LOG=info
 ENV NITRO_VSOCK_PORT=5005
 
 ENTRYPOINT ["/usr/local/bin/world-chain-proof-nitro-enclave"]
+
+# ---- reproducibility normalisation (must stay the last layer) --------------
+# PCR2 hashes the user ramdisk linuxkit builds from this image's flattened
+# rootfs (and PCR0 covers it too), so anything in the rootfs that varies per
+# build rotates both. Two things do: apt and dpkg record wall-clock times in
+# their log *contents*, and apt/COPY stamp every file's mtime with the build
+# time, which cpio preserves. Bumping SOURCE_DATE_EPOCH rotates the PCRs, the
+# same as bumping DEBIAN_SNAPSHOT or the base-image digests.
+ARG SOURCE_DATE_EPOCH=1780272000
+RUN rm -rf /var/log/apt /var/log/dpkg.log /var/log/alternatives.log \
+    && find / -xdev \
+        ! -path /etc/hostname ! -path /etc/hosts ! -path /etc/resolv.conf \
+        -exec touch --no-dereference --date="@${SOURCE_DATE_EPOCH}" {} +
