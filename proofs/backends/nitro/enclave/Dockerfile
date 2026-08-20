@@ -59,6 +59,25 @@ RUN cargo build \
         --bin world-chain-proof-nitro-enclave \
         --features enclave
 
+# Fail the image build when the binary disagrees with measurements.lock, so no enclave image
+# can be produced whose measurements are not the recorded ones. `cargo xtask measure` passes
+# the expected digest; it passes MEASURE_BOOTSTRAP=1 only when it is generating the lock. A
+# bare `docker build` supplies neither and is rejected rather than silently unchecked.
+#
+# Deliberately in the builder stage: this layer never reaches the runtime image, so it cannot
+# perturb the rootfs the PCRs are taken over.
+ARG EXPECTED_BINARY_SHA256=""
+ARG MEASURE_BOOTSTRAP=0
+RUN if [ "$MEASURE_BOOTSTRAP" = "1" ]; then \
+        echo "MEASURE_BOOTSTRAP=1: not checking the enclave binary against measurements.lock"; \
+    elif [ -z "$EXPECTED_BINARY_SHA256" ]; then \
+        echo "EXPECTED_BINARY_SHA256 is unset; build via \`cargo xtask measure\`" >&2; \
+        exit 1; \
+    else \
+        echo "$EXPECTED_BINARY_SHA256  proofs/backends/nitro/enclave/target/release/world-chain-proof-nitro-enclave" \
+            | sha256sum -c -; \
+    fi
+
 # ---- runtime image (kept minimal so PCR0 stays stable) ---------------------
 # debian:bookworm-slim
 FROM debian@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb

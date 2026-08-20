@@ -69,14 +69,32 @@ pub fn run(args: Args) -> eyre::Result<()> {
     let out = root.join("target/measure");
     std::fs::create_dir_all(&out).wrap_err_with(|| format!("creating {}", out.display()))?;
 
+    let path = root.join(LOCK_PATH);
+    // Read the committed lock first when checking, so its digest can be handed to the image
+    // build and enforced there too, not just compared afterwards.
+    let committed = if args.check {
+        let text = std::fs::read_to_string(&path).wrap_err_with(|| {
+            format!(
+                "cannot read {}; run `cargo xtask measure` to generate it",
+                path.display()
+            )
+        })?;
+        Some(Lock::parse(&text)?)
+    } else {
+        None
+    };
+
     let built = Lock {
         version: SCHEMA_VERSION,
         sp1: measure_sp1(&root, &out)?,
-        nitro: measure_nitro(&root, &out)?,
+        nitro: measure_nitro(
+            &root,
+            &out,
+            committed.as_ref().map(|l| l.nitro.binary_sha256.as_str()),
+        )?,
     };
     built.validate()?;
 
-    let path = root.join(LOCK_PATH);
     if !args.check {
         std::fs::write(&path, built.render()?)
             .wrap_err_with(|| format!("writing {}", path.display()))?;
@@ -84,13 +102,7 @@ pub fn run(args: Args) -> eyre::Result<()> {
         return Ok(());
     }
 
-    let text = std::fs::read_to_string(&path).wrap_err_with(|| {
-        format!(
-            "cannot read {}; run `cargo xtask measure` to generate it",
-            path.display()
-        )
-    })?;
-    let committed = Lock::parse(&text)?;
+    let committed = committed.expect("read above when --check is set");
     let diff = committed.diff(&built);
     if diff.is_empty() {
         println!("{LOCK_PATH} is up to date");
@@ -145,10 +157,10 @@ fn measure_sp1(root: &Path, out: &Path) -> eyre::Result<Sp1> {
 
 /// Builds the enclave image and its EIF, and records both the PCRs and the cheap input
 /// digests a build can assert without producing an EIF.
-fn measure_nitro(root: &Path, out: &Path) -> eyre::Result<Nitro> {
+fn measure_nitro(root: &Path, out: &Path, expected_binary: Option<&str>) -> eyre::Result<Nitro> {
     require_linux_x86_64()?;
 
-    build_image(root, out)?;
+    build_image(root, out, expected_binary)?;
     let binary_sha256 = image_binary_sha256(out)?;
     let dockerfile_sha256 = sha256_file(&root.join(DOCKERFILE))?;
     let pcrs = build_eif(root, out)?;
@@ -170,13 +182,32 @@ fn measure_nitro(root: &Path, out: &Path) -> eyre::Result<Nitro> {
 /// `rewrite-timestamp` normalises every layer's timestamps, which is what keeps PCR0/PCR2
 /// stable across builds; it cannot be combined with an exporter that unpacks straight into
 /// the image store, hence the archive-then-load two-step.
-fn build_image(root: &Path, out: &Path) -> eyre::Result<()> {
+fn build_image(root: &Path, out: &Path, expected_binary: Option<&str>) -> eyre::Result<()> {
     let archive = out.join("enclave-image.tar");
+    // When checking, hand the recorded digest to the build so the image build itself rejects
+    // a binary that disagrees. When generating, say so explicitly — there is nothing to
+    // check against yet.
+    let (bootstrap, expected) = match expected_binary {
+        Some(digest) => ("0", digest),
+        None => ("1", ""),
+    };
     run_cmd(
         Command::new("docker")
             .current_dir(root)
             .env("SOURCE_DATE_EPOCH", SOURCE_DATE_EPOCH)
-            .args(["buildx", "build", "--build-arg"])
+            // EIFs are linux/amd64 only, so pin the platform rather than inheriting the
+            // host's: an arm64 build would silently produce a different binary and PCRs.
+            .args([
+                "buildx",
+                "build",
+                "--platform",
+                "linux/amd64",
+                "--build-arg",
+            ])
+            .arg(format!("MEASURE_BOOTSTRAP={bootstrap}"))
+            .arg("--build-arg")
+            .arg(format!("EXPECTED_BINARY_SHA256={expected}"))
+            .arg("--build-arg")
             .arg(format!("SOURCE_DATE_EPOCH={SOURCE_DATE_EPOCH}"))
             .arg("--output")
             .arg(format!(
