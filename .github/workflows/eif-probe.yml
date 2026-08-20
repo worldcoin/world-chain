@@ -1,0 +1,49 @@
+# Temporary diagnostic: build the enclave image twice from identical source and diff the
+# resulting rootfs entry-by-entry, to identify what makes PCR0/PCR2 non-reproducible.
+# Delete once the cause is fixed.
+name: eif-probe
+
+on:
+  push:
+    branches: ["scratch/eif-determinism"]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - name: Build twice and diff the rootfs
+        run: |
+          set -euo pipefail
+          for tag in a b; do
+            echo "::group::build $tag"
+            docker build --no-cache -t "probe:$tag" \
+              -f proofs/backends/nitro/enclave/Dockerfile .
+            echo "::endgroup::"
+            cid=$(docker create "probe:$tag")
+            docker export "$cid" | python3 scripts/rootfs-manifest.py > "/tmp/$tag.manifest"
+            docker rm "$cid" >/dev/null
+            echo "$tag entries: $(wc -l < "/tmp/$tag.manifest")"
+          done
+
+          echo "=== differing entries (name only) ==="
+          diff <(awk '{print $NF}' /tmp/a.manifest) <(awk '{print $NF}' /tmp/b.manifest) \
+            && echo "(entry set identical)"
+
+          echo "=== differing lines (full, first 80) ==="
+          if diff /tmp/a.manifest /tmp/b.manifest > /tmp/manifest.diff; then
+            echo "ROOTFS IDENTICAL — nondeterminism is in linuxkit/nitro-cli, not the image"
+          else
+            head -80 /tmp/manifest.diff
+            echo "--- total differing lines: $(grep -c '^[<>]' /tmp/manifest.diff) ---"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: rootfs-manifests
+          path: /tmp/*.manifest
