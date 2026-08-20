@@ -1431,7 +1431,7 @@ dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "h2 0.3.27",
- "h2 0.4.17",
+ "h2 0.4.18",
  "http 0.2.12",
  "http 1.5.0",
  "http-body 0.4.6",
@@ -2107,6 +2107,16 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "coset"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1eb98d5e9155e2cf7cd942c8b3033097d4563b6fb0a00b9caecb74669555c058"
+dependencies = [
+ "ciborium",
+ "ciborium-io",
+]
 
 [[package]]
 name = "cpufeatures"
@@ -2825,9 +2835,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.17"
+version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f877e75f39e9827ec50a572dd592684ac28c029578726c85f1b2aa6ab807449"
+checksum = "839c0e8a181239723652be9062bb56ca5bf5f64011f73b623f6f4fc59086a228"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -3075,7 +3085,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
- "h2 0.4.17",
+ "h2 0.4.18",
  "http 1.5.0",
  "http-body 1.1.0",
  "httparse",
@@ -7049,6 +7059,7 @@ dependencies = [
  "aws-nitro-enclaves-nsm-api",
  "base64 0.22.1",
  "ciborium",
+ "coset",
  "hex",
  "k256",
  "kona-proof",
@@ -7058,6 +7069,8 @@ dependencies = [
  "rand 0.8.7",
  "rcgen",
  "rkyv",
+ "rustls-pki-types",
+ "rustls-webpki 0.103.14",
  "serde",
  "serde_bytes",
  "serde_json",
