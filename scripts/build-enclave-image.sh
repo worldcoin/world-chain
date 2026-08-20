@@ -24,9 +24,16 @@ cd "$repo_root"
 # Keep in sync with SOURCE_DATE_EPOCH in the enclave Dockerfile; changing it rotates the PCRs.
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1780272000}"
 
+# `rewrite-timestamp` cannot be combined with an exporter that unpacks straight into the
+# image store, so write a docker-archive and load it in a second step.
+archive="$(mktemp -t enclave-image-XXXXXX).tar"
+trap 'rm -f "$archive"' EXIT
+
 docker buildx build \
   --build-arg "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" \
-  --output "type=docker,name=${tag},rewrite-timestamp=true" \
+  --output "type=docker,name=${tag},dest=${archive},rewrite-timestamp=true" \
   -f proofs/backends/nitro/enclave/Dockerfile \
   "$@" \
   .
+
+docker load -i "$archive"
