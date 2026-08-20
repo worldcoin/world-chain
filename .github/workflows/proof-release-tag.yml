@@ -1,0 +1,50 @@
+# Cuts the proofs/vX.Y.Z tag automatically when a merge to main advances
+# proof-releases.lock, then dispatches release-proof.yml on that tag.
+# (The explicit dispatch is required: tags pushed with GITHUB_TOKEN do not fire
+# `on: push` workflows.) Idempotent — an already-existing tag is a no-op, so
+# unrelated edits to the file never re-release.
+
+name: proof-release-tag
+
+on:
+  push:
+    branches: [main]
+    paths: ["proof-releases.lock"]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: proof-release-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: tag current proof release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - name: Install pycryptodome
+        run: PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install --user pycryptodome==3.23.0
+      - name: Create tag and dispatch release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/check-proof-releases.py
+          version=$(python3 scripts/check-proof-releases.py --current | jq -r '.version // empty')
+          if [[ -z "$version" ]]; then
+            echo "No current release in proof-releases.lock (latest_rc and latest_stable empty); nothing to tag."
+            exit 0
+          fi
+          tag="proofs/v$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            echo "$tag already exists; nothing to do."
+            exit 0
+          fi
+          git tag "$tag" "$GITHUB_SHA"
+          git push origin "refs/tags/$tag"
+          echo "Created $tag at $GITHUB_SHA; dispatching release-proof."
+          gh workflow run release-proof.yml --ref "$tag"

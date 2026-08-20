@@ -6,7 +6,7 @@ on:
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
-      - "Cargo.lock"
+      - "**/Cargo.lock"
       - "rust-toolchain.toml"
       - ".cargo/**"
       - ".config/nextest.toml"
@@ -19,7 +19,7 @@ on:
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
-      - "Cargo.lock"
+      - "**/Cargo.lock"
       - "rust-toolchain.toml"
       - ".cargo/**"
       - ".config/nextest.toml"
@@ -91,13 +91,17 @@ jobs:
           tool: nextest
       - name: tests
         run: mold -run just test --profile ci
+      # The enclave crate is a standalone workspace (see proofs/backends/nitro/enclave/Cargo.toml),
+      # so --workspace does not cover it.
+      - name: tests (nitro enclave workspace)
+        run: mold -run cargo nextest run --manifest-path proofs/backends/nitro/enclave/Cargo.toml --locked
 
   cargo-clippy:
     runs-on: arc-public-8xlarge-amd64-runner
     environment:
       name: dev
       deployment: false
-    timeout-minutes: 20
+    timeout-minutes: 30
     name: clippy
     env:
       RUSTC_WRAPPER: sccache
@@ -136,6 +140,11 @@ jobs:
         run: cargo +nightly-2026-07-01 fmt --all -- --check
       - name: clippy
         run: cargo +nightly-2026-07-01 clippy --workspace --all-targets --all-features -- -D warnings
+      # The enclave crate is a standalone workspace, not covered by --workspace.
+      - name: fmt (nitro enclave workspace)
+        run: cargo +nightly-2026-07-01 fmt --manifest-path proofs/backends/nitro/enclave/Cargo.toml --all -- --check
+      - name: clippy (nitro enclave workspace)
+        run: cargo +nightly-2026-07-01 clippy --manifest-path proofs/backends/nitro/enclave/Cargo.toml --all-targets --all-features -- -D warnings
 
   cargo-docs:
     runs-on: arc-public-8xlarge-amd64-runner

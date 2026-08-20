@@ -34,7 +34,7 @@ mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd)"
 
 echo "[1/3] Building enclave container image ($ENCLAVE_IMAGE_TAG)..."
-docker build -t "$ENCLAVE_IMAGE_TAG" -f proofs/backends/nitro/enclave/Dockerfile .
+scripts/build-enclave-image.sh "$ENCLAVE_IMAGE_TAG"
 
 echo "[2/3] Building nitro-cli $NITRO_CLI_VERSION..."
 nitro_cli_dir="$out_dir/aws-nitro-enclaves-cli-$NITRO_CLI_VERSION"

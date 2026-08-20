@@ -92,7 +92,7 @@ fn main() {
             program_dir,
             sp1_build::BuildArgs {
                 docker,
-                // Pin the linux/amd64 manifest that produced vkeys.json. The tag remains in the
+                // Pin the linux/amd64 manifest that produced the registry's vkeys. The tag remains in the
                 // reference for readability, while the digest prevents a mutable tag from
                 // silently rotating the guest ELFs and their on-chain vkeys.
                 tag:

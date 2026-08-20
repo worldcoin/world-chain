@@ -161,9 +161,10 @@ RUN profile_dir="${PROFILE}" && \
     if [ "${PROFILE}" = "release" ]; then profile_dir="release"; fi && \
     install -D "/app/target/${profile_dir}/${PROVER_BIN}" "/app/bin/${PROVER_BIN}"
 
-# Validate the bytes actually linked into the worker, not only the intermediate files.
+# Validate the bytes actually linked into the worker, not only the intermediate
+# files, against the registry's current release entry.
 RUN /app/bin/${PROVER_BIN} vkeys \
-    --check /app/proofs/backends/sp1/elfs/vkeys.json
+    --check-registry /app/proof-releases.lock
 
 FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime
 WORKDIR /app

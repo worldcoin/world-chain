@@ -89,6 +89,10 @@ struct Sp1VkeysArgs {
     /// Output path for the vkeys JSON. Printed to stdout when unset.
     #[arg(long)]
     output: Option<PathBuf>,
+    /// Fail unless the embedded measurements match the current release entry in
+    /// this registry (proof-releases.lock).
+    #[arg(long)]
+    check_registry: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -218,6 +222,19 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
 
 async fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
     let manifest = world_chain_proof_sp1_host::vkeys::embedded_vkey_manifest().await?;
+    if let Some(path) = &args.check_registry {
+        let expected = world_chain_proof_sp1_host::vkeys::registry_vkey_manifest(path)?;
+        if manifest != expected {
+            anyhow::bail!(
+                "embedded SP1 measurements do not match the current release in {}\nexpected: {expected:#?}\nactual: {manifest:#?}",
+                path.display()
+            );
+        }
+        println!(
+            "embedded SP1 measurements match the current release in {}",
+            path.display()
+        );
+    }
     let out = serde_json::to_string_pretty(&manifest)?;
 
     match &args.output {

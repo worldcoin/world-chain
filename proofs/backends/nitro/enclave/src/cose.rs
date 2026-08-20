@@ -124,7 +124,7 @@ mod tests {
         let signing_key = SigningKey::random(&mut rand::thread_rng());
         let signature: Signature = signing_key.sign(&reference_tbs(&protected, payload));
 
-        let doc = make_cose(&protected, payload, signature.to_bytes().as_slice());
+        let doc = make_cose(&protected, payload, &signature.to_bytes());
         let sign1 = parse_cose_sign1(&doc).unwrap();
 
         let verifying_key = signing_key.verifying_key();

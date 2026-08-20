@@ -1,0 +1,124 @@
+# Proof measurement gate: a PR cannot change what the proof system measures
+# (SP1 vkeys, enclave PCRs / tee_image_id) without committing to a new release
+# in proof-releases.lock. Measurement drift is detected by comparing
+# measurements rebuilt from source against the registry's current entry — never
+# by path guesses alone. This gate covers the registry file and the enclave
+# PCRs; the SP1 vkeys leg is vkeys.yml. Cut an entry with
+# `just proof-release --version X.Y.Z`.
+
+name: proof-gate
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - "proofs/**"
+      - "proof-releases.lock"
+      - "scripts/build-eif.sh"
+      - "scripts/check-proof-releases.py"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/proof-gate.yml"
+
+jobs:
+  # Registry file is well-formed, tee_image_id derives from pcr0, and released
+  # entries are append-only/immutable relative to the base branch.
+  check-registry:
+    name: validate proof-releases.lock
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - name: Install pycryptodome
+        run: PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install --user pycryptodome==3.23.0
+      - name: Validate
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if git show "origin/$BASE_REF:proof-releases.lock" > /tmp/base-releases.toml 2>/dev/null; then
+            python3 scripts/check-proof-releases.py --base /tmp/base-releases.toml
+          else
+            echo "proof-releases.lock does not exist on $BASE_REF; skipping append-only check."
+            python3 scripts/check-proof-releases.py
+          fi
+
+  # Cheap merge-base diff so the expensive EIF rebuild only runs when one of
+  # the enclave's actual measurement inputs changed. The input set is
+  # enumerable because the enclave is a standalone workspace with its own lock.
+  changes:
+    name: detect enclave input changes
+    runs-on: ubuntu-latest
+    outputs:
+      eif: ${{ steps.filter.outputs.eif }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Filter changed files
+        id: filter
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          base=$(git merge-base "origin/$BASE_REF" HEAD)
+          changed=$(git diff --name-only "$base" HEAD)
+          echo "Changed files:"; echo "$changed"
+          if grep -qE '^(proofs/backends/nitro/enclave/|proofs/core/|proofs/kona/client/|proofs/services/tx-signer/|proof-releases\.lock$|scripts/build-eif\.sh$|Cargo\.toml$)' <<< "$changed"; then
+            echo "eif=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eif=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Rebuild the EIF and require its PCRs to match the registry's current entry.
+  gate-eif:
+    name: EIF PCRs match current release
+    needs: changes
+    if: needs.changes.outputs.eif == 'true'
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - name: Install pycryptodome
+        run: PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install --user pycryptodome==3.23.0
+      - name: Build EIF
+        run: scripts/build-eif.sh target/eif
+      - name: Compare PCRs to registry
+        run: |
+          entry=$(python3 scripts/check-proof-releases.py --current)
+          if [[ "$entry" == "{}" ]]; then
+            echo "No current release in proof-releases.lock; skipping EIF gate."
+            exit 0
+          fi
+          built_pcr0=$(jq -r .PCR0 target/eif/pcrs.json)
+          built_pcr1=$(jq -r .PCR1 target/eif/pcrs.json)
+          built_pcr2=$(jq -r .PCR2 target/eif/pcrs.json)
+          if [[ "$built_pcr0" == "$(jq -r .pcr0 <<< "$entry")" \
+             && "$built_pcr1" == "$(jq -r .pcr1 <<< "$entry")" \
+             && "$built_pcr2" == "$(jq -r .pcr2 <<< "$entry")" ]]; then
+            echo "EIF PCRs match current release $(jq -r .version <<< "$entry")."
+            exit 0
+          fi
+          version=$(jq -r .version <<< "$entry")
+          image_id=$(python3 scripts/check-proof-releases.py --image-id "$built_pcr0")
+          {
+            echo "Enclave measurements changed but proof-releases.lock still points at $version."
+            echo "This is a governance event: commit a new release entry to this PR with"
+            echo "\`just proof-release --version X.Y.Z\` (Linux x86_64 + Docker)."
+            echo
+            echo "New measurements for reference:"
+            echo "pcr0 = \"$built_pcr0\""
+            echo "pcr1 = \"$built_pcr1\""
+            echo "pcr2 = \"$built_pcr2\""
+            echo "tee_image_id = \"$image_id\""
+          } >&2
+          echo "::error::EIF PCRs do not match the current proof-releases.lock entry ($version) — commit a new release entry." >&2
+          exit 1

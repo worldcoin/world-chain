@@ -109,20 +109,20 @@ prove *args='':
 proof-vkeys *args='':
     cargo run --release -p world-chain-prover-sp1 -- vkeys $@
 
-# Recompute vkeys from the embedded ELFs and update proofs/backends/sp1/elfs/vkeys.json.
-# Requires Docker and the SP1 toolchain (sp1up v6.3.1) for reproducible ELF builds.
-update-proof-vkeys:
-    cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-update.json
-    jq -S . /tmp/vkeys-update.json > proofs/backends/sp1/elfs/vkeys.json
-
-# Verify that the committed vkeys.json matches what the current source produces.
-# Uses jq -S to normalize key ordering before comparing, so the diff is not
-# sensitive to JSON insertion order. Used by CI. Fails if they differ.
+# Verify the SP1 measurements built from current source match the registry's
+# current release entry (proof-releases.lock). Used by CI. On a
+# mismatch, cut a new release entry with `just proof-release --version X.Y.Z`.
 verify-proof-vkeys:
-    cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-actual.json
-    jq -S . proofs/backends/sp1/elfs/vkeys.json > /tmp/vkeys-committed.json
-    jq -S . /tmp/vkeys-actual.json > /tmp/vkeys-actual-normalized.json
-    diff /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
+    cargo run --release -p world-chain-prover-sp1 -- vkeys --check-registry proof-releases.lock
+
+# Cut a proof release: rebuild the SP1 vkeys and the enclave EIF PCRs from
+# source, then append the proof-releases.lock entry and advance latest_rc (--stable
+# for latest_stable). Requires Linux x86_64 and Docker (EIF build).
+# Usage: just proof-release --version 1.0.0
+proof-release *args='':
+    SP1_BUILD_DOCKER=true cargo run --release -p world-chain-prover-sp1 -- vkeys --output target/proof-release-vkeys.json
+    scripts/build-eif.sh target/eif
+    python3 scripts/check-proof-releases.py "$@" --vkeys target/proof-release-vkeys.json --pcrs target/eif/pcrs.json
 
 # Generate CLI reference docs for the mdbook
 docs:
