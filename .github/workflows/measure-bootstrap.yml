@@ -1,0 +1,54 @@
+# Temporary: generate the first measurements.lock on a native linux/amd64 runner.
+# The values cannot be produced on an arm64 host (QEMU cannot run rustc), and they must come
+# from the environment every future `measure --check` runs in. Delete once the lock is committed.
+name: measure-bootstrap
+
+on:
+  push:
+    branches: ["scratch/measure-bootstrap"]
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: arc-public-8xlarge-amd64-runner
+    environment:
+      name: dev
+      deployment: false
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      AWS_REGION: us-east-1
+      RUSTC_WRAPPER: sccache
+      SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+      SCCACHE_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-07-01
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::348981876543:role/oidc/github-deploy
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@89e9040de88b577a072e3760aaf59f585da083af # v0.0.5
+      - name: Generate measurements.lock
+        env:
+          # Nothing to check against yet — this run is what produces the file.
+          WORLD_CHAIN_MEASURE_BOOTSTRAP: "1"
+        run: cargo xtask measure
+      - name: Show the generated lock
+        run: |
+          echo "=== measurements.lock ==="
+          cat measurements.lock
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: measurements-lock
+          path: measurements.lock
