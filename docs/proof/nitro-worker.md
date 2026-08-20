@@ -26,6 +26,30 @@ This document explains every layer.
 
 ---
 
+## Where the deployment recipes live
+
+The proof-system runbook is split across two repos, along the line of what needs cluster
+credentials:
+
+| Repo | Recipes | Needs |
+|---|---|---|
+| `world-chain` (this one) | `proof-deploy-nitro`, `proof-deploy-mocks`, `proof-deploy-system`, `proof-activate-system`, `proof-approve-pcrs`, `proof-certmanager-prewarm`, `proof-rollup-config-hash` | An L1/L2 RPC, forge/cast |
+| [`crypto-apps`](https://github.com/worldcoin/crypto-apps) | `proof-pcrs`, `proof-attestation`, `proof-chain-id`, `proof-verify-pcrs`, `proof-register-key`, `proof-setup` | An authenticated kubecontext |
+
+Measuring the running enclave and registering its signing key require vsock access, which
+only exists inside the worker pod — so those recipes live with the deployment topology in
+crypto-apps. `just proof-setup <env>` there drives the whole sequence, reading the cluster
+and then delegating each contract phase back here via `$WORLD_CHAIN_REPO`:
+
+```bash
+export WORLD_CHAIN_REPO=~/work/world-chain
+cd ~/work/crypto-apps && just dry_run=true proof-setup alphanet
+```
+
+PCR values are inputs to the recipes in this repo, never discovered by them — that
+separation is deliberate, since a recipe that both measures and approves cannot detect
+the PCR drift it exists to catch.
+
 ## Architecture
 
 ### The 2-Container Pod
