@@ -1,0 +1,30 @@
+[package]
+name = "world-chain-proof-nitro-register"
+description = "Host-side on-chain registration of a Nitro enclave's signing key."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# Talks to a running enclave over AF_VSOCK and submits `registerKey` to L1, so it is
+# host-side only. Kept out of `world-chain-proof-nitro-enclave` so the measured enclave
+# binary does not carry the alloy provider/signer stack in its dependency graph.
+[target.'cfg(target_os = "linux")'.dependencies]
+alloy-contract.workspace = true
+alloy-primitives.workspace = true
+alloy-provider = { workspace = true, features = ["reqwest", "reqwest-rustls-tls"] }
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+alloy-sol-types.workspace = true
+anyhow.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+world-chain-proof-nitro-enclave = { workspace = true, features = ["enclave"] }
+world-chain-proof-tx-signer.workspace = true

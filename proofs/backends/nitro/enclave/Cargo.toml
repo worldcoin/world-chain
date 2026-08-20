@@ -27,12 +27,6 @@ enclave = [
     "dep:tokio-vsock",
     "dep:tracing-subscriber",
     "dep:world-chain-proof-kona-client",
-    "dep:alloy-contract",
-    "dep:alloy-provider",
-    "dep:alloy-signer",
-    "dep:alloy-signer-local",
-    "dep:url",
-    "dep:world-chain-proof-tx-signer",
 ]
 
 [dependencies]
@@ -82,21 +76,6 @@ world-chain-proof-kona-client = { path = "../../../kona/client", default-feature
 # (k256 is in the top-level [dependencies] as a non-optional dep so it is
 # available to both the enclave-side signing code and the host-side
 # verification code in host.rs.)
-
-# On-chain registration (register module `submit` flow). Only used on Linux with the
-# `enclave` feature; optional + kept in the target table so non-Linux / non-enclave builds
-# don't pull them in.
-alloy-contract = { version = "=2.1.1", default-features = false, optional = true }
-alloy-provider = { version = "=2.1.1", default-features = false, features = [
-    "reqwest",
-    "reqwest-rustls-tls",
-], optional = true }
-alloy-signer = { version = "=2.1.1", default-features = false, optional = true }
-alloy-signer-local = { version = "=2.1.1", default-features = false, features = [
-    "mnemonic",
-], optional = true }
-url = { version = "2.5.7", optional = true }
-world-chain-proof-tx-signer = { path = "../../../services/tx-signer", default-features = false, optional = true }
 
 # Feature-gated bin support -------------------------------------------------
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"], optional = true }

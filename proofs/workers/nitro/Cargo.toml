@@ -24,6 +24,7 @@ world-chain-prover-service.workspace = true
 
 # Nitro prover (host-side, requires Linux + enclave feature)
 world-chain-proof-nitro-enclave = { workspace = true, features = ["enclave"] }
+world-chain-proof-nitro-register.workspace = true
 
 # Witness generation (shared with sp1-worker)
 world-chain-proof-kona-host.workspace = true
