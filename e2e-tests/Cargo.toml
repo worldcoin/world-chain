@@ -15,6 +15,7 @@ workspace = true
 world-chain-node.workspace = true
 world-chain-devnet.workspace = true
 world-chain-proof-protocol.workspace = true
+world-chain-proposer.workspace = true
 world-chain-test-utils = { workspace = true}
 world-chain-primitives.workspace = true
 world-chain-validator.workspace = true

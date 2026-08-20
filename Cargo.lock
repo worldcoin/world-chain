@@ -2155,20 +2155,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aws-nitro-enclaves-nsm-api"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "986ca4c3a91a67cadc5ae92b3dfe9de373c2b432bb2288eed90203343e9f47c4"
-dependencies = [
- "libc",
- "log",
- "nix 0.31.3",
- "serde",
- "serde_bytes",
- "serde_cbor",
-]
-
-[[package]]
 name = "aws-runtime"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7930,18 +7916,6 @@ dependencies = [
  "cfg-if",
  "libc",
  "memoffset 0.9.1",
-]
-
-[[package]]
-name = "nix"
-version = "0.31.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
-dependencies = [
- "bitflags 2.13.1",
- "cfg-if",
- "cfg_aliases",
- "libc",
 ]
 
 [[package]]
@@ -15239,9 +15213,9 @@ dependencies = [
 
 [[package]]
 name = "sp1-build"
-version = "6.1.0"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7321136acefff985b0fb201b84359d609451bbd0a63203d4b601eaabe28da14f"
+checksum = "b86f0b3b6f39976825b472e2967e212b4e36f6dc395c74076b25b2ed52c605dd"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -15732,9 +15706,9 @@ dependencies = [
 
 [[package]]
 name = "sp1-sdk"
-version = "6.1.0"
+version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349ca86c7a88456c9f0fa1c8869e0d35bb63d6c811dc9ad8337c90909ce532ec"
+checksum = "ac474619d83bd48d3bec8ffea7e620c6f490223a399f3ff8ad4826c146c25bef"
 dependencies = [
  "alloy-primitives",
  "alloy-signer 1.8.3",
@@ -19115,7 +19089,6 @@ dependencies = [
  "alloy-signer-local 2.1.1",
  "alloy-sol-types",
  "anyhow",
- "aws-nitro-enclaves-nsm-api",
  "base64 0.22.1",
  "ciborium",
  "hex",
@@ -19125,6 +19098,8 @@ dependencies = [
  "num-traits",
  "p384",
  "rkyv",
+ "rustls-pki-types",
+ "rustls-webpki 0.103.13",
  "serde",
  "serde_bytes",
  "sha2 0.10.9",
@@ -19637,6 +19612,7 @@ dependencies = [
  "world-chain-p2p",
  "world-chain-primitives",
  "world-chain-proof-protocol",
+ "world-chain-proposer",
  "world-chain-test-utils",
  "world-chain-validator",
 ]

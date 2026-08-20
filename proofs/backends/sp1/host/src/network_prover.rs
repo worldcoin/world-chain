@@ -1,24 +1,23 @@
 //! Range proofs are produced in `Compressed` mode so the aggregation guest can recursively
 //! verify them; the aggregation proof mode is configurable (Groth16 for on-chain verification).
 
+use std::time::Duration;
+
 use crate::{SuccinctProverError, WorldSuccinctProver};
 use alloy_primitives::{B256, U256};
-use anyhow::{Context, bail};
+use anyhow::Context;
 use async_trait::async_trait;
 pub use sp1_sdk::SP1ProofMode;
 use sp1_sdk::{
     HashableKey, NetworkProver, ProveRequest, Prover, ProvingKey, SP1Proof,
     SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
     network::{
-        NetworkClient, NetworkMode, get_default_rpc_url_for_mode,
-        proto::{GetProofRequestStatusResponse, types::FulfillmentStatus},
+        Error as NetworkError, NetworkClient, NetworkMode, get_default_rpc_url_for_mode,
         signer::NetworkSigner,
     },
 };
 use world_chain_proof_core::types::AggregationInputs;
-use world_chain_proof_sp1_types::{
-    AggregationProofRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
-};
+use world_chain_proof_sp1_types::{AggregationProofRequest, RangeProofRequest, Sp1ProofRequest};
 
 /// [`WorldSuccinctProver`] network implementation over the sp1-sdk network prover.
 pub struct NetworkSuccinctProver {
@@ -29,6 +28,8 @@ pub struct NetworkSuccinctProver {
     agg_mode: SP1ProofMode,
     limits: Option<NetworkProverLimits>,
     max_price_per_pgu: Option<u64>,
+    auction_timeout: Option<Duration>,
+    proof_timeout: Option<Duration>,
 }
 
 /// Upper bounds supplied to SP1 Network instead of estimating them by executing guests locally.
@@ -47,6 +48,19 @@ pub struct NetworkProverLimits {
     pub range: ProofLimits,
     /// Limits for the aggregation guest.
     pub aggregation: ProofLimits,
+}
+
+/// Optional request settings forwarded to the SP1 Network SDK.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NetworkProofRequestConfig {
+    /// Guest execution limits. When absent, the SDK estimates them locally.
+    pub limits: Option<NetworkProverLimits>,
+    /// Maximum auction price in PROVE base units per PGU.
+    pub max_price_per_pgu: Option<u64>,
+    /// Maximum time a request may remain unassigned. The SDK default applies when absent.
+    pub auction_timeout: Option<Duration>,
+    /// Overall proof-generation deadline. The SDK-derived default applies when absent.
+    pub proof_timeout: Option<Duration>,
 }
 
 /// Lightweight client for reading an account's SP1 Network credit balance.
@@ -142,16 +156,26 @@ impl NetworkSuccinctProver {
         agg_mode: SP1ProofMode,
         connection: NetworkConnection,
     ) -> anyhow::Result<Self> {
-        Self::from_connection_with_request_config(agg_mode, connection, None, None).await
+        Self::from_connection_with_network_config(
+            agg_mode,
+            connection,
+            NetworkProofRequestConfig::default(),
+        )
+        .await
     }
 
-    /// Creates the prover with optional execution limits and auction price ceiling.
-    pub async fn from_connection_with_request_config(
+    /// Creates the prover with optional SP1 Network request settings.
+    pub async fn from_connection_with_network_config(
         agg_mode: SP1ProofMode,
         connection: NetworkConnection,
-        limits: Option<NetworkProverLimits>,
-        max_price_per_pgu: Option<u64>,
+        request_config: NetworkProofRequestConfig,
     ) -> anyhow::Result<Self> {
+        let NetworkProofRequestConfig {
+            limits,
+            max_price_per_pgu,
+            auction_timeout,
+            proof_timeout,
+        } = request_config;
         let range_elf = world_chain_proof_sp1_elfs::range_elf();
         let agg_elf = world_chain_proof_sp1_elfs::aggregation_elf();
         let client =
@@ -174,6 +198,8 @@ impl NetworkSuccinctProver {
             agg_mode,
             limits,
             max_price_per_pgu,
+            auction_timeout,
+            proof_timeout,
         })
     }
 
@@ -190,6 +216,9 @@ impl NetworkSuccinctProver {
         }
         if let Some(max_price_per_pgu) = self.max_price_per_pgu {
             proof_request = proof_request.max_price_per_pgu(max_price_per_pgu);
+        }
+        if let Some(proof_timeout) = self.proof_timeout {
+            proof_request = proof_request.timeout(proof_timeout);
         }
 
         let backend_session_id = proof_request
@@ -227,6 +256,9 @@ impl NetworkSuccinctProver {
         if let Some(max_price_per_pgu) = self.max_price_per_pgu {
             proof_request = proof_request.max_price_per_pgu(max_price_per_pgu);
         }
+        if let Some(proof_timeout) = self.proof_timeout {
+            proof_request = proof_request.timeout(proof_timeout);
+        }
 
         let backend_session_id = proof_request
             .request()
@@ -234,21 +266,6 @@ impl NetworkSuccinctProver {
             .context("aggregation proving failed")?;
 
         Ok(backend_session_id.to_string())
-    }
-
-    /// Fetch the network session state and any proof returned by the SP1 Network.
-    pub async fn get_network_proof_status(
-        &self,
-        backend_session_id: &str,
-    ) -> anyhow::Result<(Sp1SessionStatus, Option<SP1ProofWithPublicValues>)> {
-        let proof_id = parse_proof_id(backend_session_id)?;
-        let (status, proof) = self
-            .client
-            .get_proof_status(proof_id)
-            .await
-            .context("failed to get network proof status")?;
-        let sp1_status = sp1_status(&status);
-        Ok((sp1_status, proof))
     }
 }
 
@@ -276,25 +293,42 @@ impl WorldSuccinctProver for NetworkSuccinctProver {
         }
     }
 
-    async fn poll(&self, session_id: &str) -> anyhow::Result<Sp1SessionStatus> {
-        let (sp1_status, _maybe_proof) = self.get_network_proof_status(session_id).await?;
-        Ok(sp1_status)
+    async fn wait(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
+        let proof_id = parse_proof_id(session_id)?;
+        self.client
+            // The request carries its immutable network deadline. Passing no additional local
+            // timeout keeps restart recovery anchored to that original deadline.
+            .wait_proof(proof_id, None, self.auction_timeout)
+            .await
+            .map_err(|error| map_network_wait_error(error, session_id))
     }
+}
 
-    async fn download(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
-        let (sp1_status, maybe_proof) = self.get_network_proof_status(session_id).await?;
-        match sp1_status {
-            Sp1SessionStatus::Completed => maybe_proof.ok_or_else(|| {
-                anyhow::anyhow!("network proof {session_id} is fulfilled but no proof was returned")
-            }),
-            Sp1SessionStatus::Running => {
-                bail!("network proof {session_id} is not fulfilled yet");
+fn map_network_wait_error(error: anyhow::Error, session_id: &str) -> anyhow::Error {
+    let Some(network_error) = error.downcast_ref::<NetworkError>() else {
+        return error.context(format!("waiting for SP1 Network request {session_id}"));
+    };
+
+    match network_error {
+        NetworkError::RequestAuctionTimedOut { .. } => {
+            SuccinctProverError::RequestAuctionTimedOut {
+                session_id: session_id.to_string(),
             }
-            Sp1SessionStatus::Failed(reason) => bail!("{reason}"),
-            Sp1SessionStatus::NotFound => {
-                bail!("network proof {session_id} was not found");
-            }
+            .into()
         }
+        NetworkError::RequestTimedOut { .. } => SuccinctProverError::RequestTimedOut {
+            session_id: session_id.to_string(),
+        }
+        .into(),
+        NetworkError::RequestUnexecutable { .. } => SuccinctProverError::RequestUnexecutable {
+            session_id: session_id.to_string(),
+        }
+        .into(),
+        NetworkError::RequestUnfulfillable { .. } => SuccinctProverError::RequestUnfulfillable {
+            session_id: session_id.to_string(),
+        }
+        .into(),
+        _ => error.context(format!("waiting for SP1 Network request {session_id}")),
     }
 }
 
@@ -305,20 +339,35 @@ fn parse_proof_id(proof_id: &str) -> anyhow::Result<B256> {
         .map_err(|e| anyhow::anyhow!("invalid network proof ID: {e}"))
 }
 
-/// Map an SP1 Network proof status response to the sp1 session status.
-fn sp1_status(status: &GetProofRequestStatusResponse) -> Sp1SessionStatus {
-    match FulfillmentStatus::try_from(status.fulfillment_status()) {
-        Ok(FulfillmentStatus::Fulfilled) => Sp1SessionStatus::Completed,
-        Ok(FulfillmentStatus::Unfulfillable) => Sp1SessionStatus::Failed(format!(
-            "proof unfulfillable, execution_status={}",
-            status.execution_status()
-        )),
-        Ok(FulfillmentStatus::Assigned)
-        | Ok(FulfillmentStatus::Requested)
-        | Ok(FulfillmentStatus::UnspecifiedFulfillmentStatus) => Sp1SessionStatus::Running,
-        Err(_) => Sp1SessionStatus::Failed(format!(
-            "unknown network proof fulfillment status: {}",
-            status.fulfillment_status()
-        )),
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_sdk_auction_timeout_to_resubmittable_error() {
+        let error = anyhow::Error::new(NetworkError::RequestAuctionTimedOut {
+            request_id: vec![1; 32],
+        });
+
+        let mapped = map_network_wait_error(error, "0x01");
+        let mapped = mapped
+            .downcast_ref::<SuccinctProverError>()
+            .expect("SDK timeout should map to a structured prover error");
+
+        assert!(matches!(
+            mapped,
+            SuccinctProverError::RequestAuctionTimedOut { session_id } if session_id == "0x01"
+        ));
+        assert!(mapped.should_resubmit());
+    }
+
+    #[test]
+    fn preserves_non_terminal_sdk_errors() {
+        let error = anyhow::Error::new(NetworkError::SimulationFailed);
+
+        let mapped = map_network_wait_error(error, "0x02");
+
+        assert!(mapped.downcast_ref::<NetworkError>().is_some());
+        assert!(mapped.downcast_ref::<SuccinctProverError>().is_none());
     }
 }

@@ -4,33 +4,20 @@ use eyre::eyre::eyre;
 use tokio::sync::watch;
 use world_chain_chainspec::{WorldChainHardfork, WorldChainHardforks};
 use world_chain_devnet::{
-    DevnetComponentKind, DevnetComponentStatus, HaSequencerConfig, ObservabilityConfig,
-    WorldDevnet, WorldDevnetBuilder, WorldDevnetPreset, ensure_dev_chain_id, is_docker_unavailable,
+    DevnetComponentKind, DevnetComponentStatus, WorldDevnet, WorldDevnetBuilder,
+    ensure_dev_chain_id,
 };
 use world_chain_test_utils::DEV_CHAIN_ID;
+
+use crate::it::utils::devnet::try_build_ha_devnet;
 
 #[ignore = "Does not run in CI"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn direct_sequencer_devnet_smoke() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let ha_config = HaSequencerConfig::default()
-        .with_sequencer_count(2)
-        .with_observability(ObservabilityConfig::default());
-
-    let mut devnet = match WorldDevnetBuilder::new()
-        .preset(WorldDevnetPreset::HaSequencer)
-        .ha_sequencer(ha_config)
-        .block_time(Duration::from_secs(1))
-        .build()
-        .await
-    {
-        Ok(devnet) => devnet,
-        Err(err) if is_docker_unavailable(&err) => {
-            eprintln!("skipping devnet smoke because Docker is unavailable: {err:#}");
-            return Ok(());
-        }
-        Err(err) => return Err(err),
+    let Some(mut devnet) = try_build_ha_devnet("devnet smoke").await? else {
+        return Ok(());
     };
 
     print_devnet_summary(&devnet);

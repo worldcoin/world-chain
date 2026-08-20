@@ -37,7 +37,7 @@ does not interrupt in-flight work.
 `NETWORK_RPC_URL` remains the optional override for the SP1 Network API itself. It is distinct from
 `SP1_NETWORK_L1_RPC_URL`.
 
-### SP1 Network execution limits
+### SP1 Network request configuration
 
 Network requests skip local guest execution by default and submit with separate upper bounds for
 the range and aggregation guests:
@@ -49,6 +49,8 @@ the range and aggregation guests:
 | `SP1_AGGREGATION_CYCLE_LIMIT` | `--sp1-aggregation-cycle-limit` | `7000000` |
 | `SP1_AGGREGATION_GAS_LIMIT` | `--sp1-aggregation-gas-limit` | `6500000` PGUs |
 | `SP1_MAX_PRICE_PER_PGU` | `--sp1-max-price-per-pgu` | SP1 Network default |
+| `SP1_AUCTION_TIMEOUT_SECONDS` | `--sp1-auction-timeout-seconds` | SP1 SDK default (30 seconds) |
+| `SP1_PROOF_TIMEOUT_SECONDS` | `--sp1-proof-timeout-seconds` | SP1 SDK derived deadline |
 
 These are execution safety ceilings, not the final auction charge. The gas limit still affects the
 request's worst-case authorization and balance check because the network multiplies it by the
@@ -58,7 +60,17 @@ with explicitly configured limit flags.
 
 `SP1_MAX_PRICE_PER_PGU` caps the auction price encoded in each range and aggregation request. The
 value uses PROVE base units (18 decimals) per PGU. For example, `50000000` is `0.05 PROVE/bPGU`.
-When omitted, the SP1 SDK uses the maximum price returned by the Succinct Network RPC.
+When omitted, the SP1 SDK applies its default 20% buffer to the market-based maximum price
+returned by the Succinct Network RPC.
+
+The auction timeout limits how long a request may remain unassigned. The proof timeout sets the
+request's overall network deadline and may be longer than four hours when configured explicitly;
+when omitted, the SDK derives a deadline from the gas limit and caps it at four hours.
+
+If either phase times out, the worker marks that request failed and resubmits after one, two, and
+five minutes. This three-resubmission budget applies to one worker attempt. The prover service
+separately bounds complete worker attempts, so a restarted or expired lease cannot retry forever.
+Completed range proofs are reused when only aggregation needs to be retried.
 
 ## Deposit PROVE
 

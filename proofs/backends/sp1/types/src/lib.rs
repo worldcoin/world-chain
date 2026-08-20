@@ -66,16 +66,3 @@ pub struct AggregationSessionRequest {
     /// Serialized compressed SP1 range proofs, ordered to match `transition_public_values`.
     pub range_proofs: Vec<Vec<u8>>,
 }
-
-/// Current status of a backend proving session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Sp1SessionStatus {
-    /// The backend session is still running.
-    Running,
-    /// The backend session completed successfully and the proof can be downloaded.
-    Completed,
-    /// The backend session failed with the given reason.
-    Failed(String),
-    /// The backend has no record of the session id.
-    NotFound,
-}

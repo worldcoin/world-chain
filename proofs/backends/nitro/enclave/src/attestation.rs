@@ -6,18 +6,15 @@
 //!
 //! 1. PCR / `user_data` invariants needed by the World fault proof flow.
 //! 2. The COSE_Sign1 P-384 signature against the leaf certificate's public key.
-//! 3. That the root certificate in the chain matches the hardcoded AWS Nitro root CA.
-//! 4. Certificate validity periods (not-before / not-after) for every cert in the chain.
+//! 3. An RFC 5280 certification path from the leaf to the AWS Nitro Root CA.
+//! 4. The keyUsage bits AWS requires, which `webpki` does not inspect.
 //! 5. Nonce freshness: the host supplies a per-request nonce that the NSM embeds in the
 //!    signed payload, preventing replay of captured attestation documents.
 
 use crate::{ExpectedPcrs, PCR_LEN, PcrDigest};
 use p384::ecdsa::{Signature, signature::Verifier as _};
-use std::collections::BTreeMap;
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// AWS Nitro Attestation PKI root CA
-// ──────────────────────────────────────────────────────────────────────────────────────
+use rustls_pki_types::{CertificateDer, SignatureVerificationAlgorithm, UnixTime};
+use webpki::{EndEntityCert, ExtendedKeyUsageValidator, KeyPurposeIdIter};
 
 /// DER-encoded AWS Nitro Attestation PKI root CA certificate.
 ///
@@ -27,20 +24,7 @@ use std::collections::BTreeMap;
 /// This constant is used to anchor the certificate chain validation in
 /// [`verify_cose_sign1_signature`]. The root certificate in the attestation document's
 /// `cabundle` field must match this value byte-for-byte.
-pub const AWS_NITRO_ROOT_CA_PEM: &str = r"-----BEGIN CERTIFICATE-----
-MIICETCCAZagAwIBAgIRAPkxdWgbkK/hHUbMtOTn+FYwCgYIKoZIzj0EAwMwSTEL
-MAkGA1UEBhMCVVMxDzANBgNVBAoMBkFtYXpvbjEMMAoGA1UECwwDQVdTMRswGQYD
-VQQDDBJhd3Mubml0cm8tZW5jbGF2ZXMwHhcNMTkxMDI4MTMyODA1WhcNNDkxMDI4
-MTQyODA1WjBJMQswCQYDVQQGEwJVUzEPMA0GA1UECgwGQW1hem9uMQwwCgYDVQQL
-DANBV1MxGzAZBgNVBAMMEmF3cy5uaXRyby1lbmNsYXZlczB2MBAGByqGSM49AgEG
-BSuBBAAiA2IABPwCVOumCMHzaHDimtqQvkY4MpJzbolL//Zy2YlES1BR5TSksfbb
-48C8WBoyt7F2Bw7eEtaaP+ohG2bnUs990d0JX28TcPQXCEPZ3BABIeTPYwEoCWZE
-h8l5YoQwTcU/9KNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUkCW1DdkF
-R+eWw5b6cp3PmanfS5YwDgYDVR0PAQH/BAQDAgGGMAoGCCqGSM49BAMDA2kAMGYC
-MQCjfy+Rocm9Xue4YnwWmNJVA44fA0P5W2OpYow9OYCVRaEevL8uO1XYru5xtMPW
-rfMCMQCi85sWBbJwKKXdS6BptQFuZbT73o/gBh1qUxl/nNr12UO8Yfwr6wPLb+6N
-IwLz3/Y=
------END CERTIFICATE-----";
+pub const AWS_NITRO_ROOT_CA_PEM: &str = include_str!("../res/aws_nitro_root_g1.pem");
 
 /// Lazy-decoded DER bytes of [`AWS_NITRO_ROOT_CA_PEM`].
 ///
@@ -57,10 +41,6 @@ fn aws_root_ca_der() -> Result<Vec<u8>, String> {
         .decode(b64)
         .map_err(|e| format!("AWS root CA PEM decode failed: {e}"))
 }
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Error types
-// ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Errors raised while validating an attestation document.
 #[derive(Debug, thiserror::Error)]
@@ -124,350 +104,73 @@ pub enum AttestationError {
     },
 }
 
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Parsed attestation doc
-// ──────────────────────────────────────────────────────────────────────────────────────
+/// AWS's own definition of the signed attestation payload, re-exported so callers work against
+/// the field set AWS declares rather than a local subset kept in step by hand.
+///
+/// `certificate` and `cabundle` are mandatory there, so a decoded document always carries a leaf.
+pub use aws_nitro_enclaves_nsm_api::api::AttestationDoc;
 
-/// Decodes the relevant subset of a Nitro attestation document.
-#[derive(Clone, Debug)]
-pub struct ParsedAttestationDoc {
-    /// `pcrs` map from PCR index to digest bytes.
-    pub pcrs: BTreeMap<u8, Vec<u8>>,
-    /// Optional `user_data` field. Present whenever the enclave passed one to `Request::Attestation`.
-    pub user_data: Option<Vec<u8>>,
-    /// `module_id` of the originating enclave.
-    pub module_id: Option<String>,
-    /// `digest` algorithm field (typically `"SHA384"`).
-    pub digest: Option<String>,
-    /// DER-encoded leaf certificate used to sign the COSE_Sign1 structure.
-    pub certificate: Option<Vec<u8>>,
-    /// DER-encoded CA bundle, root first. The last element issued `certificate`.
-    pub cabundle: Vec<Vec<u8>>,
-    /// Optional `public_key` field. Present when the enclave called `NsmRequest::Attestation`
-    /// with `public_key: Some(bytes)` — i.e., for [`EnclaveRequest::PublicKey`] responses.
-    /// The bytes are the uncompressed SEC1 encoding (`0x04 || X || Y`, 65 bytes) of the
-    /// enclave's ephemeral secp256k1 key.
-    ///
-    /// Use [`extract_nsm_public_key`] to obtain this value with a mandatory-presence check.
-    pub public_key: Option<Vec<u8>>,
-    /// Optional `nonce` field. Present when the host supplied a nonce in the request, which
-    /// the NSM embeds verbatim into the signed payload for replay protection.
-    pub nonce: Option<Vec<u8>>,
-}
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Parsing
-// ──────────────────────────────────────────────────────────────────────────────────────
-
-/// Parses a `COSE_Sign1` Nitro attestation document and returns the inner payload fields the
-/// host cares about.
+/// Parses a `COSE_Sign1` Nitro attestation document and returns the signed payload.
+///
+/// Decoding is `serde`-driven, so a `pcrs` entry with a non-integer key or non-bstr value fails
+/// the whole parse instead of being silently skipped.
 ///
 /// This does **not** verify the signature or certificate chain — call
 /// [`verify_cose_sign1_signature`] for full cryptographic verification.
-pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, AttestationError> {
-    // COSE_Sign1 layout: [protected, unprotected, payload, signature]
-    let cose: ciborium::value::Value =
-        ciborium::from_reader(doc).map_err(|err| AttestationError::Malformed(err.to_string()))?;
-    let array = match cose {
-        ciborium::value::Value::Array(a) => a,
-        // Tag 18 = COSE_Sign1 tag.
-        ciborium::value::Value::Tag(18, inner) => match *inner {
-            ciborium::value::Value::Array(a) => a,
-            _ => {
-                return Err(AttestationError::Malformed(
-                    "expected array under tag 18".into(),
-                ));
-            }
-        },
-        _ => {
-            return Err(AttestationError::Malformed(
-                "expected COSE_Sign1 array".into(),
-            ));
-        }
-    };
-    if array.len() != 4 {
-        return Err(AttestationError::Malformed(format!(
-            "expected 4-element COSE_Sign1 array, got {}",
-            array.len()
-        )));
-    }
-    let payload_bytes = match &array[2] {
-        ciborium::value::Value::Bytes(b) => b.clone(),
-        _ => {
-            return Err(AttestationError::Malformed(
-                "COSE_Sign1 payload is not a byte string".into(),
-            ));
-        }
-    };
-    let payload: ciborium::value::Value = ciborium::from_reader(payload_bytes.as_slice())
-        .map_err(|err| AttestationError::Malformed(format!("payload decode: {err}")))?;
-    let entries = match payload {
-        ciborium::value::Value::Map(m) => m,
-        _ => {
-            return Err(AttestationError::Malformed(
-                "attestation payload is not a CBOR map".into(),
-            ));
-        }
-    };
-
-    let mut pcrs: BTreeMap<u8, Vec<u8>> = BTreeMap::new();
-    let mut user_data: Option<Vec<u8>> = None;
-    let mut module_id: Option<String> = None;
-    let mut digest: Option<String> = None;
-    let mut certificate: Option<Vec<u8>> = None;
-    let mut cabundle: Vec<Vec<u8>> = Vec::new();
-    let mut public_key: Option<Vec<u8>> = None;
-    let mut nonce: Option<Vec<u8>> = None;
-
-    for (key, value) in entries {
-        let key_str = match key {
-            ciborium::value::Value::Text(t) => t,
-            _ => continue,
-        };
-        match key_str.as_str() {
-            "pcrs" => {
-                let entries = match value {
-                    ciborium::value::Value::Map(m) => m,
-                    _ => {
-                        return Err(AttestationError::Malformed(
-                            "pcrs field is not a map".into(),
-                        ));
-                    }
-                };
-                for (pcr_key, pcr_value) in entries {
-                    let idx: u8 = match pcr_key {
-                        ciborium::value::Value::Integer(i) => match u8::try_from(i) {
-                            Ok(idx) => idx,
-                            Err(_) => continue,
-                        },
-                        _ => continue,
-                    };
-                    let bytes = match pcr_value {
-                        ciborium::value::Value::Bytes(b) => b,
-                        _ => continue,
-                    };
-                    pcrs.insert(idx, bytes);
-                }
-            }
-            "user_data" => {
-                user_data = match value {
-                    ciborium::value::Value::Bytes(b) => Some(b),
-                    ciborium::value::Value::Null => None,
-                    _ => {
-                        return Err(AttestationError::Malformed(
-                            "user_data is not a byte string".into(),
-                        ));
-                    }
-                };
-            }
-            "module_id" => {
-                if let ciborium::value::Value::Text(t) = value {
-                    module_id = Some(t);
-                }
-            }
-            "digest" => {
-                if let ciborium::value::Value::Text(t) = value {
-                    digest = Some(t);
-                }
-            }
-            "certificate" => {
-                if let ciborium::value::Value::Bytes(b) = value {
-                    certificate = Some(b);
-                }
-            }
-            "cabundle" => {
-                if let ciborium::value::Value::Array(arr) = value {
-                    for item in arr {
-                        if let ciborium::value::Value::Bytes(b) = item {
-                            cabundle.push(b);
-                        }
-                    }
-                }
-            }
-            "public_key" => {
-                if let ciborium::value::Value::Bytes(b) = value {
-                    public_key = Some(b);
-                }
-            }
-            "nonce" => {
-                if let ciborium::value::Value::Bytes(b) = value {
-                    nonce = Some(b);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    Ok(ParsedAttestationDoc {
-        pcrs,
-        user_data,
-        module_id,
-        digest,
-        certificate,
-        cabundle,
-        public_key,
-        nonce,
-    })
+pub fn parse_attestation_doc(doc: &[u8]) -> Result<AttestationDoc, AttestationError> {
+    let sign1 = crate::cose::parse_cose_sign1(doc)
+        .map_err(|err| AttestationError::Malformed(err.to_string()))?;
+    // `parse_cose_sign1` rejects an absent payload, so this is always `Some`.
+    let payload_bytes = sign1
+        .payload
+        .ok_or_else(|| AttestationError::Malformed("COSE_Sign1 payload is absent".into()))?;
+    ciborium::from_reader(payload_bytes.as_slice())
+        .map_err(|err| AttestationError::Malformed(format!("payload decode: {err}")))
 }
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// COSE_Sign1 signature verification
-// ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Verifies the COSE_Sign1 signature on an AWS Nitro attestation document.
 ///
 /// # What this verifies
 ///
-/// 1. Parses the outer COSE_Sign1 envelope to extract `protected`, `payload`, and
-///    `signature` fields.
-/// 2. Extracts the DER-encoded leaf certificate from the payload's `certificate` field.
-/// 3. Extracts the P-384 public key from the leaf certificate.
-/// 4. Reconstructs the `Sig_Structure`: `CBOR(["Signature1", protected, b"", payload])`.
-/// 5. Verifies the P-384 / ES384 signature over the `Sig_Structure` bytes.
-/// 6. Checks that the root certificate in `cabundle` matches the hardcoded
-///    AWS Nitro Attestation PKI root CA.
-/// 7. Checks certificate validity periods (not-before / not-after) for the leaf and
-///    all intermediate certificates in the chain.
+/// 1. Decodes the COSE_Sign1 envelope via [`crate::cose::parse_cose_sign1`].
+/// 2. Validates an RFC 5280 path from the payload's leaf certificate to the pinned AWS Nitro
+///    root CA, plus the keyUsage bits AWS requires.
+/// 3. Verifies the ES384 signature over the `Sig_Structure`, using the leaf certificate's key.
 ///
-/// # Skipping for synthetic test documents
-///
-/// If the payload does not contain a `certificate` field (i.e., synthetic test documents),
-/// this function returns `Ok(())` without performing any cryptographic checks. Real Nitro
-/// attestation documents always include a certificate.
+/// A document without a `certificate` field is rejected: accepting one would let PCR and
+/// `user_data` checks pass with no cryptographic proof the values came from AWS hardware.
 pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
-    // ── 1. Parse outer COSE_Sign1 ───────────────────────────────────────────────────
-    let cose: ciborium::value::Value = ciborium::from_reader(doc)
+    let sign1 = crate::cose::parse_cose_sign1(doc)
         .map_err(|e| AttestationError::Malformed(format!("COSE parse: {e}")))?;
+    // `parse_cose_sign1` rejects an absent payload, so this is always `Some`.
+    let payload_bstr = sign1
+        .payload
+        .as_deref()
+        .ok_or_else(|| AttestationError::Malformed("COSE_Sign1 payload is absent".into()))?;
 
-    let array = match cose {
-        ciborium::value::Value::Array(a) => a,
-        ciborium::value::Value::Tag(18, inner) => match *inner {
-            ciborium::value::Value::Array(a) => a,
-            _ => {
-                return Err(AttestationError::Malformed(
-                    "expected array under tag 18".into(),
-                ));
-            }
-        },
-        _ => {
-            return Err(AttestationError::Malformed(
-                "expected COSE_Sign1 array".into(),
-            ));
-        }
-    };
-
-    if array.len() != 4 {
-        return Err(AttestationError::Malformed(format!(
-            "COSE_Sign1 must have 4 elements, got {}",
-            array.len()
-        )));
-    }
-
-    let protected_bstr = match &array[0] {
-        ciborium::value::Value::Bytes(b) => b.clone(),
-        _ => {
-            return Err(AttestationError::Malformed(
-                "COSE_Sign1 protected is not a bstr".into(),
-            ));
-        }
-    };
-    let payload_bstr = match &array[2] {
-        ciborium::value::Value::Bytes(b) => b.clone(),
-        _ => {
-            return Err(AttestationError::Malformed(
-                "COSE_Sign1 payload is not a bstr".into(),
-            ));
-        }
-    };
-    let signature_bytes = match &array[3] {
-        ciborium::value::Value::Bytes(b) => b.clone(),
-        _ => {
-            return Err(AttestationError::Malformed(
-                "COSE_Sign1 signature is not a bstr".into(),
-            ));
-        }
-    };
-
-    // ── 2. Parse payload to get certificate and cabundle ───────────────────────────
-    let payload_value: ciborium::value::Value = ciborium::from_reader(payload_bstr.as_slice())
+    let payload: AttestationDoc = ciborium::from_reader(payload_bstr)
         .map_err(|e| AttestationError::Malformed(format!("payload decode: {e}")))?;
 
-    let payload_map = match payload_value {
-        ciborium::value::Value::Map(m) => m,
-        _ => {
-            return Err(AttestationError::Malformed(
-                "attestation payload is not a CBOR map".into(),
-            ));
-        }
-    };
+    let cert_der = payload.certificate.into_vec();
+    let cabundle: Vec<Vec<u8>> = payload
+        .cabundle
+        .into_iter()
+        .map(serde_bytes::ByteBuf::into_vec)
+        .collect();
 
-    let mut cert_der: Option<Vec<u8>> = None;
-    let mut cabundle: Vec<Vec<u8>> = Vec::new();
-
-    for (k, v) in &payload_map {
-        match k {
-            ciborium::value::Value::Text(s) if s == "certificate" => {
-                if let ciborium::value::Value::Bytes(b) = v {
-                    cert_der = Some(b.clone());
-                }
-            }
-            ciborium::value::Value::Text(s) if s == "cabundle" => {
-                if let ciborium::value::Value::Array(arr) = v {
-                    for item in arr {
-                        if let ciborium::value::Value::Bytes(b) = item {
-                            cabundle.push(b.clone());
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // A valid Nitro attestation document must always carry a leaf certificate.
-    // Accepting a document without one would allow PCR / user_data checks to pass
-    // without any cryptographic proof that those values came from AWS hardware.
-    let cert_der = cert_der.ok_or_else(|| {
-        AttestationError::Malformed(
-            "attestation document missing required `certificate` field".into(),
-        )
-    })?;
-
-    // ── 3. Verify full certificate chain ─────────────────────────────────────────
-    // Walk leaf → intermediates → root, verifying each signature and anchoring
-    // the root to the hardcoded AWS Nitro Attestation PKI constant.
     verify_cert_chain(&cert_der, &cabundle)?;
 
-    // ── 4. Build Sig_Structure ─────────────────────────────────────────────────────
-    // RFC 8152 §4.4:
-    //   Sig_Structure = [
-    //     context:      "Signature1",
-    //     body_protected: protected_bstr,
-    //     external_aad: h'',
-    //     payload:      payload_bstr,
-    //   ]
-    let sig_structure = ciborium::value::Value::Array(vec![
-        ciborium::value::Value::Text("Signature1".into()),
-        ciborium::value::Value::Bytes(protected_bstr),
-        ciborium::value::Value::Bytes(vec![]), // external_aad
-        ciborium::value::Value::Bytes(payload_bstr),
-    ]);
-    let mut sig_struct_bytes = Vec::new();
-    ciborium::into_writer(&sig_structure, &mut sig_struct_bytes)
-        .map_err(|e| AttestationError::Malformed(format!("Sig_Structure encode: {e}")))?;
-
-    // ── 5. Extract P-384 public key from leaf certificate ─────────────────────────
     let verifying_key = extract_p384_key(&cert_der)?;
 
-    // ── 6. Verify ES384 signature ──────────────────────────────────────────────────
+    // `coset` rebuilds the RFC 8152 §4.4 `Sig_Structure` from the original `protected` bytes.
     // COSE ES384 uses the fixed (r‖s) 96-byte encoding for P-384 signatures.
-    let sig = Signature::from_slice(&signature_bytes)
-        .map_err(|e| AttestationError::CoseSignature(format!("signature decode: {e}")))?;
-    verifying_key
-        .verify(&sig_struct_bytes, &sig)
-        .map_err(|e| AttestationError::CoseSignature(format!("ES384 verify: {e}")))?;
-
-    Ok(())
+    sign1.verify_signature(&[], |signature_bytes, sig_struct_bytes| {
+        let sig = Signature::from_slice(signature_bytes)
+            .map_err(|e| AttestationError::CoseSignature(format!("signature decode: {e}")))?;
+        verifying_key
+            .verify(sig_struct_bytes, &sig)
+            .map_err(|e| AttestationError::CoseSignature(format!("ES384 verify: {e}")))
+    })
 }
 
 /// Extracts the P-384 verifying key from a DER-encoded X.509 certificate.
@@ -496,17 +199,10 @@ fn extract_p384_key(cert_der: &[u8]) -> Result<p384::ecdsa::VerifyingKey, Attest
 ///
 /// # Errors
 ///
-/// Returns [`AttestationError::Malformed`] if the document carries no leaf certificate,
-/// and [`AttestationError::CertChain`] if the certificate or its key cannot be parsed.
+/// Returns [`AttestationError::Malformed`] if the document does not decode, and
+/// [`AttestationError::CertChain`] if the certificate or its key cannot be parsed.
 pub fn leaf_cert_pubkey_xy(doc: &[u8]) -> Result<[u8; 96], AttestationError> {
-    let parsed = parse_attestation_doc(doc)?;
-    let cert_der = parsed.certificate.ok_or_else(|| {
-        AttestationError::Malformed(
-            "attestation document missing required `certificate` field".into(),
-        )
-    })?;
-
-    cert_pubkey_xy(&cert_der)
+    cert_pubkey_xy(&parse_attestation_doc(doc)?.certificate)
 }
 
 /// Extracts any certificate's P-384 public key as the uncompressed `x || y` coordinate pair
@@ -549,24 +245,49 @@ fn verify_root_ca_against(
     Ok(())
 }
 
-/// Checks that `now_secs` falls within `cert`'s not-before / not-after window.
-fn check_cert_validity(
-    cert: &x509_parser::prelude::X509Certificate<'_>,
-    label: &str,
-    now_secs: i64,
-) -> Result<(), AttestationError> {
-    use x509_parser::time::ASN1Time;
-    let now = ASN1Time::from_timestamp(now_secs).map_err(|_| {
-        AttestationError::CertExpired(format!("{label}: failed to construct current time"))
+/// Checks the pinned root's own validity window.
+fn check_root_validity(root_der: &[u8], now_secs: i64) -> Result<(), AttestationError> {
+    use x509_parser::prelude::{ASN1Time, FromDer as _, X509Certificate};
+
+    let (_, root) = X509Certificate::from_der(root_der)
+        .map_err(|e| AttestationError::CertChain(format!("pinned root CA parse: {e}")))?;
+
+    let now = ASN1Time::from_timestamp(now_secs).map_err(|e| {
+        AttestationError::CertExpired(format!("current time is unrepresentable: {e}"))
     })?;
-    if !cert.validity().is_valid_at(now) {
-        let v = cert.validity();
+
+    if !root.validity().is_valid_at(now) {
         return Err(AttestationError::CertExpired(format!(
-            "{label}: not_before={} not_after={}",
-            v.not_before, v.not_after
+            "pinned root CA outside its validity window (notBefore {}, notAfter {}, now {now_secs})",
+            root.validity().not_before.timestamp(),
+            root.validity().not_after.timestamp(),
         )));
     }
     Ok(())
+}
+
+/// AWS signs every Nitro certificate with ecdsa-with-SHA384; naming only that pins the chain
+/// away from weaker primitives.
+static NITRO_SIG_ALGS: &[&dyn SignatureVerificationAlgorithm] = &[webpki::ring::ECDSA_P384_SHA384];
+
+/// Nitro certificates carry no EKU, so no policy applies. `webpki` requires one to be supplied.
+struct AnyExtendedKeyUsage;
+
+impl ExtendedKeyUsageValidator for AnyExtendedKeyUsage {
+    fn validate(&self, _eku: KeyPurposeIdIter<'_, '_>) -> Result<(), webpki::Error> {
+        Ok(())
+    }
+}
+
+/// Keeps expiry distinguishable from the rest, so a stale document reads differently from a
+/// forged one. `Debug` names the `webpki::Error` variant; `Display` collapses several into one.
+fn map_path_error(err: webpki::Error) -> AttestationError {
+    match err {
+        webpki::Error::CertExpired { .. } | webpki::Error::CertNotValidYet { .. } => {
+            AttestationError::CertExpired(format!("{err:?}"))
+        }
+        other => AttestationError::CertChain(format!("path validation failed: {other:?}")),
+    }
 }
 
 /// Verifies the chain from `leaf_der` up to the AWS Nitro root CA.
@@ -599,95 +320,67 @@ fn verify_cert_chain_against(
     expected_root: &[u8],
     now_secs: i64,
 ) -> Result<(), AttestationError> {
+    // Shape check only: the anchor below comes from `expected_root`, never from the document.
+    verify_root_ca_against(cabundle, expected_root)?;
+    check_root_validity(expected_root, now_secs)?;
+
+    let root = CertificateDer::from(expected_root);
+    let anchor = webpki::anchor_from_trusted_cert(&root)
+        .map_err(|e| AttestationError::CertChain(format!("pinned root CA parse: {e:?}")))?;
+
+    // `cabundle[0]` is the root, passed as the anchor. Order of the rest is not load-bearing.
+    let intermediates: Vec<CertificateDer<'_>> = cabundle[1..]
+        .iter()
+        .map(|der| CertificateDer::from(der.as_slice()))
+        .collect();
+
+    let leaf_der_typed = CertificateDer::from(leaf_der);
+    let leaf = EndEntityCert::try_from(&leaf_der_typed)
+        .map_err(|e| AttestationError::CertChain(format!("leaf cert parse: {e:?}")))?;
+
+    let now = UnixTime::since_unix_epoch(std::time::Duration::from_secs(
+        u64::try_from(now_secs).map_err(|_| {
+            AttestationError::CertExpired("current time is before the Unix epoch".into())
+        })?,
+    ));
+
+    // Revocation is `None`: AWS publishes no CRL or OCSP for the Nitro Attestation PKI.
+    leaf.verify_for_usage(
+        NITRO_SIG_ALGS,
+        &[anchor],
+        &intermediates,
+        now,
+        AnyExtendedKeyUsage,
+        None,
+        None,
+    )
+    .map_err(map_path_error)?;
+
+    check_key_usage_policy(leaf_der, cabundle)
+}
+
+/// The keyUsage bits AWS requires ([§3.2.3.3]) and `webpki` never enforces.
+///
+/// [§3.2.3.3]: https://github.com/aws/aws-nitro-enclaves-nsm-api/blob/main/docs/attestation_process.md
+fn check_key_usage_policy(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
     use x509_parser::prelude::{FromDer as _, X509Certificate};
 
-    verify_root_ca_against(cabundle, expected_root)?;
-
-    // Every element of cabundle is a CA in the path, root included: its own pathLenConstraint
-    // bounds what may follow it. Only the signature and issuer checks are skipped for the root,
-    // which is self-signed and anchored above.
-    for i in 0..cabundle.len() {
-        let (_, cert) = X509Certificate::from_der(&cabundle[i])
+    for (i, der) in cabundle.iter().enumerate() {
+        let (_, cert) = X509Certificate::from_der(der)
             .map_err(|e| AttestationError::CertChain(format!("cabundle[{i}] parse: {e}")))?;
-        let label = format!("cabundle[{i}]");
-        check_cert_validity(&cert, &label, now_secs)?;
-        check_signature_algorithm(&cert, &label)?;
-        check_is_ca(&cert, &label)?;
-        // pathLenConstraint counts the CAs that follow this one, excluding the leaf.
-        check_path_len(&cert, &label, cabundle.len() - 1 - i)?;
-
-        if i == 0 {
-            continue;
-        }
-        let (_, issuer) = X509Certificate::from_der(&cabundle[i - 1])
-            .map_err(|e| AttestationError::CertChain(format!("cabundle[{}] parse: {e}", i - 1)))?;
-        check_issued_by(&cert, &issuer, &label, &format!("cabundle[{}]", i - 1))?;
-        cert.verify_signature(Some(issuer.public_key()))
-            .map_err(|e| {
-                AttestationError::CertChain(format!(
-                    "cabundle[{i}] signature invalid (issuer cabundle[{}]): {e}",
-                    i - 1
-                ))
-            })?;
+        check_ca_key_usage(&cert, &format!("cabundle[{i}]"))?;
     }
 
     let (_, leaf) = X509Certificate::from_der(leaf_der)
         .map_err(|e| AttestationError::CertChain(format!("leaf cert parse: {e}")))?;
-    check_cert_validity(&leaf, "leaf", now_secs)?;
-    check_signature_algorithm(&leaf, "leaf")?;
-    // A CA presented as the leaf would let any intermediate stand in for an enclave.
-    check_end_entity(&leaf, "leaf")?;
-    let last = cabundle.len() - 1;
-    let (_, leaf_issuer) = X509Certificate::from_der(&cabundle[last])
-        .map_err(|e| AttestationError::CertChain(format!("cabundle[{last}] parse: {e}")))?;
-    check_issued_by(&leaf, &leaf_issuer, "leaf", &format!("cabundle[{last}]"))?;
-    leaf.verify_signature(Some(leaf_issuer.public_key()))
-        .map_err(|e| AttestationError::CertChain(format!("leaf cert signature invalid: {e}")))?;
-
-    Ok(())
+    check_end_entity_policy(&leaf, "leaf")
 }
 
-/// Every AWS Nitro cert is signed with ecdsa-with-SHA384. Pinning it stops an algorithm
-/// substitution from steering verification onto a weaker primitive.
-///
-/// This pin is our policy, not an RFC requirement: RFC 5280 defines the `signatureAlgorithm`
-/// field but does not restrict which algorithm a CA may use.
-///
-/// See: [RFC 5280 §4.1.1.2 — signatureAlgorithm](https://datatracker.ietf.org/doc/html/rfc5280#section-4.1.1.2)
-fn check_signature_algorithm(
+/// Requires `keyCertSign` on a CA, and the extension itself — a CA with none would pass.
+fn check_ca_key_usage(
     cert: &x509_parser::prelude::X509Certificate<'_>,
     label: &str,
 ) -> Result<(), AttestationError> {
-    use x509_parser::oid_registry::OID_SIG_ECDSA_WITH_SHA384;
-    if cert.signature_algorithm.algorithm != OID_SIG_ECDSA_WITH_SHA384 {
-        return Err(AttestationError::CertChain(format!(
-            "{label}: unexpected signature algorithm {}",
-            cert.signature_algorithm.algorithm
-        )));
-    }
-    Ok(())
-}
-
-/// Requires basicConstraints CA:TRUE and, when keyUsage is present, keyCertSign. Without this
-/// a leaf certificate could be spliced in as an intermediate — the CVE-2021-3450 class.
-///
-/// See: [RFC 5280 §4.2.1.9 — Basic Constraints](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.9)
-/// See: [RFC 5280 §4.2.1.3 — Key Usage](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.3)
-fn check_is_ca(
-    cert: &x509_parser::prelude::X509Certificate<'_>,
-    label: &str,
-) -> Result<(), AttestationError> {
-    let bc = cert
-        .basic_constraints()
-        .map_err(|e| AttestationError::CertChain(format!("{label}: basicConstraints parse: {e}")))?
-        .ok_or_else(|| AttestationError::CertChain(format!("{label}: missing basicConstraints")))?;
-    if !bc.value.ca {
-        return Err(AttestationError::CertChain(format!(
-            "{label}: basicConstraints CA is not TRUE"
-        )));
-    }
-
-    // Required, not optional: a CA with no keyUsage at all would otherwise pass.
     let ku = cert
         .key_usage()
         .map_err(|e| AttestationError::CertChain(format!("{label}: keyUsage parse: {e}")))?
@@ -700,29 +393,20 @@ fn check_is_ca(
     Ok(())
 }
 
-/// Checks the end-entity ("target") certificate: `digitalSignature` asserted, and no
-/// `pathLenConstraint`, which only belongs on a CA.
+/// Requires `digitalSignature` on the leaf and no `pathLenConstraint`, which belongs on a CA.
 ///
-/// AWS marks `keyUsage` critical on every CA in the chain but *not* on the leaf, so
-/// criticality is deliberately not required here.
-///
-/// See: [AWS Nitro Enclaves NSM API — attestation process §3.2.3.3](https://github.com/aws/aws-nitro-enclaves-nsm-api/blob/main/docs/attestation_process.md)
-/// See: [RFC 5280 §4.2.1.3 — Key Usage](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.3)
-fn check_end_entity(
+/// Criticality is deliberately not required: AWS marks `keyUsage` critical on the CAs but not
+/// on the leaf. `webpki` tolerates `pathLenConstraint` here, so that check stays local.
+fn check_end_entity_policy(
     cert: &x509_parser::prelude::X509Certificate<'_>,
     label: &str,
 ) -> Result<(), AttestationError> {
-    if let Ok(Some(bc)) = cert.basic_constraints() {
-        if bc.value.ca {
-            return Err(AttestationError::CertChain(format!(
-                "{label}: end-entity cert asserts basicConstraints CA:TRUE"
-            )));
-        }
-        if bc.value.path_len_constraint.is_some() {
-            return Err(AttestationError::CertChain(format!(
-                "{label}: end-entity cert carries a pathLenConstraint"
-            )));
-        }
+    if let Ok(Some(bc)) = cert.basic_constraints()
+        && bc.value.path_len_constraint.is_some()
+    {
+        return Err(AttestationError::CertChain(format!(
+            "{label}: end-entity cert carries a pathLenConstraint"
+        )));
     }
 
     let ku = cert
@@ -736,49 +420,6 @@ fn check_end_entity(
     }
     Ok(())
 }
-
-/// `pathLenConstraint` caps how many CAs may follow this one in the path.
-///
-/// See: [RFC 5280 §4.2.1.9 — Basic Constraints](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.9)
-fn check_path_len(
-    cert: &x509_parser::prelude::X509Certificate<'_>,
-    label: &str,
-    following_cas: usize,
-) -> Result<(), AttestationError> {
-    if let Ok(Some(bc)) = cert.basic_constraints()
-        && let Some(max) = bc.value.path_len_constraint
-        && following_cas as u64 > max as u64
-    {
-        return Err(AttestationError::CertChain(format!(
-            "{label}: pathLenConstraint {max} exceeded by {following_cas} following CAs"
-        )));
-    }
-    Ok(())
-}
-
-/// Signature checks alone do not tie a cert to its issuer's identity. RFC 5280 calls this name
-/// chaining: users "MUST be prepared to process the issuer distinguished name and subject
-/// distinguished name ... to perform name chaining for certification path validation".
-///
-/// See: [RFC 5280 §4.1.2.4 — Issuer](https://datatracker.ietf.org/doc/html/rfc5280#section-4.1.2.4)
-/// See: [RFC 5280 §6.1.3 — Basic Certificate Processing](https://datatracker.ietf.org/doc/html/rfc5280#section-6.1.3)
-fn check_issued_by(
-    cert: &x509_parser::prelude::X509Certificate<'_>,
-    issuer: &x509_parser::prelude::X509Certificate<'_>,
-    label: &str,
-    issuer_label: &str,
-) -> Result<(), AttestationError> {
-    if cert.issuer() != issuer.subject() {
-        return Err(AttestationError::CertChain(format!(
-            "{label}: issuer does not match {issuer_label} subject"
-        )));
-    }
-    Ok(())
-}
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// High-level verification entry points
-// ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Extracts the `public_key` field from an NSM attestation document's CBOR payload.
 ///
@@ -801,6 +442,7 @@ pub fn extract_nsm_public_key(doc: &[u8]) -> Result<Vec<u8>, AttestationError> {
     let parsed = parse_attestation_doc(doc)?;
     parsed
         .public_key
+        .map(serde_bytes::ByteBuf::into_vec)
         .ok_or(AttestationError::MissingField("public_key"))
 }
 
@@ -846,7 +488,7 @@ pub fn parse_and_check_pcrs(
     doc: &[u8],
     expected_pcrs: &ExpectedPcrs,
     expected_user_data: &[u8],
-) -> Result<ParsedAttestationDoc, AttestationError> {
+) -> Result<AttestationDoc, AttestationError> {
     let parsed = parse_attestation_doc(doc)?;
 
     check_pcr(&parsed, 0, &expected_pcrs.pcr0)?;
@@ -876,7 +518,7 @@ pub fn parse_check_and_verify(
     doc: &[u8],
     expected_pcrs: &ExpectedPcrs,
     expected_user_data: &[u8],
-) -> Result<ParsedAttestationDoc, AttestationError> {
+) -> Result<AttestationDoc, AttestationError> {
     let parsed = parse_and_check_pcrs(doc, expected_pcrs, expected_user_data)?;
     verify_cose_sign1_signature(doc)?;
     Ok(parsed)
@@ -912,7 +554,7 @@ pub fn verify_nonce(doc: &[u8], expected: &[u8]) -> Result<(), AttestationError>
 pub fn verify_pcrs_only(
     doc: &[u8],
     expected_pcrs: &ExpectedPcrs,
-) -> Result<ParsedAttestationDoc, AttestationError> {
+) -> Result<AttestationDoc, AttestationError> {
     let parsed = parse_attestation_doc(doc)?;
     check_pcr(&parsed, 0, &expected_pcrs.pcr0)?;
     check_pcr(&parsed, 1, &expected_pcrs.pcr1)?;
@@ -920,12 +562,8 @@ pub fn verify_pcrs_only(
     Ok(parsed)
 }
 
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Private helpers
-// ──────────────────────────────────────────────────────────────────────────────────────
-
 fn check_pcr(
-    parsed: &ParsedAttestationDoc,
+    parsed: &AttestationDoc,
     index: u8,
     expected: &PcrDigest,
 ) -> Result<(), AttestationError> {
@@ -934,7 +572,7 @@ fn check_pcr(
     }
     let actual = parsed
         .pcrs
-        .get(&index)
+        .get(&usize::from(index))
         .ok_or(AttestationError::MissingField(match index {
             0 => "pcr0",
             1 => "pcr1",
@@ -951,53 +589,73 @@ fn check_pcr(
     Ok(())
 }
 
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Tests
-// ──────────────────────────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Carries every field AWS declares mandatory. `certificate` / `cabundle` are placeholders:
+    /// these documents exercise the PCR / `user_data` checks, not the chain.
     fn make_doc(pcrs: Vec<(u8, Vec<u8>)>, user_data: Option<Vec<u8>>) -> Vec<u8> {
-        let pcr_map: Vec<(ciborium::value::Value, ciborium::value::Value)> = pcrs
+        make_doc_inner(pcrs, user_data, true)
+    }
+
+    /// Same, minus the mandatory `certificate` field, which the typed decode must reject.
+    fn make_doc_without_certificate(
+        pcrs: Vec<(u8, Vec<u8>)>,
+        user_data: Option<Vec<u8>>,
+    ) -> Vec<u8> {
+        make_doc_inner(pcrs, user_data, false)
+    }
+
+    fn make_doc_inner(
+        pcrs: Vec<(u8, Vec<u8>)>,
+        user_data: Option<Vec<u8>>,
+        with_certificate: bool,
+    ) -> Vec<u8> {
+        use ciborium::value::Value as V;
+
+        let pcr_map: Vec<(V, V)> = pcrs
             .into_iter()
             .map(|(idx, bytes)| {
                 (
-                    ciborium::value::Value::Integer((idx as i128).try_into().unwrap()),
-                    ciborium::value::Value::Bytes(bytes),
+                    V::Integer((idx as i128).try_into().unwrap()),
+                    V::Bytes(bytes),
                 )
             })
             .collect();
-        let mut entries: Vec<(ciborium::value::Value, ciborium::value::Value)> = vec![
+
+        let mut entries: Vec<(V, V)> = vec![
+            (V::Text("pcrs".into()), V::Map(pcr_map)),
+            (V::Text("module_id".into()), V::Text("test-module".into())),
+            (V::Text("digest".into()), V::Text("SHA384".into())),
             (
-                ciborium::value::Value::Text("pcrs".into()),
-                ciborium::value::Value::Map(pcr_map),
+                V::Text("timestamp".into()),
+                V::Integer(1_785_790_194_000u64.into()),
             ),
             (
-                ciborium::value::Value::Text("module_id".into()),
-                ciborium::value::Value::Text("test-module".into()),
+                V::Text("cabundle".into()),
+                V::Array(vec![V::Bytes(vec![0xAAu8; 64])]),
             ),
             (
-                ciborium::value::Value::Text("digest".into()),
-                ciborium::value::Value::Text("SHA384".into()),
+                V::Text("user_data".into()),
+                match user_data {
+                    Some(bytes) => V::Bytes(bytes),
+                    None => V::Null,
+                },
             ),
         ];
-        entries.push((
-            ciborium::value::Value::Text("user_data".into()),
-            match user_data {
-                Some(bytes) => ciborium::value::Value::Bytes(bytes),
-                None => ciborium::value::Value::Null,
-            },
-        ));
-        let mut payload_bytes = Vec::new();
-        ciborium::into_writer(&ciborium::value::Value::Map(entries), &mut payload_bytes).unwrap();
+        if with_certificate {
+            entries.push((V::Text("certificate".into()), V::Bytes(vec![0xBBu8; 64])));
+        }
 
-        let cose = ciborium::value::Value::Array(vec![
-            ciborium::value::Value::Bytes(vec![]),
-            ciborium::value::Value::Map(vec![]),
-            ciborium::value::Value::Bytes(payload_bytes),
-            ciborium::value::Value::Bytes(vec![0u8; 96]),
+        let mut payload_bytes = Vec::new();
+        ciborium::into_writer(&V::Map(entries), &mut payload_bytes).unwrap();
+
+        let cose = V::Array(vec![
+            V::Bytes(vec![]),
+            V::Map(vec![]),
+            V::Bytes(payload_bytes),
+            V::Bytes(vec![0u8; 96]),
         ]);
         let mut out = Vec::new();
         ciborium::into_writer(&cose, &mut out).unwrap();
@@ -1019,8 +677,8 @@ mod tests {
             Some(vec![7u8; 32]),
         );
         let parsed = parse_and_check_pcrs(&doc, &non_placeholder_pcrs(3), &[7u8; 32]).unwrap();
-        assert_eq!(parsed.user_data.unwrap(), vec![7u8; 32]);
-        assert_eq!(parsed.module_id.unwrap(), "test-module");
+        assert_eq!(parsed.user_data.unwrap().into_vec(), vec![7u8; 32]);
+        assert_eq!(parsed.module_id, "test-module");
     }
 
     #[test]
@@ -1064,17 +722,59 @@ mod tests {
         assert!(matches!(err, AttestationError::UserDataMismatch { .. }));
     }
 
-    /// Documents without a `certificate` field must be rejected by the signature
-    /// verifier — accepting them would allow PCR/user_data checks to pass without
-    /// any AWS hardware proof.
+    /// A document without a `certificate` field would let PCR/`user_data` checks pass with no
+    /// AWS hardware proof. Being mandatory in AWS's schema, the decode now catches it first.
     #[test]
-    fn verify_cose_sign1_rejects_missing_certificate() {
+    fn rejects_missing_certificate() {
+        let doc = make_doc_without_certificate(
+            vec![(0, vec![3u8; 48]), (1, vec![3u8; 48]), (2, vec![3u8; 48])],
+            Some(vec![7u8; 32]),
+        );
+
+        for err in [
+            parse_attestation_doc(&doc).unwrap_err(),
+            verify_cose_sign1_signature(&doc).unwrap_err(),
+        ] {
+            assert!(
+                matches!(err, AttestationError::Malformed(_)),
+                "expected Malformed error, got: {err:?}"
+            );
+        }
+    }
+
+    /// A non-bstr `pcrs` value used to be skipped, leaving the PCR absent rather than rejected.
+    #[test]
+    fn rejects_malformed_pcr_entry() {
+        use ciborium::value::Value as V;
+
         let doc = make_doc(
             vec![(0, vec![3u8; 48]), (1, vec![3u8; 48]), (2, vec![3u8; 48])],
             Some(vec![7u8; 32]),
         );
-        // Must return an error when the certificate field is absent.
-        let err = verify_cose_sign1_signature(&doc).unwrap_err();
+        // Re-encode the payload with pcr1 replaced by a text string.
+        let sign1 = crate::cose::parse_cose_sign1(&doc).unwrap();
+        let mut payload: V = ciborium::from_reader(sign1.payload.unwrap().as_slice()).unwrap();
+        if let V::Map(entries) = &mut payload {
+            for (k, v) in entries.iter_mut() {
+                if *k == V::Text("pcrs".into())
+                    && let V::Map(pcrs) = v
+                {
+                    pcrs[1].1 = V::Text("not-a-digest".into());
+                }
+            }
+        }
+        let mut payload_bytes = Vec::new();
+        ciborium::into_writer(&payload, &mut payload_bytes).unwrap();
+        let cose = V::Array(vec![
+            V::Bytes(vec![]),
+            V::Map(vec![]),
+            V::Bytes(payload_bytes),
+            V::Bytes(vec![0u8; 96]),
+        ]);
+        let mut tampered = Vec::new();
+        ciborium::into_writer(&cose, &mut tampered).unwrap();
+
+        let err = parse_attestation_doc(&tampered).unwrap_err();
         assert!(
             matches!(err, AttestationError::Malformed(_)),
             "expected Malformed error, got: {err:?}"
@@ -1091,7 +791,11 @@ mod tests {
     fn root_ca_pem_decodes_successfully() {
         // Verify the PEM delimiters are intact.
         assert!(AWS_NITRO_ROOT_CA_PEM.starts_with("-----BEGIN CERTIFICATE-----"));
-        assert!(AWS_NITRO_ROOT_CA_PEM.ends_with("-----END CERTIFICATE-----"));
+        assert!(
+            AWS_NITRO_ROOT_CA_PEM
+                .trim_end()
+                .ends_with("-----END CERTIFICATE-----")
+        );
         // Verify the base64 body decodes to valid DER.
         assert!(
             aws_root_ca_der().is_ok(),
@@ -1158,13 +862,9 @@ mod tests {
         ]
     }
 
-    // ──────────────────────────────────────────────────────────────────────────────────
-    // Generated chains
-    //
     // AWS only ever issues well-formed chains, so the fixtures above cannot exercise a
     // malformed one. These build chains with rcgen instead: no expiry to work around, and
     // the shape is ours to break.
-    // ──────────────────────────────────────────────────────────────────────────────────
 
     use rcgen::{
         BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair, KeyUsagePurpose,
@@ -1228,6 +928,40 @@ mod tests {
         verify_cert_chain_against(&leaf, &cabundle, &root, gen_now()).unwrap();
     }
 
+    /// `webpki` never checks a trust anchor's own validity window, so an expired pinned root
+    /// has to be rejected by `check_root_validity` or it keeps validating chains forever.
+    #[test]
+    fn rejects_expired_root_anchor() {
+        let mut root = gen_cert("expired root", Some(BasicConstraints::Unconstrained), None);
+        root.params.not_before = rcgen::date_time_ymd(2000, 1, 1);
+        root.params.not_after = rcgen::date_time_ymd(2001, 1, 1);
+        root.der = root.params.self_signed(&root.key).unwrap().der().to_vec();
+
+        let inter = gen_cert(
+            "test intermediate",
+            Some(BasicConstraints::Constrained(0)),
+            Some(&root),
+        );
+        let leaf = gen_cert("test leaf", None, Some(&inter));
+        let cabundle = vec![root.der.clone(), inter.der];
+
+        let err =
+            verify_cert_chain_against(&leaf.der, &cabundle, &root.der, gen_now()).unwrap_err();
+        match err {
+            AttestationError::CertExpired(msg) => {
+                assert!(msg.contains("pinned root CA"), "got: {msg}")
+            }
+            other => panic!("expected CertExpired, got: {other:?}"),
+        }
+    }
+
+    /// The pinned AWS root must be inside its window at the timestamp the AWS fixtures use.
+    #[test]
+    fn pinned_aws_root_is_currently_valid() {
+        let root = aws_root_ca_der().unwrap();
+        check_root_validity(&root, gen_now()).unwrap();
+    }
+
     /// CVE-2021-3450 class: an end-entity cert must not be usable as an intermediate.
     #[test]
     fn rejects_leaf_used_as_intermediate() {
@@ -1240,7 +974,7 @@ mod tests {
             verify_cert_chain_against(&leaf.der, &cabundle, &root.der, gen_now()).unwrap_err();
         match err {
             AttestationError::CertChain(msg) => {
-                assert!(msg.contains("CA is not TRUE"), "got: {msg}")
+                assert!(msg.contains("EndEntityUsedAsCa"), "got: {msg}")
             }
             other => panic!("expected CertChain, got: {other:?}"),
         }
@@ -1280,13 +1014,15 @@ mod tests {
         }
     }
 
+    /// The constraint sits on an intermediate because webpki does not carry the trust anchor's
+    /// own basicConstraints into validation. The real AWS root asserts no `pathLenConstraint`.
     #[test]
     fn rejects_path_len_exceeded() {
         // pathlen:0 permits no further CAs, but a second intermediate follows.
-        let root = gen_cert("test root", Some(BasicConstraints::Constrained(0)), None);
+        let root = gen_cert("test root", Some(BasicConstraints::Unconstrained), None);
         let a = gen_cert(
             "inter a",
-            Some(BasicConstraints::Unconstrained),
+            Some(BasicConstraints::Constrained(0)),
             Some(&root),
         );
         let b = gen_cert("inter b", Some(BasicConstraints::Unconstrained), Some(&a));
@@ -1301,7 +1037,7 @@ mod tests {
         .unwrap_err();
         match err {
             AttestationError::CertChain(msg) => {
-                assert!(msg.contains("pathLenConstraint"), "got: {msg}")
+                assert!(msg.contains("PathLenConstraintViolated"), "got: {msg}")
             }
             other => panic!("expected CertChain, got: {other:?}"),
         }
@@ -1340,7 +1076,7 @@ mod tests {
         .unwrap_err();
         match err {
             AttestationError::CertChain(msg) => {
-                assert!(msg.contains("signature algorithm"), "got: {msg}")
+                assert!(msg.contains("UnsupportedSignatureAlgorithm"), "got: {msg}")
             }
             other => panic!("expected CertChain, got: {other:?}"),
         }
@@ -1382,7 +1118,7 @@ mod tests {
         .unwrap_err();
         match err {
             AttestationError::CertChain(msg) => {
-                assert!(msg.contains("issuer does not match"), "got: {msg}")
+                assert!(msg.contains("UnknownIssuer"), "got: {msg}")
             }
             other => panic!("expected CertChain, got: {other:?}"),
         }
@@ -1421,10 +1157,8 @@ mod tests {
 
     /// AWS §3.2.3.3: the target certificate must carry no `pathLenConstraint`.
     ///
-    /// rcgen ties `pathLenConstraint` to `IsCa::Ca`, so the only chain it can build here also
-    /// asserts CA:TRUE and trips that check first. The `pathLenConstraint` branch of
-    /// `check_end_entity` is therefore not reachable from a generated chain — asserting the
-    /// CA rejection is what this can honestly cover.
+    /// rcgen ties `pathLenConstraint` to `IsCa::Ca`, so any chain it builds here trips
+    /// `CaUsedAsEndEntity` first. Asserting the CA rejection is what this can honestly cover.
     #[test]
     fn rejects_leaf_asserting_ca() {
         let root = gen_cert("test root", Some(BasicConstraints::Unconstrained), None);
@@ -1447,7 +1181,9 @@ mod tests {
         )
         .unwrap_err();
         match err {
-            AttestationError::CertChain(msg) => assert!(msg.contains("CA:TRUE"), "got: {msg}"),
+            AttestationError::CertChain(msg) => {
+                assert!(msg.contains("CaUsedAsEndEntity"), "got: {msg}")
+            }
             other => panic!("expected CertChain, got: {other:?}"),
         }
     }
@@ -1519,19 +1255,13 @@ mod tests {
         );
     }
 
-    /// The root stays in place here, so the anchor check passes and something further down
-    /// has to catch it. AWS's descending pathlen values make it pathLenConstraint.
+    /// webpki builds the path itself, so a swapped bundle still verifies. The pinned anchor is
+    /// what makes the chain trustworthy, not the ordering.
     #[test]
-    fn rejects_real_aws_chain_with_reordered_intermediates() {
+    fn verifies_real_aws_chain_with_reordered_intermediates() {
         let mut swapped = aws_cabundle();
         swapped.swap(1, 2);
-        let err = verify_cert_chain_at(AWS_LEAF, &swapped, AWS_CHAIN_VALID_AT).unwrap_err();
-        match err {
-            AttestationError::CertChain(msg) => {
-                assert!(msg.contains("pathLenConstraint"), "got: {msg}")
-            }
-            other => panic!("expected CertChain, got: {other:?}"),
-        }
+        verify_cert_chain_at(AWS_LEAF, &swapped, AWS_CHAIN_VALID_AT).unwrap();
     }
 
     #[test]
