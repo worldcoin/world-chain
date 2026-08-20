@@ -199,7 +199,7 @@ fn sign_transition_public_values(
     // 65 bytes: 64-byte compact sig (r ‖ s) + 1-byte EVM recovery id (27 or 28).
     // EVM ecrecover expects v = recovery_id + 27.
     let mut sig_bytes = Vec::with_capacity(65);
-    sig_bytes.extend_from_slice(sig.to_bytes().as_slice());
+    sig_bytes.extend_from_slice(&sig.to_bytes());
     sig_bytes.push(rec_id.to_byte() + 27);
 
     Ok(sig_bytes)
