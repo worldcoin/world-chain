@@ -62,4 +62,7 @@ Bonds are custodied in `DelayedWETH` and paid out in two phases. The first `clai
 call unlocks the credit; the second, after the WETH delay, withdraws and transfers it. Both are
 gated on `AnchorStateRegistry.isGameFinalized`, since `claimCredit` calls `closeGame`, which reverts
 until the registry's finality airgap has elapsed. The bond manager keeps every discovered
-proposer-owned game tracked until it is resolved and its pending withdrawal is drained.
+proposer-owned game tracked until it is resolved and its pending withdrawal is drained. For games
+whose embedded proposal domain differs from the currently registered domain, it also submits any
+available positive or negative resolution because those games are no longer visible to the selected
+lineage proposer. Same-domain outcomes remain with the proposer to avoid racing retry creation.
