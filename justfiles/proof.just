@@ -88,10 +88,10 @@ proof-rollup-config-hash env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -n "${L2_RPC_URL:-}" ]; then
-        echo "Fetching rollup config from op-node at $L2_RPC_URL…" >&2
+        echo "Fetching rollup config from op-node at ${L2_RPC_URL}…" >&2
         cargo run -p world-chain-prover-nitro -- hash-rollup-config --l2-rpc "$L2_RPC_URL"
     elif [ -n "${ROLLUP_CONFIG_URL:-}" ]; then
-        echo "Downloading rollup config from $ROLLUP_CONFIG_URL…" >&2
+        echo "Downloading rollup config from ${ROLLUP_CONFIG_URL}…" >&2
         curl -sfSL "$ROLLUP_CONFIG_URL" -o /tmp/rollup.json
         cargo run -p world-chain-prover-nitro -- hash-rollup-config --rollup-config /tmp/rollup.json
     elif [ -n "${ROLLUP_CONFIG:-}" ]; then
@@ -103,7 +103,6 @@ proof-rollup-config-hash env="alphanet":
         echo "  which port-forwards to the op-node and sets L2_RPC_URL for you." >&2
         exit 1
     fi
-    echo "PCR2=$(echo "$MEASUREMENTS" | jq -r '.PCR2')"
 
 # Phase 1 – Deploy the Nitro attestation stack.
 [group('proof')]
@@ -292,7 +291,6 @@ proof-certmanager-prewarm env="alphanet":
     cd pkg/contracts && CERT_MANAGER_ADDRESS="$CERT_MANAGER_ADDRESS" PREWARM_PLAN="$PREWARM_PLAN" \
         PREWARM_SKIP_IF_UNDEPLOYED="$PREWARM_SKIP_IF_UNDEPLOYED" \
         forge script scripts/devnet/PrewarmCertManager.s.sol:PrewarmCertManager \
-            --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
             --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3b – Approve the PCR set on NitroAttestationVerifier.
