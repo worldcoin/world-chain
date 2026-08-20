@@ -2,6 +2,7 @@
 
 # Manage the native Rust HA devnet. Use `just devnet up -d` to run in the background and `just devnet down` to stop it.
 # Set BAL=1 to enable flashblocks block access lists on the sequencer nodes.
+[doc("Manage the native Rust HA devnet: up / down / status. BAL=1 enables block access lists.")]
 [group('devnet')]
 devnet command='up' *args='':
     #!/usr/bin/env bash

@@ -51,12 +51,14 @@ prove *args='':
 # `proofs/backends/sp1/elfs/build.rs` (sp1_build::build_program_with_args
 # with docker:true at the pinned SP1 toolchain tag), so just running
 # `cargo run` is enough — no separate ELF build step is required.
+[doc("Print the on-chain verification keys for the SP1 proof ELFs.")]
 [group('proof')]
 proof-vkeys *args='':
     cargo run --release -p world-chain-prover-sp1 -- vkeys $@
 
 # Recompute vkeys from the embedded ELFs and update proofs/backends/sp1/elfs/vkeys.json.
 # Requires Docker and the SP1 toolchain (sp1up v6.3.1) for reproducible ELF builds.
+[doc("Recompute vkeys from the embedded ELFs and update vkeys.json.")]
 [group('proof')]
 update-proof-vkeys:
     cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-update.json
@@ -65,6 +67,7 @@ update-proof-vkeys:
 # Verify that the committed vkeys.json matches what the current source produces.
 # Uses jq -S to normalize key ordering before comparing, so the diff is not
 # sensitive to JSON insertion order. Used by CI. Fails if they differ.
+[doc("Assert the committed vkeys.json matches what the source produces. Used by CI.")]
 [group('proof')]
 verify-proof-vkeys:
     cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-actual.json
@@ -79,6 +82,7 @@ verify-proof-vkeys:
 #   ROLLUP_CONFIG     – local file path to an existing rollup config JSON
 # For a deployed environment, `just proof-rollup-config-hash <env>` in crypto-apps
 # port-forwards to the op-node and calls this recipe with L2_RPC_URL set.
+[doc("Phase 0a - Compute the rollup config hash from an L2 RPC or config file.")]
 [group('proof')]
 proof-rollup-config-hash env="alphanet":
     #!/usr/bin/env bash
@@ -128,6 +132,7 @@ proof-deploy-nitro env="alphanet":
 # MockRootIdVerifier accepts every proof: never run this against a chain whose
 # withdrawals matter.
 # Phase 1b (devnet only) – Deploy the proof-lane test doubles (MOCKS, accept any proof).
+[doc("Phase 1b (devnet only) - Deploy proof-lane test doubles. MOCKS: accept any proof.")]
 [group('proof')]
 proof-deploy-mocks env="alphanet":
     #!/usr/bin/env bash
@@ -211,6 +216,7 @@ proof-deploy-system env="alphanet":
 
 # Activate the registered WIP-1006 implementation after validating its wiring and current anchor.
 # Set REQUIRE_FRESH_ANCHOR=true during a clean chain bootstrap.
+[doc("Activate the registered WIP-1006 implementation after validating its wiring.")]
 [group('proof')]
 proof-activate-system env="alphanet":
     #!/usr/bin/env bash
@@ -234,6 +240,7 @@ proof-activate-system env="alphanet":
 # ATTESTATION_HEX is an input: fetch it with `just proof-attestation <env>` in
 # crypto-apps, which execs into the worker pod (the only place with vsock access).
 # ATTESTATION_FILE is accepted as an alternative, since the hex is large.
+[doc("Phase 3a - Pre-warm CertManager with the AWS Nitro CA cert chain.")]
 [group('proof')]
 proof-certmanager-prewarm env="alphanet":
     #!/usr/bin/env bash
