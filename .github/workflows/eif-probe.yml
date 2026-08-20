@@ -1,6 +1,6 @@
 # Temporary diagnostic: build the enclave image twice from identical source and diff the
-# resulting rootfs entry-by-entry, to identify what makes PCR0/PCR2 non-reproducible.
-# Delete once the cause is fixed.
+# resulting rootfs entry-by-entry, to confirm PCR0/PCR2 are reproducible.
+# Delete once the fix has landed.
 name: eif-probe
 
 on:
@@ -20,27 +20,28 @@ jobs:
       - name: Build twice and diff the rootfs
         run: |
           set -euo pipefail
+          # `docker create`/`docker export` inject these per-container; linuxkit reads image
+          # layers and never sees them, so they are probe noise rather than PCR inputs.
+          injected='^(\.dockerenv|dev$|dev/|etc$|etc/hostname$|etc/hosts$|etc/resolv\.conf$|etc/mtab$)'
+
           for tag in a b; do
             echo "::group::build $tag"
-            docker build --no-cache -t "probe:$tag" \
-              -f proofs/backends/nitro/enclave/Dockerfile .
+            scripts/build-enclave-image.sh "probe:$tag" --no-cache
             echo "::endgroup::"
             cid=$(docker create "probe:$tag")
-            docker export "$cid" | python3 scripts/rootfs-manifest.py > "/tmp/$tag.manifest"
+            docker export "$cid" | python3 scripts/rootfs-manifest.py \
+              | awk -v skip="$injected" '$NF !~ skip' > "/tmp/$tag.manifest"
             docker rm "$cid" >/dev/null
             echo "$tag entries: $(wc -l < "/tmp/$tag.manifest")"
           done
 
-          echo "=== differing entries (name only) ==="
-          diff <(awk '{print $NF}' /tmp/a.manifest) <(awk '{print $NF}' /tmp/b.manifest) \
-            && echo "(entry set identical)"
-
-          echo "=== differing lines (full, first 80) ==="
           if diff /tmp/a.manifest /tmp/b.manifest > /tmp/manifest.diff; then
-            echo "ROOTFS IDENTICAL — nondeterminism is in linuxkit/nitro-cli, not the image"
+            echo "ROOTFS REPRODUCIBLE — image rootfs is bit-for-bit identical across builds"
           else
-            head -80 /tmp/manifest.diff
+            echo "ROOTFS STILL DIFFERS:"
+            head -60 /tmp/manifest.diff
             echo "--- total differing lines: $(grep -c '^[<>]' /tmp/manifest.diff) ---"
+            exit 1
           fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
