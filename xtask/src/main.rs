@@ -17,7 +17,9 @@ use tracing_subscriber::{
 
 mod devnet;
 mod docs;
+mod measure;
 mod preflight;
+mod release;
 mod stress;
 mod swarm;
 mod toolkit;
@@ -37,6 +39,10 @@ enum Command {
     Stress(stress::Args),
     /// Prove a PBH transaction
     Prove(toolkit::Args),
+    /// Rebuild the proof measurements and reconcile them with measurements.lock
+    Measure(measure::Args),
+    /// Promote the locked measurements into the append-only release log
+    Release(release::Args),
 }
 
 #[tokio::main]
@@ -68,6 +74,8 @@ async fn main() -> eyre::Result<()> {
             stress::run(args).await
         }
         Command::Prove(args) => toolkit::run(args).await,
+        Command::Measure(args) => measure::run(args),
+        Command::Release(args) => release::run(args),
     }
 }
 

@@ -333,6 +333,9 @@ dashmap = { version = "6.2.1", features = ["rayon"] }
 spin = "0.10"
 rkyv = { version = "0.8", features = ["hashbrown-0_15", "std"] }
 toml = "0.9"
+# Pinned to the version sp1-build depends on so `Metadata` unifies when
+# elfs/build.rs calls sp1_build::generate_elf_paths.
+cargo_metadata = "0.18"
 tower = "0.5.0"
 backon = { version = "1", default-features = false, features = ["std", "tokio-sleep"] }
 arbitrary = { version = "=1.4.2", features = ["derive"] }

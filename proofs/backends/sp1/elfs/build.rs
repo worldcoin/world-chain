@@ -87,27 +87,130 @@ fn main() {
         .expect("workspace root path must be valid UTF-8")
         .to_string();
 
-    let build = |program_dir: &str| {
-        sp1_build::build_program_with_args(
-            program_dir,
-            sp1_build::BuildArgs {
-                docker,
-                // Pin the linux/amd64 manifest that produced the registry's vkeys. The tag remains in the
-                // reference for readability, while the digest prevents a mutable tag from
-                // silently rotating the guest ELFs and their on-chain vkeys.
-                tag:
-                    "v6.3.1@sha256:7c1c8201de6f63e3f1fb9075bd9a67a4c5fc8c2d546d11a5ff71587bb51e6eb3"
-                        .to_string(),
-                ignore_rust_version: true,
-                locked: true,
-                workspace_directory: Some(workspace_root.clone()),
-                ..Default::default()
-            },
+    let build_args = || sp1_build::BuildArgs {
+        docker,
+        // Pin the linux/amd64 manifest that produced the registry's vkeys. The tag remains in the
+        // reference for readability, while the digest prevents a mutable tag from
+        // silently rotating the guest ELFs and their on-chain vkeys.
+        tag: "v6.3.1@sha256:7c1c8201de6f63e3f1fb9075bd9a67a4c5fc8c2d546d11a5ff71587bb51e6eb3"
+            .to_string(),
+        ignore_rust_version: true,
+        locked: true,
+        workspace_directory: Some(workspace_root.clone()),
+        ..Default::default()
+    };
+
+    let lock_path = std::path::Path::new(&workspace_root).join("measurements.lock");
+    println!("cargo:rerun-if-changed={}", lock_path.display());
+    println!("cargo:rerun-if-env-changed=WORLD_CHAIN_MEASURE_BOOTSTRAP");
+
+    // `cargo xtask measure` is what writes measurements.lock, and it links this crate, so it
+    // cannot also require the file to already exist and agree. This is the only way to build
+    // without the check, it has to be asked for explicitly, and it is set by `measure`
+    // itself — a missing lock in any other build is a hard error, not a silent skip.
+    let expected = if std::env::var_os("WORLD_CHAIN_MEASURE_BOOTSTRAP").is_some() {
+        println!(
+            "cargo:warning=WORLD_CHAIN_MEASURE_BOOTSTRAP set: not checking guest ELFs against measurements.lock"
         );
+        None
+    } else {
+        Some(ExpectedElfDigests::load(&lock_path))
     };
 
     // Paths are relative to this build script's CARGO_MANIFEST_DIR
     // (proofs/backends/sp1/elfs).
-    build("../programs/range-ethereum");
-    build("../programs/aggregation");
+    for (program_dir, field) in [
+        ("../programs/range-ethereum", "range_sha256"),
+        ("../programs/aggregation", "aggregation_sha256"),
+    ] {
+        let args = build_args();
+        sp1_build::build_program_with_args(program_dir, args);
+        if let Some(expected) = &expected {
+            assert_elf_matches_lock(program_dir, &build_args(), field, expected);
+        }
+    }
+}
+
+/// The `sp1.elf` digests recorded in `measurements.lock`.
+struct ExpectedElfDigests {
+    aggregation_sha256: String,
+    range_sha256: String,
+}
+
+impl ExpectedElfDigests {
+    fn load(path: &std::path::Path) -> Self {
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| {
+            panic!(
+                "cannot read {}: {e}\n\
+                 The guest ELFs are measured against it. Run `cargo xtask measure` to generate it.",
+                path.display()
+            )
+        });
+        let doc: toml::Value = toml::from_str(&text)
+            .unwrap_or_else(|e| panic!("{} is not valid TOML: {e}", path.display()));
+        let get = |field: &str| -> String {
+            doc.get("sp1")
+                .and_then(|sp1| sp1.get("elf"))
+                .and_then(|elf| elf.get(field))
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| {
+                    panic!("{}: missing sp1.elf.{field}", path.display());
+                })
+                .to_string()
+        };
+        Self {
+            aggregation_sha256: get("aggregation_sha256"),
+            range_sha256: get("range_sha256"),
+        }
+    }
+
+    fn field(&self, name: &str) -> &str {
+        match name {
+            "aggregation_sha256" => &self.aggregation_sha256,
+            "range_sha256" => &self.range_sha256,
+            other => panic!("unknown ELF digest field {other}"),
+        }
+    }
+}
+
+/// Fails the build when a freshly compiled guest ELF does not match `measurements.lock`.
+///
+/// The vkeys are a deterministic function of the ELF, so matching the ELF digest is what
+/// makes it impossible to produce a guest whose vkey disagrees with the recorded one —
+/// without paying for an SP1 setup pass on every build.
+fn assert_elf_matches_lock(
+    program_dir: &str,
+    args: &sp1_build::BuildArgs,
+    field: &str,
+    expected: &ExpectedElfDigests,
+) {
+    use sha2::{Digest, Sha256};
+
+    let manifest = std::path::Path::new(program_dir).join("Cargo.toml");
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(&manifest)
+        .exec()
+        .unwrap_or_else(|e| panic!("cargo metadata for {}: {e}", manifest.display()));
+    let elf_paths = sp1_build::generate_elf_paths(&metadata, Some(args))
+        .unwrap_or_else(|e| panic!("resolving ELF paths for {program_dir}: {e}"));
+
+    for (target, elf_path) in elf_paths {
+        // `SP1_SKIP_PROGRAM_BUILD` leaves whatever the last real build produced; verify it
+        // when it exists (a stale cache is exactly what this guards) and stay quiet when it
+        // does not, so `cargo check` on a fresh clone still works.
+        if !elf_path.as_std_path().exists() {
+            continue;
+        }
+        let bytes = std::fs::read(elf_path.as_std_path())
+            .unwrap_or_else(|e| panic!("reading {elf_path}: {e}"));
+        let built = format!("{:x}", Sha256::digest(&bytes));
+        let want = expected.field(field);
+        if built != want {
+            panic!(
+                "guest ELF `{target}` does not match measurements.lock\n  \
+                 sp1.elf.{field}\n    lock:  {want}\n    built: {built}\n\
+                 Run `cargo xtask measure` and commit the updated measurements.lock."
+            );
+        }
+    }
 }

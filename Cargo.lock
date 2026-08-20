@@ -19219,8 +19219,11 @@ dependencies = [
 name = "world-chain-proof-sp1-elfs"
 version = "2.4.2"
 dependencies = [
+ "cargo_metadata",
+ "sha2 0.10.9",
  "sp1-build",
  "sp1-sdk",
+ "toml",
 ]
 
 [[package]]
@@ -19822,7 +19825,9 @@ dependencies = [
  "semaphore-rs",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
+ "toml",
  "tracing",
  "tracing-appender",
  "tracing-subscriber 0.3.23",

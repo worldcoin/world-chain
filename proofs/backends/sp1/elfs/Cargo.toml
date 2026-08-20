@@ -10,6 +10,11 @@ build = "build.rs"
 
 [build-dependencies]
 sp1-build = "=6.3.1"
+# The build asserts the compiled guest ELFs against measurements.lock, so a build can
+# never produce an ELF whose vkey disagrees with the recorded one.
+cargo_metadata.workspace = true
+sha2.workspace = true
+toml.workspace = true
 
 [dependencies]
 sp1-sdk = { version = "=6.3.1", features = ["network"] }
