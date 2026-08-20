@@ -8,6 +8,9 @@
 
 name: proof-gate
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths:
@@ -32,7 +35,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
       - name: Install pycryptodome
-        run: pip install pycryptodome==3.23.0
+        run: PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install --user pycryptodome==3.23.0
       - name: Validate
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -85,7 +88,7 @@ jobs:
           toolchain: stable
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
       - name: Install pycryptodome
-        run: pip install pycryptodome==3.23.0
+        run: PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install --user pycryptodome==3.23.0
       - name: Build EIF
         run: scripts/build-eif.sh target/eif
       - name: Compare PCRs to registry

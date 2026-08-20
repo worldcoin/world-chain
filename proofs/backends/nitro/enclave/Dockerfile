@@ -25,6 +25,11 @@
 # rust:1.95.0-bookworm
 FROM rust@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1 AS builder
 
+# Pin the compiler to the image's toolchain: without this, rustup would honour
+# the repo's rust-toolchain.toml copied into /src, so root toolchain bumps
+# would silently rotate the PCRs.
+ENV RUSTUP_TOOLCHAIN=1.95.0
+
 # Pin apt to a fixed Debian snapshot so package versions cannot drift.
 ARG DEBIAN_SNAPSHOT=20260601T000000Z
 RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.sources && \

@@ -142,6 +142,12 @@ def cut(args: argparse.Namespace, releases: dict) -> None:
     )
     if n != 1:
         fail(f"--version: could not find `{pointer}` line to update")
+    # A stable cut supersedes any pending rc: clear latest_rc so `--current`
+    # (which prefers latest_rc) resolves to the new stable entry.
+    if args.stable:
+        text, n = re.subn(r'^latest_rc = "[^"]*"$', 'latest_rc = ""', text, count=1, flags=re.M)
+        if n != 1:
+            fail("--version: could not find `latest_rc` line to clear")
     block = f'\n[releases."{version}"]\n'
     block += "".join(f'{k} = "{v}"\n' for k, v in entry.items())
     text = text.rstrip("\n") + "\n" + block
@@ -162,7 +168,9 @@ def main() -> None:
     parser.add_argument("--version", metavar="VERSION", help="cut a release entry (see docstring)")
     parser.add_argument("--pcrs", help="pcrs.json (from scripts/build-eif.sh) for --version")
     parser.add_argument("--vkeys", help="vkeys.json (from the vkeys subcommand) for --version")
-    parser.add_argument("--stable", action="store_true", help="--version advances latest_stable")
+    parser.add_argument(
+        "--stable", action="store_true", help="--version advances latest_stable and clears latest_rc"
+    )
     args = parser.parse_args()
 
     if args.image_id:
