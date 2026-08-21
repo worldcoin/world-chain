@@ -19190,6 +19190,7 @@ dependencies = [
  "backon",
  "clap",
  "dotenvy",
+ "hex",
  "telemetry-batteries",
  "tokio",
  "tracing",

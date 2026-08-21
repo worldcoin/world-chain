@@ -49,3 +49,6 @@ telemetry-batteries.workspace = true
 # Config
 clap.workspace = true
 dotenvy.workspace = true
+
+# Misc
+hex.workspace = true
