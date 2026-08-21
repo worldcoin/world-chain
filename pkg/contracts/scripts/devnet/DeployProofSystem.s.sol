@@ -28,6 +28,10 @@ import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 /// ready. This script never changes the respected game type or retirement timestamp.
 /// `setImplementation(WC_GAME_TYPE, address(0))` is the kill switch: it stops new game
 /// creation without touching in-flight games.
+/// When replacing type 1006, stop the proposer while implementation and bond registration are
+/// updated. If the new implementation changes `domainHash`, restart the proposer so its selected
+/// lineage uses the new domain; its bond manager will resolve ready proposer-owned games left in
+/// the superseded domain. Same-domain games remain on the selected lineage and settle normally.
 ///
 /// The three proof-lane verifiers are **inputs**, not outputs: this script never deploys them.
 /// Every one is a required env address and must already hold code.

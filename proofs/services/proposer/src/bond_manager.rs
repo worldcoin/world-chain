@@ -5,7 +5,7 @@ use tracing::{info, warn};
 
 use crate::{BondManagerClient, BondManagerConfig, ProposerError};
 
-/// Discovers proposer-owned games, resolves invalid-parent descendants, and recovers bond credits.
+/// Discovers proposer-owned games, resolves abandoned games, and recovers bond credits.
 #[derive(Debug)]
 pub struct BondManager<E> {
     config: BondManagerConfig,
@@ -82,7 +82,7 @@ where
         Ok(())
     }
 
-    /// Resolves invalid-parent games, advances bond claims, and prunes fully settled games.
+    /// Resolves abandoned games, advances bond claims, and prunes fully settled games.
     ///
     /// `MultiProofGame.claimCredit` first unlocks the credit in `DelayedWETH` and only
     /// transfers it on a second call after the WETH delay, so a game stays tracked until its
@@ -90,22 +90,29 @@ where
     pub async fn settle_games(&mut self) -> Result<(), ProposerError> {
         let proposed_games: Vec<_> = self.proposed_games.iter().copied().collect();
         let now = self.execution_provider.latest_l1_timestamp().await?;
+        let active_domain_hash = self.execution_provider.active_domain_hash();
 
         for game in proposed_games {
             let result: Result<bool, ProposerError> = async {
                 let resolution_status = self.execution_provider.resolution_status(game).await?;
                 if !resolution_status.is_resolved() {
-                    // Retried lineages no longer expose their stale descendants to the canonical
-                    // proposer loop, so the bond manager resolves those descendants for recovery.
-                    // Leave direct proof timeouts to the proposer to avoid racing retry creation.
-                    if resolution_status.invalid_parent_resolvable() {
+                    // Resolve games abandoned by retries or domain upgrades; active-domain direct
+                    // outcomes stay with the proposer to avoid racing retry creation.
+                    let obsolete_domain_resolvable = if resolution_status.resolvable {
+                        self.execution_provider.game_domain_hash(game).await? != active_domain_hash
+                    } else {
+                        false
+                    };
+                    if resolution_status.invalid_parent_resolvable() || obsolete_domain_resolvable {
                         let submission = self.execution_provider.resolve_game(game).await?;
                         info!(
                             lifecycle_event = "game_resolved",
-                            outcome = "negative_invalid_parent",
+                            outcome = ?resolution_status.outcome,
+                            invalidation_reason = ?resolution_status.invalidation_reason,
+                            obsolete_domain = obsolete_domain_resolvable,
                             tx_hash = ?submission.tx_hash,
                             game_address = %game,
-                            "resolved proposer-owned game invalidated by its parent"
+                            "resolved abandoned proposer-owned game"
                         );
                     }
                     return Ok(false);

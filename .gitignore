@@ -14,5 +14,3 @@ pkg/contracts/sepolia_load_test.json
 **/.DS_Store
 **/proptest-regressions/
 
-# Local proof env overrides
-scripts/proof-envs/*.local.env

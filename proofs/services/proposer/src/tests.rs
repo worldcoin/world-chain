@@ -25,6 +25,8 @@ use crate::{
 };
 
 const DOMAIN_HASH: B256 = b256!("1111111111111111111111111111111111111111111111111111111111111111");
+const OLD_DOMAIN_HASH: B256 =
+    b256!("2222222222222222222222222222222222222222222222222222222222222222");
 const ANCHOR: Address = address!("0000000000000000000000000000000000001006");
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
 
@@ -153,8 +155,10 @@ impl ProposerClient for MockContracts {
 #[derive(Debug, Clone)]
 struct MockBondClient {
     proposer: Address,
+    active_domain_hash: B256,
     /// `(game, creator)` pairs in factory index order. `None` marks a foreign game type.
     games: Arc<Mutex<Vec<(Option<Address>, Address)>>>,
+    game_domain_hashes: Arc<Mutex<HashMap<Address, B256>>>,
     requested_indices: Arc<Mutex<Vec<u64>>>,
     resolved_games: Arc<Mutex<HashSet<Address>>>,
     resolution_statuses: Arc<Mutex<HashMap<Address, ResolutionStatus>>>,
@@ -183,7 +187,9 @@ impl MockBondClient {
     fn with_indexed_games(proposer: Address, games: Vec<(Option<Address>, Address)>) -> Self {
         Self {
             proposer,
+            active_domain_hash: DOMAIN_HASH,
             games: Arc::new(Mutex::new(games)),
+            game_domain_hashes: Arc::default(),
             requested_indices: Arc::default(),
             resolved_games: Arc::default(),
             resolution_statuses: Arc::default(),
@@ -204,6 +210,10 @@ impl MockBondClient {
 impl BondManagerClient for MockBondClient {
     fn proposer_address(&self) -> Address {
         self.proposer
+    }
+
+    fn active_domain_hash(&self) -> B256 {
+        self.active_domain_hash
     }
 
     async fn game_count(&self) -> Result<u64, ProposerError> {
@@ -235,6 +245,16 @@ impl BondManagerClient for MockBondClient {
             .iter()
             .find_map(|(candidate, creator)| (*candidate == Some(game)).then_some(*creator))
             .ok_or_else(|| ProposerError::message(format!("unknown game {game}")))
+    }
+
+    async fn game_domain_hash(&self, game: Address) -> Result<B256, ProposerError> {
+        Ok(self
+            .game_domain_hashes
+            .lock()
+            .expect("not poisoned")
+            .get(&game)
+            .copied()
+            .unwrap_or(self.active_domain_hash))
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
@@ -1039,6 +1059,76 @@ async fn bond_manager_leaves_direct_proof_timeout_to_lineage_proposer() {
 
     assert!(client.resolutions.lock().expect("not poisoned").is_empty());
     assert!(manager.tracks_game(game));
+}
+
+#[tokio::test]
+async fn bond_manager_resolves_proof_timeout_from_obsolete_domain() {
+    let proposer = Address::repeat_byte(0xa1);
+    let game = game_address(1);
+    let client = MockBondClient::new(proposer, vec![(game, proposer)]);
+    client
+        .game_domain_hashes
+        .lock()
+        .expect("not poisoned")
+        .insert(game, OLD_DOMAIN_HASH);
+    client
+        .resolution_statuses
+        .lock()
+        .expect("not poisoned")
+        .insert(game, negatively_resolvable_timeout());
+    let mut manager = BondManager::new(bond_manager_config(100), client.clone());
+    manager.scan_games().await.unwrap();
+
+    manager.settle_games().await.unwrap();
+
+    assert_eq!(
+        *client.resolutions.lock().expect("not poisoned"),
+        vec![game]
+    );
+    assert!(manager.tracks_game(game));
+}
+
+#[tokio::test]
+async fn bond_manager_resolves_positive_game_from_obsolete_domain() {
+    let proposer = Address::repeat_byte(0xa1);
+    let game = game_address(1);
+    let client = MockBondClient::new(proposer, vec![(game, proposer)]);
+    client
+        .game_domain_hashes
+        .lock()
+        .expect("not poisoned")
+        .insert(game, OLD_DOMAIN_HASH);
+    client
+        .resolution_statuses
+        .lock()
+        .expect("not poisoned")
+        .insert(game, positive_ready_status());
+    client
+        .credit
+        .lock()
+        .expect("not poisoned")
+        .insert(game, U256::from(10));
+    let mut manager = BondManager::new(bond_manager_config(100), client.clone());
+    manager.scan_games().await.unwrap();
+
+    manager.settle_games().await.unwrap();
+
+    assert_eq!(
+        *client.resolutions.lock().expect("not poisoned"),
+        vec![game]
+    );
+    assert!(manager.tracks_game(game));
+
+    manager.settle_games().await.unwrap();
+    assert_eq!(*client.unlocks.lock().expect("not poisoned"), vec![game]);
+    assert!(manager.tracks_game(game));
+
+    manager.settle_games().await.unwrap();
+    assert_eq!(
+        *client.withdrawals.lock().expect("not poisoned"),
+        vec![game]
+    );
+    assert!(!manager.tracks_game(game));
 }
 
 #[tokio::test]
