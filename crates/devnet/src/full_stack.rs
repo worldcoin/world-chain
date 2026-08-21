@@ -11,7 +11,7 @@ use std::{
 use alloy_eips::{BlockNumberOrTag, eip1559::BaseFeeParams};
 use alloy_genesis::Genesis;
 use alloy_network::EthereumWallet;
-use alloy_primitives::{Address, B64, hex};
+use alloy_primitives::{Address, B64, B256, hex};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::SolValue;
@@ -106,6 +106,9 @@ const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
 const PROVER_SERVICE_POSTGRES_PORT: u16 = 5432;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
+const DEVNET_AGGREGATION_VKEY: B256 = B256::repeat_byte(0x11);
+const DEVNET_RANGE_VKEY_COMMITMENT: B256 = B256::repeat_byte(0x22);
+const DEVNET_TEE_IMAGE_ID: B256 = B256::repeat_byte(0x33);
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Env var enabling the optional SP1 worker used for challenged-game escalation.
@@ -379,6 +382,10 @@ struct DevnetNitroBackend;
 impl ClaimedProofJobHandler for DevnetNitroBackend {
     fn lane(&self) -> ProofBackend {
         ProofBackend::Nitro
+    }
+
+    fn verifier_id(&self) -> B256 {
+        DEVNET_TEE_IMAGE_ID
     }
 
     async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
@@ -1229,18 +1236,12 @@ async fn deploy_world_proof_system(
         .env("SECURITY_COUNCIL_VERIFIER", &mocks.security_council)
         .env("WORLD_CHAIN_L2_CHAIN_ID", DEV_CHAIN_ID.to_string())
         .env("ROLLUP_CONFIG_HASH", &rollup_config_hash_hex)
-        .env(
-            "AGGREGATION_VKEY",
-            "0x1111111111111111111111111111111111111111111111111111111111111111",
-        )
+        .env("AGGREGATION_VKEY", DEVNET_AGGREGATION_VKEY.to_string())
         .env(
             "RANGE_VKEY_COMMITMENT",
-            "0x2222222222222222222222222222222222222222222222222222222222222222",
+            DEVNET_RANGE_VKEY_COMMITMENT.to_string(),
         )
-        .env(
-            "TEE_IMAGE_ID",
-            "0x3333333333333333333333333333333333333333333333333333333333333333",
-        )
+        .env("TEE_IMAGE_ID", DEVNET_TEE_IMAGE_ID.to_string())
         .env(
             "PROOF_SYSTEM_BLOCK_INTERVAL",
             PROOF_SYSTEM_BLOCK_INTERVAL.to_string(),
@@ -3232,6 +3233,8 @@ where
         game_provider,
         Sp1BackendConfig {
             allow_unfinalized: false,
+            aggregation_vkey: DEVNET_AGGREGATION_VKEY,
+            range_vkey_commitment: DEVNET_RANGE_VKEY_COMMITMENT,
         },
     );
 

@@ -102,6 +102,22 @@ pub enum AttestationError {
         /// Hex-encoded key received on the wire in `EnclaveResponse::Attestation`.
         wire: String,
     },
+    /// A PCR field had a length other than the SHA-384 digest length.
+    #[error("pcr{index} must be {expected} bytes, got {actual}")]
+    InvalidPcrLength {
+        /// PCR index with the invalid length.
+        index: u8,
+        /// Required SHA-384 digest length.
+        expected: usize,
+        /// Actual field length.
+        actual: usize,
+    },
+    /// An attested PCR was all-zero, as emitted by Nitro debug mode.
+    #[error("attested pcr{index} is all-zero; debug-mode enclaves are not accepted")]
+    EmptyAttestedPcr {
+        /// PCR index containing only zero bytes.
+        index: u8,
+    },
 }
 
 /// AWS's own definition of the signed attestation payload, re-exported so callers work against
@@ -562,6 +578,44 @@ pub fn verify_pcrs_only(
     Ok(parsed)
 }
 
+/// Extracts PCR0/1/2 from an attestation payload.
+///
+/// Call this only after [`verify_cose_sign1_signature`]; parsing alone does not prove that the
+/// measurements came from AWS Nitro hardware.
+pub fn extract_pcrs(doc: &[u8]) -> Result<ExpectedPcrs, AttestationError> {
+    let parsed = parse_attestation_doc(doc)?;
+    Ok(ExpectedPcrs {
+        pcr0: extract_pcr(&parsed, 0)?,
+        pcr1: extract_pcr(&parsed, 1)?,
+        pcr2: extract_pcr(&parsed, 2)?,
+    })
+}
+
+fn extract_pcr(parsed: &AttestationDoc, index: u8) -> Result<PcrDigest, AttestationError> {
+    let value = parsed
+        .pcrs
+        .get(&usize::from(index))
+        .ok_or(AttestationError::MissingField(match index {
+            0 => "pcr0",
+            1 => "pcr1",
+            2 => "pcr2",
+            _ => "pcrN",
+        }))?;
+    let digest: PcrDigest =
+        value
+            .as_slice()
+            .try_into()
+            .map_err(|_| AttestationError::InvalidPcrLength {
+                index,
+                expected: PCR_LEN,
+                actual: value.len(),
+            })?;
+    if digest.iter().all(|byte| *byte == 0) {
+        return Err(AttestationError::EmptyAttestedPcr { index });
+    }
+    Ok(digest)
+}
+
 fn check_pcr(
     parsed: &AttestationDoc,
     index: u8,
@@ -679,6 +733,53 @@ mod tests {
         let parsed = parse_and_check_pcrs(&doc, &non_placeholder_pcrs(3), &[7u8; 32]).unwrap();
         assert_eq!(parsed.user_data.unwrap().into_vec(), vec![7u8; 32]);
         assert_eq!(parsed.module_id, "test-module");
+    }
+
+    #[test]
+    fn extracts_complete_pcr_set() {
+        let doc = make_doc(
+            vec![(0, vec![1u8; 48]), (1, vec![2u8; 48]), (2, vec![3u8; 48])],
+            None,
+        );
+
+        assert_eq!(
+            extract_pcrs(&doc).unwrap(),
+            ExpectedPcrs {
+                pcr0: [1u8; PCR_LEN],
+                pcr1: [2u8; PCR_LEN],
+                pcr2: [3u8; PCR_LEN],
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_extracted_pcr_length() {
+        let doc = make_doc(
+            vec![(0, vec![1u8; 47]), (1, vec![2u8; 48]), (2, vec![3u8; 48])],
+            None,
+        );
+
+        assert!(matches!(
+            extract_pcrs(&doc).unwrap_err(),
+            AttestationError::InvalidPcrLength {
+                index: 0,
+                expected: PCR_LEN,
+                actual: 47,
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_debug_mode_pcrs() {
+        let doc = make_doc(
+            vec![(0, vec![0u8; 48]), (1, vec![0u8; 48]), (2, vec![0u8; 48])],
+            None,
+        );
+
+        assert!(matches!(
+            extract_pcrs(&doc).unwrap_err(),
+            AttestationError::EmptyAttestedPcr { index: 0 }
+        ));
     }
 
     #[test]

@@ -16,6 +16,7 @@ world-chain-proof-metrics.workspace = true
 world-chain-prover-service.workspace = true
 
 # misc
+alloy-primitives = { workspace = true, features = ["serde"] }
 anyhow.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
@@ -24,5 +25,4 @@ tracing.workspace = true
 backon.workspace = true
 
 [dev-dependencies]
-alloy-primitives = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

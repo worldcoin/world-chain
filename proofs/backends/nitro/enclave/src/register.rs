@@ -306,9 +306,9 @@ pub struct RegisterParams {
     pub enclave_cid: u32,
     /// vsock port of the running enclave.
     pub enclave_port: u32,
-    /// Expected PCRs used for host-side attestation verification. Use
-    /// [`ExpectedPcrs::PLACEHOLDER`] in dev/test to skip host-side checks (the on-chain
-    /// verifier still enforces the approved PCR allowlist).
+    /// Optional expected PCR pin for host-side attestation verification. A placeholder accepts
+    /// the measurements from the cryptographically verified report; the on-chain verifier still
+    /// requires that PCR set to be approved.
     pub expected_pcrs: ExpectedPcrs,
     /// L1 execution RPC URL to submit `registerKey` to.
     pub l1_rpc_url: String,
@@ -373,7 +373,7 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
     // 1. Fetch a public-key-embedding attestation from the running enclave.
     let endpoint = EnclaveEndpoint::with_port(params.enclave_cid, params.enclave_port);
     let prover = NitroProver::new(endpoint, params.expected_pcrs);
-    let (attestation_doc, public_key) = prover
+    let (attestation_doc, public_key, _) = prover
         .get_public_key_async()
         .await
         .map_err(|e| anyhow!("failed to fetch enclave public-key attestation: {e}"))?;

@@ -55,7 +55,6 @@ All RPC flags accept an environment variable fallback. The full set used across 
 | `SP1_PRIVATE_KEY` | `--sp1-private-key` | Required for `--prover network` (sp1-sdk) |
 | `ENCLAVE_CID` | `--cid` | vsock CID of the running Nitro enclave |
 | `ENCLAVE_PORT` | `--port` | vsock port of the running Nitro enclave |
-| `PCR0` / `PCR1` / `PCR2` | `--pcr0/1/2` | Expected Nitro PCR measurements |
 
 A `.env` file in the working directory is loaded automatically.
 
@@ -329,7 +328,8 @@ PCR1: <48-byte hex>   # kernel + bootstrap
 PCR2: <48-byte hex>   # application
 ```
 
-Save these — they are passed to `world-chain-prover-nitro prove` as `--pcr0/1/2`.
+Save these for approving the image's PCR set on-chain. The prover itself derives them from a
+verified startup attestation.
 
 ### 3. Run the enclave
 
@@ -361,9 +361,6 @@ cargo run -p world-chain-prover-nitro -- prove \
   --rollup-config-hash $ROLLUP_CONFIG_HASH \
   --network worldchain-sepolia \
   --cid  16 \
-  --pcr0 $PCR0 \
-  --pcr1 $PCR1 \
-  --pcr2 $PCR2 \
   --output ./nitro-artifact.json
 ```
 
@@ -397,7 +394,7 @@ writes the artifact to disk.
 **Requires:** Linux host with AF_VSOCK support.
 
 ```
-world-chain-prover-nitro prove [RPC flags] [--cid <N>] [--pcr0/1/2 <HEX>] [--output <FILE>]
+world-chain-prover-nitro prove [RPC flags] [--cid <N>] [--output <FILE>]
 ```
 
 | Flag | Env | Default | Description |
@@ -411,14 +408,10 @@ world-chain-prover-nitro prove [RPC flags] [--cid <N>] [--pcr0/1/2 <HEX>] [--out
 | `--rollup-config-hash <HASH>` | `ROLLUP_CONFIG_HASH` | — | |
 | `--cid <N>` | `ENCLAVE_CID` | `16` | vsock CID of the Nitro enclave |
 | `--port <N>` | `ENCLAVE_PORT` | `5005` | vsock port the enclave listens on |
-| `--pcr0 <HEX>` | `PCR0` | — | Expected PCR0 (48-byte hex) — required |
-| `--pcr1 <HEX>` | `PCR1` | — | Expected PCR1 — required |
-| `--pcr2 <HEX>` | `PCR2` | — | Expected PCR2 — required |
 | `--output <FILE>` | — | — | Write JSON artifact (transition public values + attestation doc hex) |
 
-All three of `--pcr0`, `--pcr1`, and `--pcr2` must be provided; providing only a subset is
-an error. PCR values are the hex-encoded 48-byte enclave measurements that identify the
-exact EIF image running in the Nitro enclave.
+Before proving, the host verifies a nonce-bound startup attestation and pins subsequent proof
+attestations to its PCR0/1/2 measurements.
 
 **Example**
 
@@ -431,9 +424,6 @@ world-chain-prover-nitro prove \
   --l1-beacon-rpc $L1_BEACON_RPC_URL \
   --rollup-config-hash 0x00821da4d0ba868e5... \
   --cid  16 \
-  --pcr0 $PCR0 \
-  --pcr1 $PCR1 \
-  --pcr2 $PCR2 \
   --output ./nitro-artifact.json
 ```
 
@@ -501,7 +491,7 @@ world-chain-prover-nitro register \
   --registry <NitroEnclaveKeyRegistry address> \
   --l1-rpc <L1 RPC URL> \
   [--private-key <hex> | --kms-key-id <ID>] \
-  [--cid <N>] [--port <N>] [--pcr0/1/2 <HEX>]
+  [--cid <N>] [--port <N>]
 ```
 
 | Flag | Env | Default | Description |
@@ -512,7 +502,6 @@ world-chain-prover-nitro register \
 | `--kms-key-id <ID>` | `REGISTER_KMS_KEY_ID` | — | AWS KMS key ID or alias for the funding account |
 | `--cid <N>` | `ENCLAVE_CID` | `16` | vsock CID of the Nitro enclave |
 | `--port <N>` | `ENCLAVE_PORT` | `5005` | vsock port the enclave listens on |
-| `--pcr0/1/2 <HEX>` | `PCR0`/`PCR1`/`PCR2` | — | Optional; when all three are set the attestation is verified host-side before submission |
 
 **Example**
 

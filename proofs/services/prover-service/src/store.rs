@@ -92,9 +92,10 @@ impl ProverServiceStore {
             r#"
             INSERT INTO proof_requests (
                 proof_id, backend, game, root_claim, l2_block_number, l1_head,
+                verifier_id, range_vkey_commitment,
                 proof_status, job_status, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (proof_id) DO NOTHING
             "#,
         )
@@ -104,6 +105,12 @@ impl ProverServiceStore {
         .bind(proof_request.root_claim.as_slice())
         .bind(l2_to_i64(proof_request.l2_block_number)?)
         .bind(proof_request.l1_head.as_slice())
+        .bind(proof_request.verifier_id.as_slice())
+        .bind(
+            proof_request
+                .range_vkey_commitment
+                .map(|value| value.to_vec()),
+        )
         .bind(ProofStatus::Created.as_str())
         .bind(ProofJobStatus::Pending.as_str())
         .bind(now)
@@ -120,6 +127,8 @@ impl ProverServiceStore {
                 proof_id = %id,
                 game_address = %proof_request.game,
                 %backend,
+                verifier_id = %proof_request.verifier_id,
+                range_vkey_commitment = ?proof_request.range_vkey_commitment,
                 l2_block_number = proof_request.l2_block_number,
                 "created proof request"
             );
@@ -134,7 +143,7 @@ impl ProverServiceStore {
         let row = sqlx::query(
             r#"
             SELECT proof_status, retry_count, backend, game,
-                root_claim, l2_block_number, l1_head
+                root_claim, l2_block_number, l1_head, verifier_id, range_vkey_commitment
             FROM proof_requests
             WHERE proof_id = $1
             FOR UPDATE
@@ -154,6 +163,16 @@ impl ProverServiceStore {
             .map_err(ProofRequestError::UnknownProofStatus)?;
 
         if !request_matches(&row, &proof_request)? {
+            tx.rollback().await?;
+            return Err(ProofRequestError::RequestMismatch(id));
+        }
+
+        let stored_verifier_id: Vec<u8> = row.get("verifier_id");
+        let stored_range_vkey_commitment: Option<Vec<u8>> = row.get("range_vkey_commitment");
+        if b256_from_bytes(stored_verifier_id)? != proof_request.verifier_id
+            || option_b256_from_bytes(stored_range_vkey_commitment)?
+                != proof_request.range_vkey_commitment
+        {
             tx.rollback().await?;
             return Err(ProofRequestError::RequestMismatch(id));
         }
@@ -333,7 +352,12 @@ impl ProverServiceStore {
         &self,
         request: GetNextProofRequest,
     ) -> Result<GetNextProofResponse, ProofJobQueueError> {
-        let GetNextProofRequest { backend, worker_id } = request;
+        let GetNextProofRequest {
+            backend,
+            worker_id,
+            verifier_id,
+            range_vkey_commitment,
+        } = request;
         let lock_id = LockId::new();
         let now = Utc::now();
         let lock_expires_at = now + self.config.lock_timeout;
@@ -350,16 +374,19 @@ impl ProverServiceStore {
             WHERE proof_id = (
                 SELECT proof_id FROM proof_requests
                 WHERE backend = $7
-                    AND attempt < $8
+                    AND verifier_id = $8
+                    AND range_vkey_commitment IS NOT DISTINCT FROM $9
+                    AND attempt < $10
                     AND (
-                        job_status = $9
-                        OR (job_status = $10 AND lock_expires_at < $11)
+                        job_status = $11
+                        OR (job_status = $12 AND lock_expires_at < $13)
                     ) 
                 ORDER BY l2_block_number ASC, created_at ASC, proof_id ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1 
             )
-            RETURNING backend, game, root_claim, l2_block_number, l1_head;
+            RETURNING backend, game, root_claim, l2_block_number, l1_head,
+                verifier_id, range_vkey_commitment;
             "#,
         )
         .bind(ProofStatus::Running.as_str())
@@ -369,6 +396,8 @@ impl ProverServiceStore {
         .bind(lock_expires_at)
         .bind(now)
         .bind(backend.as_str())
+        .bind(verifier_id.as_slice())
+        .bind(range_vkey_commitment.map(|value| value.to_vec()))
         .bind(self.config.max_attempts as i32)
         .bind(ProofJobStatus::Pending.as_str())
         .bind(ProofJobStatus::Claimed.as_str())
@@ -384,6 +413,8 @@ impl ProverServiceStore {
                 game_address = %request.game,
                 %backend,
                 %worker_id,
+                %verifier_id,
+                ?range_vkey_commitment,
                 l2_block_number = request.l2_block_number,
                 "claimed proof job"
             );
@@ -637,7 +668,8 @@ impl ProverServiceStore {
         let now = Utc::now();
         let row = sqlx::query(
             r#"
-            SELECT backend, game, root_claim, l2_block_number, l1_head, proof_status,
+            SELECT backend, game, root_claim, l2_block_number, l1_head,
+                verifier_id, range_vkey_commitment, proof_status,
                 lock_id, worker_id, lock_expires_at, job_status
             FROM proof_requests
             WHERE proof_id = $1
@@ -935,6 +967,10 @@ fn b256_from_bytes(bytes: Vec<u8>) -> Result<B256, MalformedB256Error> {
     Ok(B256::from_slice(&bytes))
 }
 
+fn option_b256_from_bytes(bytes: Option<Vec<u8>>) -> Result<Option<B256>, MalformedB256Error> {
+    bytes.map(b256_from_bytes).transpose()
+}
+
 fn address_from_bytes(bytes: Vec<u8>) -> Result<Address, ProofJobQueueError> {
     if bytes.len() != 20 {
         return Err(ProofJobQueueError::MalformedAddress(bytes.len()));
@@ -955,6 +991,8 @@ fn request_from_row(row: &PgRow) -> Result<ProofRequest, ProofJobQueueError> {
         root_claim: b256_from_bytes(row.try_get("root_claim")?)?,
         l2_block_number: l2_block_number as u64,
         l1_head: b256_from_bytes(row.try_get("l1_head")?)?,
+        verifier_id: b256_from_bytes(row.try_get("verifier_id")?)?,
+        range_vkey_commitment: option_b256_from_bytes(row.try_get("range_vkey_commitment")?)?,
     })
 }
 

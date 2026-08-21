@@ -247,6 +247,10 @@ where
 
 /// Builds the proof request for one lane of a defended game.
 fn proof_request(game: &GameMetadata, backend: ProofBackend) -> ProofRequest {
+    let (verifier_id, range_vkey_commitment) = match backend {
+        ProofBackend::Sp1 => (game.aggregation_vkey, Some(game.range_vkey_commitment)),
+        ProofBackend::Nitro => (game.tee_image_id, None),
+    };
     ProofRequest {
         backend,
         game: game.address,
@@ -255,6 +259,8 @@ fn proof_request(game: &GameMetadata, backend: ProofBackend) -> ProofRequest {
         // pin the witness to the L1 origin committed at proposal time, so
         // the request id stays stable across defender restarts
         l1_head: game.l1_origin_hash,
+        verifier_id,
+        range_vkey_commitment,
     }
 }
 
@@ -269,6 +275,45 @@ fn verifier_payload(proof: &ProofData) -> Bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn game_metadata() -> GameMetadata {
+        GameMetadata {
+            address: alloy_primitives::Address::repeat_byte(0x11),
+            domain_hash: alloy_primitives::B256::repeat_byte(0x12),
+            aggregation_vkey: alloy_primitives::B256::repeat_byte(0x13),
+            range_vkey_commitment: alloy_primitives::B256::repeat_byte(0x14),
+            tee_image_id: alloy_primitives::B256::repeat_byte(0x15),
+            parent_ref: alloy_primitives::Address::repeat_byte(0x16),
+            root_claim: alloy_primitives::B256::repeat_byte(0x17),
+            l2_block_number: 1_200,
+            l1_origin_hash: alloy_primitives::B256::repeat_byte(0x18),
+            l1_origin_number: 100,
+            challenge_deadline: 200,
+            proof_deadline: 300,
+            proof_threshold: 2,
+        }
+    }
+
+    #[test]
+    fn sp1_request_uses_game_pinned_vkeys() {
+        let game = game_metadata();
+        let request = proof_request(&game, ProofBackend::Sp1);
+
+        assert_eq!(request.verifier_id, game.aggregation_vkey);
+        assert_eq!(
+            request.range_vkey_commitment,
+            Some(game.range_vkey_commitment)
+        );
+    }
+
+    #[test]
+    fn nitro_request_uses_game_pinned_image_id() {
+        let game = game_metadata();
+        let request = proof_request(&game, ProofBackend::Nitro);
+
+        assert_eq!(request.verifier_id, game.tee_image_id);
+        assert_eq!(request.range_vkey_commitment, None);
+    }
 
     #[test]
     fn nitro_verifier_payload_is_raw_signature() {

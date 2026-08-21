@@ -23,6 +23,7 @@ world-chain-proof-kona-host.workspace = true
 
 # alloy
 alloy-primitives = { workspace = true, features = ["serde"] }
+alloy-provider = { workspace = true, features = ["reqwest", "reqwest-rustls-tls"] }
 
 # misc
 anyhow.workspace = true
