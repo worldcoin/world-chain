@@ -23,16 +23,30 @@ not match the game before collecting a witness.
 
 The network prover additionally requires:
 
-- `SP1_PRIVATE_KEY`: signs SP1 proof requests and identifies the credited account.
+- Exactly one of `SP1_PRIVATE_KEY` or `SP1_KMS_KEY_ID`: signs SP1 proof requests and Ethereum
+  mainnet refill transactions, and identifies the credited account.
 - `SP1_NETWORK_L1_RPC_URL`: Ethereum mainnet RPC used for Succinct settlement reads.
 - `SUCCINCT_VAPP_ADDRESS`: SuccinctVApp proxy address on Ethereum mainnet.
 
 At startup the worker validates that the settlement RPC is Ethereum mainnet, discovers the PROVE
-token and `minDepositAmount()` from the configured VApp, then waits until the account has at least
-`10 * minDepositAmount()` in SP1 Network credits. It retries the credit check every 30 seconds and
-does not lease jobs while waiting. Once running, a background check updates
-`sp1_network_prove_balance` and `sp1_network_balance_sufficient`; a later low balance is logged but
-does not interrupt in-flight work.
+token, its decimals, and `minDepositAmount()` from the configured VApp, then waits until the account
+has the configured minimum SP1 Network credits. The default minimum is 10 PROVE. Amounts are
+human-readable and converted to base units with the token's on-chain decimals.
+
+| Variable | Flag | Default |
+|---|---|---:|
+| `SP1_NETWORK_MINIMUM_BALANCE` | `--sp1-network-minimum-balance` | `10` PROVE |
+| `SP1_NETWORK_REFILL_AMOUNT` | `--sp1-network-refill-amount` | `SuccinctVApp.minDepositAmount()` |
+
+When the balance is low, the worker deposits the larger of the configured refill amount or the
+shortfall to the minimum. The signer must hold enough PROVE and ETH on Ethereum mainnet. After a
+deposit confirms, the worker waits for the same Succinct receipt to appear in SP1 Network credits
+instead of submitting another deposit. It retries the balance check every 30 seconds and does not
+lease jobs during the startup wait. Once running, the same check and refill continue in the
+background while updating `sp1_network_prove_balance` and `sp1_network_balance_sufficient`.
+
+Run only one auto-refilling worker for a given signer. Multiple replicas can observe the same low
+balance and submit independent refills before either sees the other's receipt.
 
 `NETWORK_RPC_URL` remains the optional override for the SP1 Network API itself. It is distinct from
 `SP1_NETWORK_L1_RPC_URL`.
@@ -79,7 +93,7 @@ providing the key and settlement configuration through environment variables bac
 store:
 
 ```bash
-# SP1_NETWORK_L1_RPC_URL, SUCCINCT_VAPP_ADDRESS, and SP1_PRIVATE_KEY are injected.
+# Settlement configuration and exactly one of SP1_PRIVATE_KEY or SP1_KMS_KEY_ID are injected.
 world-chain-proof-sp1-worker deposit --amount 1000
 ```
 

@@ -14,8 +14,8 @@ use world_chain_proof_tx_signer::{TransactionSigner, build_transaction_signer};
 use super::{
     select_network_signer,
     succinct::{
-        ETHEREUM_MAINNET_CHAIN_ID, IProveToken, ISuccinctVApp, Permit, format_prove,
-        load_settlement_config,
+        ETHEREUM_MAINNET_CHAIN_ID, IProveToken, ISuccinctVApp, Permit, SettlementConfig,
+        format_prove, load_settlement_config,
     },
 };
 
@@ -53,6 +53,58 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
             .context("validating Succinct settlement configuration")?;
 
     let amount = parse_prove_amount(&args.amount, settlement.prove_decimals)?;
+    let (signer_secret, signer_type) = select_network_signer(
+        args.sp1_private_key.as_deref(),
+        args.sp1_kms_key_id.as_deref(),
+    )?;
+    let credit_client = NetworkCreditClient::new(signer_secret, signer_type).await?;
+    let credit_before = credit_client
+        .get_balance()
+        .await
+        .context("reading SP1 Network credit balance before deposit")?;
+
+    println!(
+        "Depositing {} PROVE through SuccinctVApp {}...",
+        format_prove(amount, settlement.prove_decimals),
+        settlement.vapp_address,
+    );
+    let receipt = submit_deposit(
+        &args.sp1_network_l1_rpc_url,
+        settlement,
+        signer_secret,
+        signer_type,
+        amount,
+    )
+    .await?;
+    println!(
+        "Submitted and confirmed deposit transaction {}",
+        receipt.tx_hash
+    );
+    println!("Succinct on-chain receipt ID: {}", receipt.onchain_receipt);
+
+    wait_for_credit_reflection(
+        &credit_client,
+        credit_before,
+        settlement.prove_decimals,
+        receipt.tx_hash,
+        receipt.onchain_receipt,
+    )
+    .await
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DepositReceipt {
+    pub tx_hash: B256,
+    pub onchain_receipt: u64,
+}
+
+pub(crate) async fn submit_deposit(
+    l1_rpc_url: &str,
+    settlement: SettlementConfig,
+    signer_secret: &str,
+    signer_type: SignerType,
+    amount: U256,
+) -> Result<DepositReceipt> {
     if amount < settlement.min_deposit_amount {
         bail!(
             "deposit amount {} PROVE is below SuccinctVApp.minDepositAmount() of {} PROVE",
@@ -60,22 +112,12 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
             format_prove(settlement.min_deposit_amount, settlement.prove_decimals),
         );
     }
-    let l1_rpc_url =
-        Url::parse(&args.sp1_network_l1_rpc_url).context("invalid SP1 Network L1 RPC URL")?;
-    let (signer_secret, signer_type) = select_network_signer(
-        args.sp1_private_key.as_deref(),
-        args.sp1_kms_key_id.as_deref(),
-    )?;
+    let l1_rpc_url = Url::parse(l1_rpc_url).context("invalid SP1 Network L1 RPC URL")?;
     let l1_signer = build_l1_signer(signer_secret, signer_type, &l1_rpc_url).await?;
     let signer_address = match &l1_signer {
         TransactionSigner::Local(signer) => signer.address(),
         TransactionSigner::Aws(signer) => signer.address(),
     };
-    let credit_client = NetworkCreditClient::new(signer_secret, signer_type).await?;
-    let credit_before = credit_client
-        .get_balance()
-        .await
-        .context("reading SP1 Network credit balance before deposit")?;
     let provider = ProviderBuilder::new()
         .wallet(l1_signer.wallet())
         .connect_http(l1_rpc_url);
@@ -148,18 +190,12 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
     let s = B256::from_slice(&signature[32..64]);
     let v = signature[64];
 
-    println!(
-        "Depositing {} PROVE from {signer_address} through SuccinctVApp {}...",
-        format_prove(amount, settlement.prove_decimals),
-        settlement.vapp_address,
-    );
     let pending = vapp
         .permitAndDeposit(signer_address, amount, deadline, v, r, s)
         .send()
         .await
         .context("submitting permitAndDeposit transaction")?;
     let tx_hash = *pending.tx_hash();
-    println!("Submitted deposit transaction {tx_hash}");
 
     let receipt = pending
         .get_receipt()
@@ -181,30 +217,22 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
         .with_context(|| {
             format!("deposit transaction {tx_hash} succeeded but emitted no TransactionPending")
         })?;
-    println!(
-        "Deposit transaction {tx_hash} confirmed; Succinct on-chain receipt ID: {onchain_receipt}"
-    );
-
-    wait_for_credit_reflection(
-        &credit_client,
-        credit_before,
-        settlement.prove_decimals,
+    Ok(DepositReceipt {
         tx_hash,
         onchain_receipt,
-    )
-    .await
+    })
 }
 
-fn parse_prove_amount(input: &str, decimals: u8) -> Result<U256> {
+pub(crate) fn parse_prove_amount(input: &str, decimals: u8) -> Result<U256> {
     let input = input.trim();
     if input.is_empty() || input.starts_with('-') {
-        bail!("--amount must be a positive PROVE amount");
+        bail!("PROVE amount must be positive");
     }
     let amount: U256 = parse_units(input, decimals)
         .with_context(|| format!("invalid PROVE amount `{input}`"))?
         .into();
     if amount.is_zero() {
-        bail!("--amount must be greater than zero");
+        bail!("PROVE amount must be greater than zero");
     }
     Ok(amount)
 }
