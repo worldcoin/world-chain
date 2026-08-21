@@ -13,8 +13,8 @@
 #
 # Or use scripts/build-eif.sh, which does both and emits the PCR measurements.
 #
-# The resulting EIF's PCR0/PCR1/PCR2 measurements must be copied into the verifier's
-# `ExpectedPcrs` (see `proofs/workers/nitro/src/lib.rs`).
+# The resulting EIF's PCR0/PCR1/PCR2 measurements must be approved on-chain before its signer
+# can register. The worker derives the same values from a verified startup attestation.
 #
 # REPRODUCIBILITY: the PCR measurements are a hash of the EIF contents, so this
 # build must be bit-for-bit reproducible for anyone to re-derive the registered

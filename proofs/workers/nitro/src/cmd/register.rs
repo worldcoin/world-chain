@@ -1,10 +1,10 @@
 #![cfg(target_os = "linux")]
 
 use anyhow::Result;
-use world_chain_proof_nitro_enclave::register::{
-    RegisterParams, RegistrationOutcome, register_enclave_key,
+use world_chain_proof_nitro_enclave::{
+    ExpectedPcrs,
+    register::{RegisterParams, RegistrationOutcome, register_enclave_key},
 };
-use world_chain_proof_nitro_worker::build_expected_pcrs;
 
 use crate::cmd::{common::CommonArgs, select_registration_signer};
 
@@ -39,29 +39,9 @@ pub struct RegisterArgs {
     /// Mutually exclusive with `private_key`.
     #[arg(long, env = "REGISTER_KMS_KEY_ID", hide_env_values = true)]
     pub kms_key_id: Option<String>,
-
-    /// PCR0 hex (48 bytes). When all three PCRs are set the attestation is verified
-    /// host-side before submission; otherwise host-side checks are skipped (the on-chain
-    /// verifier still enforces the approved PCR allowlist).
-    #[arg(long, env = "PCR0")]
-    pub pcr0: Option<String>,
-
-    /// PCR1 hex (48 bytes).
-    #[arg(long, env = "PCR1")]
-    pub pcr1: Option<String>,
-
-    /// PCR2 hex (48 bytes).
-    #[arg(long, env = "PCR2")]
-    pub pcr2: Option<String>,
 }
 
 pub async fn register(args: RegisterArgs) -> Result<()> {
-    let expected_pcrs = build_expected_pcrs(
-        args.pcr0.as_deref(),
-        args.pcr1.as_deref(),
-        args.pcr2.as_deref(),
-    )?;
-
     let fallback_private_key = std::env::var("PRIVATE_KEY").ok();
     let (signer_secret, signer_type) = select_registration_signer(
         args.private_key.as_deref(),
@@ -72,7 +52,7 @@ pub async fn register(args: RegisterArgs) -> Result<()> {
     let outcome = register_enclave_key(RegisterParams {
         enclave_cid: args.common.enclave_cid,
         enclave_port: args.common.enclave_port,
-        expected_pcrs,
+        expected_pcrs: ExpectedPcrs::PLACEHOLDER,
         l1_rpc_url: args.l1_rpc,
         registry: args.registry,
         signer_secret: signer_secret.to_owned(),

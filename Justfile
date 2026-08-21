@@ -644,9 +644,7 @@ proof-verify-pcrs env="alphanet":
 #
 # Required: L1_RPC_URL, and a funding signer via REGISTER_PRIVATE_KEY,
 #           REGISTER_KMS_KEY_ID, or the legacy PRIVATE_KEY fallback.
-# Optional: NITRO_ENCLAVE_KEY_REGISTRY (else read from the {{env}}-nitro.json deployment),
-#           PCR0/PCR1/PCR2 (else host-side attestation checks are skipped; the on-chain
-#           verifier still enforces the approved PCR allowlist).
+# Optional: NITRO_ENCLAVE_KEY_REGISTRY (else read from the {{env}}-nitro.json deployment).
 proof-register-key env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -720,9 +718,6 @@ proof-register-key env="alphanet":
         else
             printf 'export REGISTER_PRIVATE_KEY=%s\n' "$(shq "$REGISTER_KEY")"
         fi
-        if [ -n "${PCR0:-}" ]; then printf 'export PCR0=%s\n' "$(shq "$PCR0")"; fi
-        if [ -n "${PCR1:-}" ]; then printf 'export PCR1=%s\n' "$(shq "$PCR1")"; fi
-        if [ -n "${PCR2:-}" ]; then printf 'export PCR2=%s\n' "$(shq "$PCR2")"; fi
         printf 'exec nitro-worker register\n'
     } | kubectl --context="$KUBECONTEXT" exec -i \
         -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" -- sh -s

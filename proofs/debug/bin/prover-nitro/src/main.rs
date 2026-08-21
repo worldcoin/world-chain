@@ -74,20 +74,6 @@ struct RegisterArgs {
     /// Mutually exclusive with `private_key`.
     #[arg(long, env = "REGISTER_KMS_KEY_ID", hide_env_values = true)]
     kms_key_id: Option<String>,
-
-    /// PCR0 hex (48 bytes). Optional: when all three PCRs are set the attestation is
-    /// verified host-side before submission; otherwise host-side checks are skipped (the
-    /// on-chain verifier still enforces the approved PCR allowlist).
-    #[arg(long, env = "PCR0")]
-    pcr0: Option<String>,
-
-    /// PCR1 hex (48 bytes).
-    #[arg(long, env = "PCR1")]
-    pcr1: Option<String>,
-
-    /// PCR2 hex (48 bytes).
-    #[arg(long, env = "PCR2")]
-    pcr2: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -102,18 +88,6 @@ struct NitroArgs {
     /// vsock port the enclave is listening on.
     #[arg(long, env = "ENCLAVE_PORT", default_value_t = 5005)]
     port: u32,
-
-    /// PCR0 hex (48 bytes).
-    #[arg(long, env = "PCR0")]
-    pcr0: Option<String>,
-
-    /// PCR1 hex (48 bytes).
-    #[arg(long, env = "PCR1")]
-    pcr1: Option<String>,
-
-    /// PCR2 hex (48 bytes).
-    #[arg(long, env = "PCR2")]
-    pcr2: Option<String>,
 
     /// Output path for the JSON artifact (boot info + attestation doc).
     #[arg(long)]
@@ -183,27 +157,16 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
 
     let input = build_range_input_from_args(&args.rpc).await?;
 
-    let expected_pcrs = match (args.pcr0, args.pcr1, args.pcr2) {
-        (Some(p0), Some(p1), Some(p2)) => ExpectedPcrs {
-            pcr0: hex_to_pcr(&p0)?,
-            pcr1: hex_to_pcr(&p1)?,
-            pcr2: hex_to_pcr(&p2)?,
-        },
-        (None, None, None) => {
-            bail!(
-                "--pcr0/--pcr1/--pcr2 are required: real PCR measurements must be supplied to verify the enclave image"
-            );
-        }
-        _ => bail!("provide all three of --pcr0, --pcr1, --pcr2 or none"),
-    };
+    let endpoint = EnclaveEndpoint::with_port(args.cid, args.port);
+    let (_, _, expected_pcrs) = NitroProver::new(endpoint, ExpectedPcrs::PLACEHOLDER)
+        .get_public_key_async()
+        .await
+        .map_err(|e| anyhow!("failed to verify startup enclave attestation: {e}"))?;
 
     let request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
         .map_err(|e| anyhow!("failed to serialize witness: {e}"))?;
 
-    let prover = NitroProver::new(
-        EnclaveEndpoint::with_port(args.cid, args.port),
-        expected_pcrs,
-    );
+    let prover = NitroProver::new(endpoint, expected_pcrs);
 
     println!(
         "sending range {start}..={end} to enclave (cid {cid})",
@@ -258,15 +221,6 @@ async fn nitro_prove(_args: NitroArgs) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn hex_to_pcr(hex: &str) -> Result<[u8; 48]> {
-    // Accept an optional `0x` prefix, matching the worker's `build_expected_pcrs`.
-    let bytes = hex::decode(hex.strip_prefix("0x").unwrap_or(hex)).context("invalid PCR hex")?;
-    bytes
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("PCR must be 48 bytes"))
-}
-
-#[cfg(target_os = "linux")]
 async fn register(args: RegisterArgs) -> Result<()> {
     use world_chain_proof_nitro_enclave::{
         ExpectedPcrs,
@@ -281,20 +235,6 @@ async fn register(args: RegisterArgs) -> Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .try_init();
-
-    let expected_pcrs = match (
-        args.pcr0.as_deref(),
-        args.pcr1.as_deref(),
-        args.pcr2.as_deref(),
-    ) {
-        (Some(p0), Some(p1), Some(p2)) => ExpectedPcrs {
-            pcr0: hex_to_pcr(p0)?,
-            pcr1: hex_to_pcr(p1)?,
-            pcr2: hex_to_pcr(p2)?,
-        },
-        (None, None, None) => ExpectedPcrs::PLACEHOLDER,
-        _ => bail!("provide all three of --pcr0/--pcr1/--pcr2, or none"),
-    };
 
     let private_key = args
         .private_key
@@ -322,7 +262,7 @@ async fn register(args: RegisterArgs) -> Result<()> {
     let outcome = register_enclave_key(RegisterParams {
         enclave_cid: args.cid,
         enclave_port: args.port,
-        expected_pcrs,
+        expected_pcrs: ExpectedPcrs::PLACEHOLDER,
         l1_rpc_url: args.l1_rpc,
         registry: args.registry,
         signer_secret: signer_secret.to_owned(),

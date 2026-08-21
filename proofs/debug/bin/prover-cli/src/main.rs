@@ -22,6 +22,7 @@
 //!   --l2-rpc-url http://l2-execution:8545 \
 //!   --l1-rpc-url http://l1-execution:8545 \
 //!   --prover-service-url http://prover-service:8080 \
+//!   --game-address 0x... \
 //!   --poll
 //! ```
 //!
@@ -32,19 +33,15 @@
 use std::time::Duration;
 
 use alloy_primitives::{Address, B256};
+use alloy_provider::ProviderBuilder;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use tracing::{info, warn};
 use world_chain_proof_kona_host::online::resolve_l1_head;
-use world_chain_proof_protocol::{ConsensusProvider, OptimismConsensusClient};
+use world_chain_proof_protocol::{ConsensusProvider, IMultiProofGame, OptimismConsensusClient};
 use world_chain_prover_service::{
     ProofBackend, ProofRequest, ProofRequester, ProofResponse, ProofStatus, RpcProverServiceClient,
 };
-
-/// Default `WorldChainProofSystemGame` address used when `--game-address` is omitted. The
-/// `prover-service` does not validate that a game contract actually exists at this address,
-/// so any value works for ad-hoc testing.
-const DEFAULT_GAME_ADDRESS: &str = "0x0000000000000000000000000000000000000001";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -89,13 +86,9 @@ struct Cli {
     #[arg(long, default_value_t = 1)]
     block_interval: u64,
 
-    /// `WorldChainProofSystemGame` contract address the request nominally defends.
-    #[arg(long, default_value = DEFAULT_GAME_ADDRESS)]
+    /// `WorldChainProofSystemGame` contract address whose Nitro image identity routes the job.
+    #[arg(long)]
     game_address: Address,
-
-    /// Nitro PCR0 image identifier pinned by the target game.
-    #[arg(long, env = "TEE_IMAGE_ID")]
-    tee_image_id: B256,
 
     /// Poll `prover_getProof` until the request succeeds or fails.
     #[arg(long)]
@@ -122,6 +115,14 @@ async fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
+    let l1_rpc_url = cli.l1_rpc_url.parse().context("invalid L1 RPC URL")?;
+    let l1_provider = ProviderBuilder::new().connect_http(l1_rpc_url);
+    let tee_image_id = IMultiProofGame::new(cli.game_address, &l1_provider)
+        .teeImageId()
+        .call()
+        .await
+        .with_context(|| format!("read teeImageId() from game {}", cli.game_address))?;
+
     let rollup_rpc_url = cli
         .rollup_rpc_url
         .clone()
@@ -193,7 +194,7 @@ async fn run(cli: Cli) -> Result<()> {
         root_claim,
         l2_block_number,
         l1_head,
-        verifier_id: cli.tee_image_id,
+        verifier_id: tee_image_id,
         range_vkey_commitment: None,
     };
 

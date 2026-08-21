@@ -290,13 +290,12 @@ Here is the full journey from "job available" to "proof accepted":
 12. **Response returned.** The enclave sends back `TransitionPublicValues`, the raw attestation
     document bytes, and the secp256k1 signature.
 
-13. **Host-side verification.** Back in the worker (on the host), if production PCRs
-    are configured:
+13. **Host-side verification.** Back in the worker (on the host):
     - Parse the COSE_Sign1 attestation document
     - Verify the P-384 signature against the leaf certificate
     - Check the certificate chain up to the hardcoded AWS Nitro Root CA
     - Validate certificate `notBefore`/`notAfter` periods
-    - Check PCR0/1/2 match expected values
+    - Check PCR0/1/2 match the verified startup attestation
     - Verify `user_data` matches the computed hash from `TransitionPublicValues`
     - Verify the nonce matches what was sent
     - Extract the public key from the attestation and verify the secp256k1 signature
@@ -402,27 +401,19 @@ PCR0 is the **primary identity** — it uniquely identifies the complete enclave
 > changes from application-only changes. The trade-off: approving a new World Chain
 > PCR triple requires three values to be captured and submitted vs Base's single PCR0.
 
-### Production vs Placeholder Mode
+### Worker PCR Pinning
 
-**Placeholder PCRs** (`ExpectedPcrs::PLACEHOLDER`): All 48 bytes set to zero for all
-three PCRs. When the worker sees placeholder PCRs:
-- **All attestation verification is skipped** — no P-384 signature check, no cert
-  chain validation, no user_data check, no nonce check, no signature verification.
-- This is **dev/test mode only**.
-
-**Production PCRs**: Real 48-byte values provided via `--pcr0`, `--pcr1`, `--pcr2`
-CLI flags or environment variables. When set:
-- Full 5-check attestation verification is performed (see
-  [Attestation Verification](#host-side-verification-5-checks) below).
-- Mismatched PCRs cause the proof to be rejected.
+At startup the worker requests a nonce-bound public-key attestation, verifies its AWS certificate
+chain and P-384 signature, and extracts PCR0/1/2. It derives its queue identity as
+`keccak256(PCR0)` and pins every later proof attestation to the complete startup PCR set. Operators
+therefore do not configure PCR values on the worker.
 
 ### What Happens If PCRs Are Wrong
 
-If you deploy a new enclave image but forget to update the expected PCRs:
-- **Host-side:** `parse_check_and_verify` will fail — the PCRs in the attestation
-  won't match the expected values.
-- **On-chain:** If the old PCR set is still approved, keys from the new enclave can't
-  register. If the new PCR set isn't approved, `registerKey` will revert.
+If a different enclave replaces the one measured at startup, host-side verification rejects its
+proof attestations. A newly started worker adopts the replacement enclave's verified measurements,
+but it can only lease games whose pinned image ID matches and can only register its signer if the
+full PCR set is approved on-chain.
 
 ---
 
@@ -671,20 +662,9 @@ reads it.
 
 ## Dev/Test Mode
 
-### Placeholder PCRs
-
-When `--pcr0`, `--pcr1`, `--pcr2` are all set to zero (or omitted, defaulting to
-`ExpectedPcrs::PLACEHOLDER`), the worker runs in **dev/test mode**:
-
-- **All attestation verification is skipped:**
-  - No COSE_Sign1 P-384 signature verification
-  - No certificate chain validation
-  - No PCR matching
-  - No `user_data` hash verification
-  - No nonce verification
-  - No secp256k1 signature verification
-- The enclave still produces real attestations and signatures, but the host doesn't
-  check them.
+The production worker always requires a cryptographically valid startup attestation. Unit tests may
+construct `NitroProver` with `ExpectedPcrs::PLACEHOLDER` to bypass only the subsequent expected-PCR
+comparison; the public-key attestation's AWS signature, nonce, and key binding are still verified.
 
 ### Debug Mode Enclave
 
@@ -723,9 +703,6 @@ match the game before collecting a witness or contacting the enclave.
 | `--rollup-config-hash` / `ROLLUP_CONFIG_HASH` | Rollup config hash override | — |
 | `--enclave-cid` / `ENCLAVE_CID` | vsock CID of the enclave | `16` |
 | `--enclave-port` / `ENCLAVE_PORT` | vsock port the enclave listens on | `5005` |
-| `--pcr0` / `PCR0` | Expected PCR0 (hex, 48 bytes) | All zeros (placeholder) |
-| `--pcr1` / `PCR1` | Expected PCR1 (hex, 48 bytes) | All zeros (placeholder) |
-| `--pcr2` / `PCR2` | Expected PCR2 (hex, 48 bytes) | All zeros (placeholder) |
 | `--worker-id` | Unique identifier for this worker instance | Required |
 | `--poll-interval-seconds` / `POLL_INTERVAL_SECONDS` | Seconds between prover-service polls | `10` |
 | `--max-concurrent-jobs` | Max jobs proved in parallel | `1` |
@@ -859,10 +836,9 @@ future, a vsock-proxy sidecar will be re-added to bridge vsock to AWS endpoints 
 
 ## Host-Side Verification (5 Checks)
 
-When production PCRs are configured, the host performs five verification checks on
-every attestation:
+The host performs five verification checks on every proof attestation:
 
-1. **PCR + user_data invariants:** PCR0/1/2 match expected values; `user_data` matches
+1. **PCR + user_data invariants:** PCR0/1/2 match the verified startup values; `user_data` matches
    `keccak256(abi.encode(TransitionPublicValues))`.
 2. **COSE_Sign1 signature:** P-384 ECDSA signature verified against the leaf
    certificate's public key.
