@@ -28,10 +28,10 @@ The network prover additionally requires:
 - `SP1_NETWORK_L1_RPC_URL`: Ethereum mainnet RPC used for Succinct settlement reads.
 - `SUCCINCT_VAPP_ADDRESS`: SuccinctVApp proxy address on Ethereum mainnet.
 
-At startup the worker validates that the settlement RPC is Ethereum mainnet, discovers the PROVE
-token, its decimals, and `minDepositAmount()` from the configured VApp, then waits until the account
-has the configured minimum SP1 Network credits. The default minimum is 10 PROVE. Amounts are
-human-readable and converted to base units with the token's on-chain decimals.
+At startup the worker validates that the settlement RPC is Ethereum mainnet and discovers the
+PROVE token and `minDepositAmount()` from the configured VApp, then waits until the account has the
+configured minimum SP1 Network credits. The default minimum is 10 PROVE. Human-readable amounts
+use PROVE's fixed 18 decimals.
 
 | Variable | Flag | Default |
 |---|---|---:|
@@ -97,7 +97,7 @@ store:
 world-chain-proof-sp1-worker deposit --amount 1000
 ```
 
-The amount is human-readable PROVE; token decimals are read on-chain. The command validates the
+The amount is human-readable PROVE using PROVE's fixed 18 decimals. The command validates the
 Ethereum mainnet contracts, the signer's PROVE and ETH balances, waits for a successful transaction
 receipt, prints the transaction hash and Succinct receipt ID, then polls until the SP1 Network
 credit balance increases. If credits have not changed within 30 minutes, it exits with an error

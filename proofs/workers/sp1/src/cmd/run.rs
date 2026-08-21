@@ -323,20 +323,16 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
             let settlement = load_settlement_config(l1_rpc_url, vapp_address)
                 .await
                 .context("validating Succinct settlement configuration")?;
-            let minimum_balance =
-                parse_prove_amount(&cli.sp1_network_minimum_balance, settlement.prove_decimals)
-                    .context("invalid SP1 Network minimum balance")?;
+            let minimum_balance = parse_prove_amount(&cli.sp1_network_minimum_balance)
+                .context("invalid SP1 Network minimum balance")?;
             let refill_amount = cli
                 .sp1_network_refill_amount
                 .as_deref()
-                .map(|amount| parse_prove_amount(amount, settlement.prove_decimals))
+                .map(parse_prove_amount)
                 .transpose()
                 .context("invalid SP1 Network refill amount")?;
-            let refill_amount = resolve_refill_amount(
-                refill_amount,
-                settlement.min_deposit_amount,
-                settlement.prove_decimals,
-            )?;
+            let refill_amount =
+                resolve_refill_amount(refill_amount, settlement.min_deposit_amount)?;
             let refill = NetworkRefillConfig {
                 l1_rpc_url: l1_rpc_url.clone(),
                 settlement,
@@ -401,7 +397,7 @@ async fn wait_for_sufficient_network_balance(
     loop {
         if maintain_network_balance(client, minimum_balance, refill, &mut pending_deposit).await {
             tracing::info!(
-                minimum_balance = %format_prove(minimum_balance, refill.settlement.prove_decimals),
+                minimum_balance = %format_prove(minimum_balance),
                 "SP1 Network credit balance is sufficient"
             );
             return Ok(true);
@@ -440,7 +436,6 @@ async fn maintain_network_balance(
     refill: &NetworkRefillConfig,
     pending_deposit: &mut Option<DepositReceipt>,
 ) -> bool {
-    let decimals = refill.settlement.prove_decimals;
     let balance = match client.get_balance().await {
         Ok(balance) => balance,
         Err(error) => {
@@ -449,12 +444,12 @@ async fn maintain_network_balance(
             return false;
         }
     };
-    if record_network_balance(balance, minimum_balance, decimals) {
+    if record_network_balance(balance, minimum_balance) {
         if let Some(receipt) = pending_deposit.take() {
             tracing::info!(
                 tx_hash = %receipt.tx_hash,
                 onchain_receipt = receipt.onchain_receipt,
-                balance = %format_prove(balance, decimals),
+                balance = %format_prove(balance),
                 "SP1 Network refill is reflected in credits"
             );
         }
@@ -465,8 +460,8 @@ async fn maintain_network_balance(
         tracing::warn!(
             tx_hash = %receipt.tx_hash,
             onchain_receipt = receipt.onchain_receipt,
-            balance = %format_prove(balance, decimals),
-            minimum_balance = %format_prove(minimum_balance, decimals),
+            balance = %format_prove(balance),
+            minimum_balance = %format_prove(minimum_balance),
             "waiting for confirmed SP1 Network refill to be reflected in credits"
         );
         return false;
@@ -475,9 +470,9 @@ async fn maintain_network_balance(
     let amount = refill_amount_for_balance(balance, minimum_balance, refill.refill_amount)
         .expect("insufficient balance must have a refill amount");
     tracing::warn!(
-        balance = %format_prove(balance, decimals),
-        minimum_balance = %format_prove(minimum_balance, decimals),
-        refill_amount = %format_prove(amount, decimals),
+        balance = %format_prove(balance),
+        minimum_balance = %format_prove(minimum_balance),
+        refill_amount = %format_prove(amount),
         "SP1 Network credit balance is too low; submitting refill"
     );
     match submit_deposit(
@@ -493,7 +488,7 @@ async fn maintain_network_balance(
             tracing::info!(
                 tx_hash = %receipt.tx_hash,
                 onchain_receipt = receipt.onchain_receipt,
-                refill_amount = %format_prove(amount, decimals),
+                refill_amount = %format_prove(amount),
                 "SP1 Network refill confirmed on Ethereum mainnet"
             );
             *pending_deposit = Some(receipt);
@@ -517,25 +512,21 @@ fn refill_amount_for_balance(
     Some(shortfall.max(refill_amount))
 }
 
-fn resolve_refill_amount(
-    configured: Option<U256>,
-    min_deposit_amount: U256,
-    decimals: u8,
-) -> Result<U256> {
+fn resolve_refill_amount(configured: Option<U256>, min_deposit_amount: U256) -> Result<U256> {
     let amount = configured.unwrap_or(min_deposit_amount);
     if amount < min_deposit_amount {
         anyhow::bail!(
             "SP1 Network refill amount {} PROVE is below SuccinctVApp.minDepositAmount() of {} PROVE",
-            format_prove(amount, decimals),
-            format_prove(min_deposit_amount, decimals),
+            format_prove(amount),
+            format_prove(min_deposit_amount),
         );
     }
     Ok(amount)
 }
 
-fn record_network_balance(balance: U256, minimum_balance: U256, decimals: u8) -> bool {
+fn record_network_balance(balance: U256, minimum_balance: U256) -> bool {
     let sufficient = balance >= minimum_balance;
-    match prove_as_f64(balance, decimals) {
+    match prove_as_f64(balance) {
         Ok(balance_prove) => {
             world_chain_proof_metrics::record_sp1_network_balance(balance_prove, sufficient);
         }
@@ -746,13 +737,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_minimum_balance_using_prove_decimals() {
+    fn parses_minimum_balance_as_prove() {
         assert_eq!(
-            parse_prove_amount(DEFAULT_SP1_NETWORK_MINIMUM_BALANCE, 6).unwrap(),
-            U256::from(10_000_000_u64)
-        );
-        assert_eq!(
-            parse_prove_amount(DEFAULT_SP1_NETWORK_MINIMUM_BALANCE, 18).unwrap(),
+            parse_prove_amount(DEFAULT_SP1_NETWORK_MINIMUM_BALANCE).unwrap(),
             U256::from(10_000_000_000_000_000_000_u128)
         );
     }
@@ -778,9 +765,9 @@ mod tests {
         let vapp_minimum = U256::from(10_000_u64);
 
         assert_eq!(
-            resolve_refill_amount(None, vapp_minimum, 6).unwrap(),
+            resolve_refill_amount(None, vapp_minimum).unwrap(),
             vapp_minimum
         );
-        assert!(resolve_refill_amount(Some(U256::from(9_999)), vapp_minimum, 6).is_err());
+        assert!(resolve_refill_amount(Some(U256::from(9_999)), vapp_minimum).is_err());
     }
 }

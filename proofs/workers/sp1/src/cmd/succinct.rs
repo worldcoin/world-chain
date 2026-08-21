@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use url::Url;
 
 pub const ETHEREUM_MAINNET_CHAIN_ID: u64 = 1;
+pub const PROVE_DECIMALS: u8 = 18;
 
 sol! {
     #[sol(rpc)]
@@ -26,7 +27,6 @@ sol! {
     #[sol(rpc)]
     interface IProveToken {
         function balanceOf(address account) external view returns (uint256);
-        function decimals() external view returns (uint8);
         function name() external view returns (string);
         function nonces(address owner) external view returns (uint256);
         function DOMAIN_SEPARATOR() external view returns (bytes32);
@@ -47,7 +47,6 @@ pub struct SettlementConfig {
     pub vapp_address: Address,
     pub prove_token_address: Address,
     pub min_deposit_amount: U256,
-    pub prove_decimals: u8,
 }
 
 /// Validates the settlement endpoint and discovers the VApp's mutable token configuration.
@@ -107,26 +106,19 @@ pub async fn load_settlement_config(
         bail!("SuccinctVApp.minDepositAmount() returned zero");
     }
 
-    let prove_decimals = IProveToken::new(prove_token_address, provider)
-        .decimals()
-        .call()
-        .await
-        .context("reading PROVE token decimals()")?;
-
     Ok(SettlementConfig {
         vapp_address,
         prove_token_address,
         min_deposit_amount,
-        prove_decimals,
     })
 }
 
-pub fn format_prove(amount: U256, decimals: u8) -> String {
-    format_units(amount, decimals).unwrap_or_else(|_| amount.to_string())
+pub fn format_prove(amount: U256) -> String {
+    format_units(amount, PROVE_DECIMALS).unwrap_or_else(|_| amount.to_string())
 }
 
-pub fn prove_as_f64(amount: U256, decimals: u8) -> Result<f64> {
-    format_units(amount, decimals)
+pub fn prove_as_f64(amount: U256) -> Result<f64> {
+    format_units(amount, PROVE_DECIMALS)
         .context("formatting PROVE base units")?
         .parse::<f64>()
         .context("parsing formatted PROVE balance")
@@ -138,6 +130,9 @@ mod tests {
 
     #[test]
     fn formats_prove_base_units() {
-        assert_eq!(format_prove(U256::from(1_250_000_u64), 6), "1.250000");
+        assert_eq!(
+            format_prove(U256::from(1_250_000_000_000_000_000_u128)),
+            "1.250000000000000000"
+        );
     }
 }

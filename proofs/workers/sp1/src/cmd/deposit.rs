@@ -14,8 +14,8 @@ use world_chain_proof_tx_signer::{TransactionSigner, build_transaction_signer};
 use super::{
     select_network_signer,
     succinct::{
-        ETHEREUM_MAINNET_CHAIN_ID, IProveToken, ISuccinctVApp, Permit, SettlementConfig,
-        format_prove, load_settlement_config,
+        ETHEREUM_MAINNET_CHAIN_ID, IProveToken, ISuccinctVApp, PROVE_DECIMALS, Permit,
+        SettlementConfig, format_prove, load_settlement_config,
     },
 };
 
@@ -52,7 +52,7 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
             .await
             .context("validating Succinct settlement configuration")?;
 
-    let amount = parse_prove_amount(&args.amount, settlement.prove_decimals)?;
+    let amount = parse_prove_amount(&args.amount)?;
     let (signer_secret, signer_type) = select_network_signer(
         args.sp1_private_key.as_deref(),
         args.sp1_kms_key_id.as_deref(),
@@ -65,7 +65,7 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
 
     println!(
         "Depositing {} PROVE through SuccinctVApp {}...",
-        format_prove(amount, settlement.prove_decimals),
+        format_prove(amount),
         settlement.vapp_address,
     );
     let receipt = submit_deposit(
@@ -85,7 +85,6 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
     wait_for_credit_reflection(
         &credit_client,
         credit_before,
-        settlement.prove_decimals,
         receipt.tx_hash,
         receipt.onchain_receipt,
     )
@@ -108,8 +107,8 @@ pub(crate) async fn submit_deposit(
     if amount < settlement.min_deposit_amount {
         bail!(
             "deposit amount {} PROVE is below SuccinctVApp.minDepositAmount() of {} PROVE",
-            format_prove(amount, settlement.prove_decimals),
-            format_prove(settlement.min_deposit_amount, settlement.prove_decimals),
+            format_prove(amount),
+            format_prove(settlement.min_deposit_amount),
         );
     }
     let l1_rpc_url = Url::parse(l1_rpc_url).context("invalid SP1 Network L1 RPC URL")?;
@@ -132,8 +131,8 @@ pub(crate) async fn submit_deposit(
     if token_balance < amount {
         bail!(
             "insufficient PROVE balance for {signer_address}: have {} PROVE, need {} PROVE",
-            format_prove(token_balance, settlement.prove_decimals),
-            format_prove(amount, settlement.prove_decimals),
+            format_prove(token_balance),
+            format_prove(amount),
         );
     }
 
@@ -223,12 +222,12 @@ pub(crate) async fn submit_deposit(
     })
 }
 
-pub(crate) fn parse_prove_amount(input: &str, decimals: u8) -> Result<U256> {
+pub(crate) fn parse_prove_amount(input: &str) -> Result<U256> {
     let input = input.trim();
     if input.is_empty() || input.starts_with('-') {
         bail!("PROVE amount must be positive");
     }
-    let amount: U256 = parse_units(input, decimals)
+    let amount: U256 = parse_units(input, PROVE_DECIMALS)
         .with_context(|| format!("invalid PROVE amount `{input}`"))?
         .into();
     if amount.is_zero() {
@@ -250,7 +249,6 @@ fn permit_deadline() -> Result<U256> {
 async fn wait_for_credit_reflection(
     client: &NetworkCreditClient,
     credit_before: U256,
-    decimals: u8,
     tx_hash: B256,
     onchain_receipt: u64,
 ) -> Result<()> {
@@ -260,15 +258,15 @@ async fn wait_for_credit_reflection(
             Ok(balance) if balance > credit_before => {
                 println!(
                     "Deposit reflected in SP1 Network credits: {} -> {} PROVE",
-                    format_prove(credit_before, decimals),
-                    format_prove(balance, decimals),
+                    format_prove(credit_before),
+                    format_prove(balance),
                 );
                 return Ok(());
             }
             Ok(balance) => {
                 println!(
                     "Waiting for Succinct receipt {onchain_receipt} to be reflected in SP1 Network credits (current: {} PROVE)...",
-                    format_prove(balance, decimals),
+                    format_prove(balance),
                 );
             }
             Err(error) => {
@@ -313,14 +311,14 @@ mod tests {
     #[test]
     fn parses_human_readable_prove_amount() {
         assert_eq!(
-            parse_prove_amount("12.5", 6).unwrap(),
-            U256::from(12_500_000_u64)
+            parse_prove_amount("12.5").unwrap(),
+            U256::from(12_500_000_000_000_000_000_u128)
         );
     }
 
     #[test]
     fn rejects_non_positive_prove_amounts() {
-        assert!(parse_prove_amount("0", 18).is_err());
-        assert!(parse_prove_amount("-1", 18).is_err());
+        assert!(parse_prove_amount("0").is_err());
+        assert!(parse_prove_amount("-1").is_err());
     }
 }
