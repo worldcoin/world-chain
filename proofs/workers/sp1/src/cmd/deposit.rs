@@ -6,7 +6,7 @@ use alloy_signer::{Signer, SignerSync};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::eip712_domain;
 use anyhow::{Context, Result, bail};
-use clap::Args;
+use clap::{ArgGroup, Args};
 use url::Url;
 use world_chain_proof_sp1_host::network_prover::{NetworkCreditClient, SignerType};
 use world_chain_proof_tx_signer::{TransactionSigner, build_transaction_signer};
@@ -24,6 +24,12 @@ const CREDIT_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const CREDIT_REFLECTION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Args)]
+#[command(
+    group = ArgGroup::new("sp1_signer")
+        .required(true)
+        .multiple(false)
+        .args(["sp1_private_key", "sp1_kms_key_id"])
+)]
 pub struct DepositArgs {
     /// Human-readable amount of PROVE to deposit (for example `1000` or `12.5`).
     #[arg(long)]
@@ -38,11 +44,20 @@ pub struct DepositArgs {
     succinct_vapp_address: Address,
 
     /// Private key for both the PROVE holder and the corresponding SP1 Network account.
-    #[arg(long, env = "SP1_PRIVATE_KEY")]
+    #[arg(
+        long,
+        env = "SP1_PRIVATE_KEY",
+        value_parser = clap::builder::NonEmptyStringValueParser::new()
+    )]
     sp1_private_key: Option<String>,
 
     /// AWS KMS key ID for both the PROVE holder and the corresponding SP1 Network account.
-    #[arg(long, env = "SP1_KMS_KEY_ID", hide_env_values = true)]
+    #[arg(
+        long,
+        env = "SP1_KMS_KEY_ID",
+        hide_env_values = true,
+        value_parser = clap::builder::NonEmptyStringValueParser::new()
+    )]
     sp1_kms_key_id: Option<String>,
 }
 
@@ -56,7 +71,7 @@ pub async fn deposit(args: DepositArgs) -> Result<()> {
     let (signer_secret, signer_type) = select_network_signer(
         args.sp1_private_key.as_deref(),
         args.sp1_kms_key_id.as_deref(),
-    )?;
+    );
     let credit_client = NetworkCreditClient::new(signer_secret, signer_type).await?;
     let credit_before = credit_client
         .get_balance()

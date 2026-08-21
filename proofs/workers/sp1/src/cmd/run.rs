@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::ProviderBuilder;
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host::online::{
     OnlineHostConfig, build_online_config, hardfork_config_from_chain_spec,
@@ -67,6 +67,12 @@ impl Network {
 }
 
 #[derive(Debug, Parser)]
+#[command(
+    group = ArgGroup::new("sp1_signer")
+        .required(true)
+        .multiple(false)
+        .args(["sp1_private_key", "sp1_kms_key_id"])
+)]
 pub struct WorkerArgs {
     /// prover-service JSON-RPC URL.
     #[arg(long, env = "PROVER_SERVICE_URL")]
@@ -119,14 +125,23 @@ pub struct WorkerArgs {
 
     /// SP1 network private key.
     ///
-    /// Required when --prover network and sp1_kms_key_id is not provided.
-    #[arg(long, env = "SP1_PRIVATE_KEY")]
+    /// Exactly one of this and sp1_kms_key_id must be configured.
+    #[arg(
+        long,
+        env = "SP1_PRIVATE_KEY",
+        value_parser = clap::builder::NonEmptyStringValueParser::new()
+    )]
     sp1_private_key: Option<String>,
 
     /// AWS KMS key ID or alias the sp1 proof worker signs proof requests.
     ///
-    /// Required when --prover network and sp1_private_key is not provided.
-    #[arg(long, env = "SP1_KMS_KEY_ID", hide_env_values = true)]
+    /// Exactly one of this and sp1_private_key must be configured.
+    #[arg(
+        long,
+        env = "SP1_KMS_KEY_ID",
+        hide_env_values = true,
+        value_parser = clap::builder::NonEmptyStringValueParser::new()
+    )]
     sp1_kms_key_id: Option<String>,
 
     /// Ethereum mainnet RPC used to validate the Succinct VApp and its deposit threshold.
@@ -316,7 +331,7 @@ pub async fn run(cli: WorkerArgs) -> Result<()> {
             let (network_secret, signer_type) = select_network_signer(
                 cli.sp1_private_key.as_deref(),
                 cli.sp1_kms_key_id.as_deref(),
-            )?;
+            );
             let vapp_address = cli
                 .succinct_vapp_address
                 .context("SUCCINCT_VAPP_ADDRESS is required when --prover network")?;
@@ -615,7 +630,7 @@ where
 mod tests {
     use super::*;
 
-    fn base_args() -> Vec<&'static str> {
+    fn base_args_without_signer() -> Vec<&'static str> {
         vec![
             "sp1-worker",
             "--prover-service-url",
@@ -629,6 +644,12 @@ mod tests {
             "--worker-id",
             "test",
         ]
+    }
+
+    fn base_args() -> Vec<&'static str> {
+        let mut args = base_args_without_signer();
+        args.extend(["--sp1-kms-key-id", "alias/prover"]);
+        args
     }
 
     #[test]
@@ -670,6 +691,32 @@ mod tests {
         let cli = WorkerArgs::parse_from(args);
 
         assert!(cli.sp1_estimate_limits);
+    }
+
+    #[test]
+    fn worker_requires_exactly_one_signer() {
+        assert_eq!(
+            WorkerArgs::try_parse_from(base_args_without_signer())
+                .unwrap_err()
+                .kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+
+        let mut multiple = base_args();
+        multiple.extend(["--sp1-private-key", "0x1234"]);
+        assert_eq!(
+            WorkerArgs::try_parse_from(multiple).unwrap_err().kind(),
+            clap::error::ErrorKind::ArgumentConflict
+        );
+
+        for signer in [
+            ["--sp1-private-key", "0x1234"],
+            ["--sp1-kms-key-id", "alias/prover"],
+        ] {
+            let mut valid = base_args_without_signer();
+            valid.extend(signer);
+            WorkerArgs::try_parse_from(valid).unwrap();
+        }
     }
 
     #[test]

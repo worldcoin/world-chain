@@ -21,12 +21,14 @@ For every leased job, the worker reads the proof interval and immutable transiti
 the job's `MultiProofGame`. It rejects queued root, block, L1 head, or rollup-config values that do
 not match the game before collecting a witness.
 
-The network prover additionally requires:
+The worker requires exactly one of `SP1_PRIVATE_KEY` or `SP1_KMS_KEY_ID`. The network prover
+additionally requires:
 
-- Exactly one of `SP1_PRIVATE_KEY` or `SP1_KMS_KEY_ID`: signs SP1 proof requests and Ethereum
-  mainnet refill transactions, and identifies the credited account.
 - `SP1_NETWORK_L1_RPC_URL`: Ethereum mainnet RPC used for Succinct settlement reads.
 - `SUCCINCT_VAPP_ADDRESS`: SuccinctVApp proxy address on Ethereum mainnet.
+
+The configured signer signs SP1 proof requests and Ethereum mainnet refill transactions, and
+identifies the credited account.
 
 At startup the worker validates that the settlement RPC is Ethereum mainnet and discovers the
 PROVE token and `minDepositAmount()` from the configured VApp, then waits until the account has the
