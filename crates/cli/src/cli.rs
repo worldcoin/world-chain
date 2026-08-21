@@ -13,7 +13,8 @@ use reth_rpc_server_types::{
 use std::{str::FromStr, sync::Arc};
 use tracing::{debug, info, warn};
 use world_chain_chainspec::{
-    JOVIAN_UPGRADE_TIMESTAMP_MAINNET, JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA, WorldChainHardfork,
+    JOVIAN_UPGRADE_TIMESTAMP_MAINNET, JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA,
+    KARST_UPGRADE_TIMESTAMP_MAINNET, KARST_UPGRADE_TIMESTAMP_SEPOLIA, WorldChainHardfork,
     WorldChainSpec,
 };
 
@@ -163,10 +164,19 @@ impl WorldChainArgs {
                     WorldChainHardfork::Jovian,
                     ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_MAINNET),
                 );
+                chain_spec.set_fork(
+                    WorldChainHardfork::Karst,
+                    ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_MAINNET),
+                );
                 info!(
                     target: "reth::cli",
                     timestamp = JOVIAN_UPGRADE_TIMESTAMP_MAINNET,
                     "Overriding Jovian activation timestamp for World mainnet"
+                );
+                info!(
+                    target: "reth::cli",
+                    timestamp = KARST_UPGRADE_TIMESTAMP_MAINNET,
+                    "Overriding Karst activation timestamp for World mainnet"
                 );
             }
             Some(NamedChain::WorldSepolia) => {
@@ -211,10 +221,19 @@ impl WorldChainArgs {
                     WorldChainHardfork::Jovian,
                     ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA),
                 );
+                chain_spec.set_fork(
+                    WorldChainHardfork::Karst,
+                    ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_SEPOLIA),
+                );
                 info!(
                     target: "reth::cli",
                     timestamp = JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA,
                     "Overriding Jovian activation timestamp for World Sepolia"
+                );
+                info!(
+                    target: "reth::cli",
+                    timestamp = KARST_UPGRADE_TIMESTAMP_SEPOLIA,
+                    "Overriding Karst activation timestamp for World Sepolia"
                 );
             }
             _ => {
