@@ -93,20 +93,14 @@ impl WorldChainSpec {
                     WorldChainHardfork::Jovian,
                     JOVIAN_UPGRADE_TIMESTAMP_MAINNET,
                 );
-                self.set_missing_world_fork(
-                    WorldChainHardfork::Karst,
-                    KARST_UPGRADE_TIMESTAMP_MAINNET,
-                );
+                self.set_missing_karst_forks(KARST_UPGRADE_TIMESTAMP_MAINNET);
             }
             Some(NamedChain::WorldSepolia) => {
                 self.set_missing_world_fork(
                     WorldChainHardfork::Jovian,
                     JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA,
                 );
-                self.set_missing_world_fork(
-                    WorldChainHardfork::Karst,
-                    KARST_UPGRADE_TIMESTAMP_SEPOLIA,
-                );
+                self.set_missing_karst_forks(KARST_UPGRADE_TIMESTAMP_SEPOLIA);
             }
             _ => {}
         }
@@ -115,6 +109,18 @@ impl WorldChainSpec {
     fn set_missing_world_fork(&mut self, fork: WorldChainHardfork, timestamp: u64) {
         if matches!(self.inner.fork(fork), ForkCondition::Never) {
             self.set_fork(fork, ForkCondition::Timestamp(timestamp));
+        }
+    }
+
+    fn set_missing_karst_forks(&mut self, default_timestamp: u64) {
+        self.set_missing_world_fork(WorldChainHardfork::Karst, default_timestamp);
+
+        if matches!(
+            self.inner.fork(EthereumHardfork::Osaka),
+            ForkCondition::Never
+        ) && let Some(timestamp) = self.inner.fork(WorldChainHardfork::Karst).as_timestamp()
+        {
+            self.set_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(timestamp));
         }
     }
 }
@@ -590,6 +596,10 @@ mod tests {
             spec.fork(WorldChainHardfork::Karst),
             ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_MAINNET)
         );
+        assert_eq!(
+            spec.fork(EthereumHardfork::Osaka),
+            ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_MAINNET)
+        );
     }
 
     #[test]
@@ -601,6 +611,10 @@ mod tests {
         );
         assert_eq!(
             spec.fork(WorldChainHardfork::Karst),
+            ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_SEPOLIA)
+        );
+        assert_eq!(
+            spec.fork(EthereumHardfork::Osaka),
             ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_SEPOLIA)
         );
     }

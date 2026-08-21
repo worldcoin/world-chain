@@ -2,7 +2,7 @@ use crate::config::{FlashblocksPayloadBuilderConfig, FlashblocksStoreConfig};
 use ::eyre::eyre::bail;
 use alloy_chains::NamedChain;
 use alloy_primitives::{Address, address};
-use reth_chainspec::{EthChainSpec, ForkCondition};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, ForkCondition};
 use reth_network_peers::{PeerId, TrustedPeer};
 use reth_node_builder::NodeConfig;
 use reth_optimism_node::args::RollupArgs;
@@ -168,6 +168,10 @@ impl WorldChainArgs {
                     WorldChainHardfork::Karst,
                     ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_MAINNET),
                 );
+                chain_spec.set_fork(
+                    EthereumHardfork::Osaka,
+                    ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_MAINNET),
+                );
                 info!(
                     target: "reth::cli",
                     timestamp = JOVIAN_UPGRADE_TIMESTAMP_MAINNET,
@@ -223,6 +227,10 @@ impl WorldChainArgs {
                 );
                 chain_spec.set_fork(
                     WorldChainHardfork::Karst,
+                    ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_SEPOLIA),
+                );
+                chain_spec.set_fork(
+                    EthereumHardfork::Osaka,
                     ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_SEPOLIA),
                 );
                 info!(
