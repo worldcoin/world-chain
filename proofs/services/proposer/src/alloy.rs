@@ -1,6 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
 use std::{sync::Arc, time::Duration};
@@ -217,6 +217,10 @@ where
         self.provider.default_signer_address()
     }
 
+    fn active_domain_hash(&self) -> B256 {
+        self.registered.domain_hash
+    }
+
     async fn game_count(&self) -> Result<u64, ProposerError> {
         let count = self.factory.gameCount().call().await?;
         u256_to_u64(count)
@@ -229,6 +233,14 @@ where
     async fn game_creator(&self, game: Address) -> Result<Address, ProposerError> {
         self.game(game)
             .gameCreator()
+            .call()
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn game_domain_hash(&self, game: Address) -> Result<B256, ProposerError> {
+        self.game(game)
+            .proposalDomainHash()
             .call()
             .await
             .map_err(Into::into)
