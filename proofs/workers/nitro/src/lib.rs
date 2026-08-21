@@ -24,7 +24,7 @@
 
 use alloy_primitives::{B256, Bytes, keccak256};
 use alloy_sol_types::SolValue;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, bail};
 use tracing::{debug, info};
 use world_chain_proof_kona_host::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input,

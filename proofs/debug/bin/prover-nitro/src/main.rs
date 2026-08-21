@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-#[cfg(target_os = "linux")]
-use anyhow::Context;
 use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand};
 use world_chain_prover::{
