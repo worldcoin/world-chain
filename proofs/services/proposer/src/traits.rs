@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, B256, U256};
 use async_trait::async_trait;
 use world_chain_proof_protocol::{LineageProvider, ResolutionStatus};
 
@@ -13,6 +13,9 @@ pub trait BondManagerClient: Send + Sync {
     /// Returns the address whose proposal credits are managed.
     fn proposer_address(&self) -> Address;
 
+    /// Returns the proposal domain currently registered for WIP-1006.
+    fn active_domain_hash(&self) -> B256;
+
     /// Returns the total number of games indexed by the dispute-game factory, across all
     /// game types.
     async fn game_count(&self) -> Result<u64, ProposerError>;
@@ -24,10 +27,13 @@ pub trait BondManagerClient: Send + Sync {
     /// Returns the account that created the provided game.
     async fn game_creator(&self, game: Address) -> Result<Address, ProposerError>;
 
+    /// Returns the proposal domain embedded in the provided game.
+    async fn game_domain_hash(&self, game: Address) -> Result<B256, ProposerError>;
+
     /// Returns the resolution status of the provided game.
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError>;
 
-    /// Resolves a proposer-owned game invalidated by its parent.
+    /// Resolves a proposer-owned game that is ready for a terminal outcome.
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError>;
 
     /// Returns whether the registry's finality airgap has elapsed for the provided game.
