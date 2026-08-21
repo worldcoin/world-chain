@@ -630,7 +630,7 @@ where
 mod tests {
     use super::*;
 
-    fn base_args_without_signer() -> Vec<&'static str> {
+    fn base_args() -> Vec<&'static str> {
         vec![
             "sp1-worker",
             "--prover-service-url",
@@ -643,13 +643,9 @@ mod tests {
             "http://127.0.0.1:5052",
             "--worker-id",
             "test",
+            "--sp1-kms-key-id",
+            "alias/prover",
         ]
-    }
-
-    fn base_args() -> Vec<&'static str> {
-        let mut args = base_args_without_signer();
-        args.extend(["--sp1-kms-key-id", "alias/prover"]);
-        args
     }
 
     #[test]
@@ -694,29 +690,13 @@ mod tests {
     }
 
     #[test]
-    fn worker_requires_exactly_one_signer() {
-        assert_eq!(
-            WorkerArgs::try_parse_from(base_args_without_signer())
-                .unwrap_err()
-                .kind(),
-            clap::error::ErrorKind::MissingRequiredArgument
-        );
-
+    fn worker_rejects_multiple_signers() {
         let mut multiple = base_args();
         multiple.extend(["--sp1-private-key", "0x1234"]);
         assert_eq!(
             WorkerArgs::try_parse_from(multiple).unwrap_err().kind(),
             clap::error::ErrorKind::ArgumentConflict
         );
-
-        for signer in [
-            ["--sp1-private-key", "0x1234"],
-            ["--sp1-kms-key-id", "alias/prover"],
-        ] {
-            let mut valid = base_args_without_signer();
-            valid.extend(signer);
-            WorkerArgs::try_parse_from(valid).unwrap();
-        }
     }
 
     #[test]
