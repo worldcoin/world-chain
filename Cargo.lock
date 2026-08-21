@@ -19398,6 +19398,7 @@ name = "world-chain-prover-cli"
 version = "2.4.2"
 dependencies = [
  "alloy-primitives",
+ "alloy-provider",
  "anyhow",
  "clap",
  "dotenvy",

@@ -216,6 +216,8 @@ async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
         game_provider,
         Sp1BackendConfig {
             allow_unfinalized: false,
+            aggregation_vkey: B256::with_last_byte(0xa1),
+            range_vkey_commitment: B256::with_last_byte(0xa2),
         },
     );
 
@@ -265,6 +267,8 @@ async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
         root_claim,
         l2_block_number: claimed_block,
         l1_head,
+        verifier_id: B256::with_last_byte(0xa1),
+        range_vkey_commitment: Some(B256::with_last_byte(0xa2)),
     };
     let response = client
         .request_proof(request)

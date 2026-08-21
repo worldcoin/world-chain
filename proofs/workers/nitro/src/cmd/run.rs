@@ -2,7 +2,7 @@
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use alloy_primitives::B256;
+use alloy_primitives::{B256, keccak256};
 use alloy_provider::ProviderBuilder;
 use anyhow::{Context, Result};
 use backon::{ExponentialBuilder, Retryable};
@@ -10,10 +10,12 @@ use clap::Parser;
 use tracing::{error, info};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host::online::{build_online_config, hardfork_config_from_chain_spec};
-use world_chain_proof_nitro_enclave::register::{
-    RegisterParams, RegistrationOutcome, register_enclave_key,
+use world_chain_proof_nitro_enclave::{
+    ExpectedPcrs,
+    host::{EnclaveEndpoint, NitroProver},
+    register::{RegisterParams, RegistrationOutcome, register_enclave_key},
 };
-use world_chain_proof_nitro_worker::{NitroBackend, NitroBackendConfig, build_expected_pcrs};
+use world_chain_proof_nitro_worker::{NitroBackend, NitroBackendConfig};
 use world_chain_proof_protocol::AlloyProofGameProvider;
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
@@ -178,18 +180,6 @@ pub struct WorkerArgs {
     )]
     enclave_port: u32,
 
-    /// PCR0 hex (48 bytes). All three PCRs must be provided for production use.
-    #[arg(long, env = "PCR0")]
-    pcr0: Option<String>,
-
-    /// PCR1 hex (48 bytes).
-    #[arg(long, env = "PCR1")]
-    pcr1: Option<String>,
-
-    /// PCR2 hex (48 bytes).
-    #[arg(long, env = "PCR2")]
-    pcr2: Option<String>,
-
     /// Seconds to sleep between job-queue polls when no work is available.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 10)]
     poll_interval_seconds: u64,
@@ -275,11 +265,14 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
         &schedule,
         Duration::from_secs(args.witness_timeout_seconds),
     )?;
-    let expected_pcrs = build_expected_pcrs(
-        args.pcr0.as_deref(),
-        args.pcr1.as_deref(),
-        args.pcr2.as_deref(),
-    )?;
+    // The verified startup report is the canonical identity of the enclave attached to this
+    // worker. Pinning later attestations to the same PCR set also catches enclave replacement.
+    let endpoint = EnclaveEndpoint::with_port(args.enclave_cid, args.enclave_port);
+    let (_, _, expected_pcrs) = NitroProver::new(endpoint, ExpectedPcrs::PLACEHOLDER)
+        .get_public_key_async()
+        .await
+        .context("failed to verify startup enclave attestation")?;
+    let tee_image_id = keccak256(expected_pcrs.pcr0);
 
     // Self-register the enclave's generated signing key on-chain before leasing any jobs:
     // proofs signed by an unregistered key do not verify, so an unregistered worker must not
@@ -330,6 +323,7 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
     info!(
         prover_service = %args.prover_service_url,
         enclave_cid = args.enclave_cid,
+        %tee_image_id,
         submit_proof_retry_max_retries = args.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = args.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = args.submit_proof_retry_max_delay_ms,

@@ -60,13 +60,17 @@ pub struct ProofRequest {
     pub l2_block_number: BlockNumber,
     /// The L1 head hash pinning the witness data.
     pub l1_head: B256,
+    /// Game-pinned verifier identifier: the aggregation vkey for SP1 or TEE image id for Nitro.
+    pub verifier_id: B256,
+    /// SP1 range-program vkey commitment. `None` for Nitro requests.
+    pub range_vkey_commitment: Option<B256>,
 }
 
 impl ProofRequest {
     /// Compute the deterministic identifier of this request.
     ///
-    /// The id commits to every request field, so exact duplicates are deduplicated without
-    /// allowing a proof pinned to a different L1 head to satisfy this request.
+    /// The id commits to the proof statement. Verifier identifiers are immutable properties of
+    /// `game`, so they are stored for worker routing rather than duplicated in the identifier.
     #[must_use]
     pub fn id(&self) -> ProofRequestId {
         let mut buf = Vec::with_capacity(1 + 20 + 32 + 8 + 32);
@@ -398,6 +402,10 @@ pub struct GetNextProofRequest {
     pub backend: ProofBackend,
     /// Stable id of the worker claiming the job.
     pub worker_id: String,
+    /// Verifier identifier supported by this worker.
+    pub verifier_id: B256,
+    /// SP1 range-program vkey commitment supported by this worker. `None` for Nitro workers.
+    pub range_vkey_commitment: Option<B256>,
 }
 
 /// Response returned after attempting to claim the next proof job.

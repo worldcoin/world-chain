@@ -74,10 +74,13 @@ impl NitroProver {
 
     /// Requests the enclave's NSM attestation document that embeds its ephemeral public key.
     ///
-    /// Use this during one-time registration to learn the enclave's secp256k1 public key
-    /// and verify it is pinned to the expected PCR measurements.
+    /// Use this during startup or registration to learn the enclave's secp256k1 public key and
+    /// verified PCR measurements. A non-placeholder expected set additionally pins the report to
+    /// measurements previously observed by the caller.
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
-    pub async fn get_public_key_async(&self) -> Result<(Vec<u8>, Vec<u8>), NitroProverError> {
+    pub async fn get_public_key_async(
+        &self,
+    ) -> Result<(Vec<u8>, Vec<u8>, ExpectedPcrs), NitroProverError> {
         let nonce = generate_nonce()?;
         let response = self.round_trip(EnclaveRequest::PublicKey { nonce }).await?;
         match response {
@@ -85,13 +88,14 @@ impl NitroProver {
                 attestation_doc,
                 public_key,
             } => {
+                attestation::verify_cose_sign1_signature(&attestation_doc)?;
+                attestation::verify_nonce(&attestation_doc, &nonce)?;
+                attestation::verify_nsm_public_key(&attestation_doc, &public_key)?;
+                let attested_pcrs = attestation::extract_pcrs(&attestation_doc)?;
                 if !self.expected_pcrs.is_placeholder() {
-                    attestation::verify_cose_sign1_signature(&attestation_doc)?;
                     attestation::verify_pcrs_only(&attestation_doc, &self.expected_pcrs)?;
-                    attestation::verify_nonce(&attestation_doc, &nonce)?;
-                    attestation::verify_nsm_public_key(&attestation_doc, &public_key)?;
                 }
-                Ok((attestation_doc, public_key))
+                Ok((attestation_doc, public_key, attested_pcrs))
             }
             EnclaveResponse::Error { message } => Err(NitroProverError::Enclave(message)),
             EnclaveResponse::Range { .. } => Err(NitroProverError::UnexpectedResponse("range")),

@@ -92,8 +92,8 @@ pub struct ExpectedPcrs {
 }
 
 impl ExpectedPcrs {
-    /// All-zero placeholder PCRs. Useful for unit tests and as the default for the WIP
-    /// integration; production callers MUST override these with real measurements.
+    /// All-zero placeholder PCRs. Used while bootstrapping expected measurements from a verified
+    /// public-key attestation and in unit tests.
     pub const PLACEHOLDER: Self = Self {
         pcr0: [0u8; PCR_LEN],
         pcr1: [0u8; PCR_LEN],
@@ -102,9 +102,8 @@ impl ExpectedPcrs {
 
     /// Returns `true` if all three PCRs are all-zero (i.e., the placeholder value).
     ///
-    /// Callers can use this to skip attestation verification in dev/test environments
-    /// where real PCR measurements are not available. **Never use placeholder PCRs in
-    /// production.**
+    /// Callers can use this to skip comparison against a previously pinned PCR set. Operations
+    /// that bootstrap from an attestation must still verify its AWS signature and freshness.
     #[must_use]
     pub fn is_placeholder(&self) -> bool {
         self.pcr0.iter().all(|&b| b == 0)

@@ -5,6 +5,8 @@ CREATE TABLE proof_requests (
     root_claim          BYTEA NOT NULL,
     l2_block_number     BIGINT NOT NULL,
     l1_head             BYTEA NOT NULL,
+    verifier_id         BYTEA NOT NULL,
+    range_vkey_commitment BYTEA NULL,
 
     proof_status        TEXT NOT NULL,
     proof_data          BYTEA NULL,
@@ -28,9 +30,9 @@ CREATE TABLE proof_requests (
    
 );
 
-CREATE INDEX proof_requests_queued_idx
-    ON proof_requests (backend, created_at)
-    WHERE job_status = 'PENDING';
+CREATE INDEX proof_requests_verifier_queue_idx
+    ON proof_requests (backend, verifier_id, range_vkey_commitment, l2_block_number, created_at)
+    WHERE job_status IN ('PENDING', 'CLAIMED');
 
 CREATE INDEX proof_requests_starting_lock_idx
     ON proof_requests (lock_expires_at)

@@ -17,6 +17,7 @@ use world_chain_proof_sp1_host::{
         NetworkConnection, NetworkCreditClient, NetworkProofRequestConfig, NetworkProverLimits,
         NetworkSuccinctProver, ProofLimits, SignerType,
     },
+    vkeys::embedded_vkey_manifest,
 };
 use world_chain_proof_sp1_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
@@ -557,6 +558,9 @@ async fn run_worker<P>(cli: &WorkerArgs, host: OnlineHostConfig, prover: P) -> R
 where
     P: WorldSuccinctProver + Send + Sync + 'static,
 {
+    let embedded_vkeys = embedded_vkey_manifest()
+        .await
+        .context("computing embedded SP1 verifier identifiers")?;
     let l1_rpc_url = cli.l1_rpc.parse().context("invalid L1 RPC URL")?;
     let game_provider =
         AlloyProofGameProvider::new(ProviderBuilder::new().connect_http(l1_rpc_url));
@@ -566,6 +570,8 @@ where
         game_provider,
         Sp1BackendConfig {
             allow_unfinalized: cli.allow_unfinalized,
+            aggregation_vkey: embedded_vkeys.aggregation_vkey,
+            range_vkey_commitment: embedded_vkeys.range_vkey_commitment,
         },
     );
 
@@ -606,6 +612,8 @@ where
         sp1_max_price_per_pgu = ?cli.sp1_max_price_per_pgu,
         sp1_auction_timeout_seconds = ?cli.sp1_auction_timeout_seconds,
         sp1_proof_timeout_seconds = ?cli.sp1_proof_timeout_seconds,
+        aggregation_vkey = %embedded_vkeys.aggregation_vkey,
+        range_vkey_commitment = %embedded_vkeys.range_vkey_commitment,
         submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = cli.submit_proof_retry_max_delay_ms,

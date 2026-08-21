@@ -28,6 +28,21 @@ and keeps measurement changes reviewable on their own.
 The draft release notes include a measurements section that diffs the vkeys/PCRs against the
 previous `proof/v*` release and flags when a new game implementation or PCR approval is required.
 
+## Same-domain measurement cutovers
+
+Deploy verifier-aware queue routing to the prover-service, defender, and current workers before
+activating an implementation with new vkeys or a new Nitro image. Keep the current
+workers running as the old generation, add workers built for the new measurements, and only then
+activate the new game implementation. Both generations may share one prover-service: workers lease
+only games whose pinned aggregation/range vkeys or TEE image id match their own measurements.
+SP1 workers derive their vkeys from their embedded guest programs; Nitro workers verify a startup
+attestation and derive their TEE image ID from its PCR0, so neither identity is configured manually
+on the worker.
+
+Remove the old workers after no matching old-game requests remain. This procedure covers
+same-domain implementation rotations. A domain-changing cutover requires a separate policy for
+retiring or continuing to defend the old lineage.
+
 ## Cutting a release
 
 ```bash
