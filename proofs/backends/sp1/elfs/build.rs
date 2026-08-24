@@ -108,6 +108,6 @@ fn main() {
 
     // Paths are relative to this build script's CARGO_MANIFEST_DIR
     // (proofs/backends/sp1/elfs).
-    build("../programs/range-ethereum");
-    build("../programs/aggregation");
+    build("../../../measured/sp1-programs/range-ethereum");
+    build("../../../measured/sp1-programs/aggregation");
 }
