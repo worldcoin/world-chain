@@ -12,7 +12,8 @@ set -euo pipefail
 #
 # Outputs in <output-dir>:
 #   world-chain-proof-nitro-enclave.eif   the enclave image
-#   pcrs.json                       PCR0/PCR1/PCR2 measurements
+#   measurements.json               proofs/measurements.json with the freshly measured
+#                                   PCR0/PCR1/PCR2 substituted into `.nitro`
 #
 # Env overrides:
 #   NITRO_CLI_VERSION   tag of aws/aws-nitro-enclaves-cli to build (default v1.4.2)
@@ -24,7 +25,7 @@ if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
 fi
 
 NITRO_CLI_VERSION="${NITRO_CLI_VERSION:-v1.4.2}"
-ENCLAVE_IMAGE_TAG="${ENCLAVE_IMAGE_TAG:-world-chain-proof-nitro-enclave:local}"
+ENCLAVE_IMAGE_TAG="${ENCLAVE_IMAGE_TAG:-world-chain-nitro-enclave:local}"
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -45,7 +46,7 @@ command -v nix >/dev/null || {
 }
 nix build .#enclave-image --no-link --print-out-paths > "$out_dir/enclave-image-path"
 docker load -i "$(cat "$out_dir/enclave-image-path")"
-docker tag world-chain-proof-nitro-enclave:nix "$ENCLAVE_IMAGE_TAG"
+docker tag world-chain-nitro-enclave:nix "$ENCLAVE_IMAGE_TAG"
 
 echo "[2/3] Building nitro-cli $NITRO_CLI_VERSION..."
 nitro_cli_dir="$out_dir/aws-nitro-enclaves-cli-$NITRO_CLI_VERSION"
@@ -66,9 +67,18 @@ NITRO_CLI_ARTIFACTS="$out_dir/artifacts" \
     --docker-uri "$ENCLAVE_IMAGE_TAG" \
     --output-file "$eif_path" | tee "$build_json"
 
-jq '.Measurements' "$build_json" > "$out_dir/pcrs.json"
+# A whole measurements.json rather than the PCRs alone, so the output is directly
+# comparable to the committed file: `diff <(jq -S . proofs/measurements.json) \
+# <(jq -S . target/eif/measurements.json)` answers "does this checkout still measure to what
+# it claims" in one command. The SP1 half is carried over untouched — it is measured by a
+# different toolchain and nothing here is in a position to recompute it.
+jq -S --slurpfile built <(jq '.Measurements' "$build_json") \
+  '.nitro = {pcr0: ("0x" + $built[0].PCR0),
+             pcr1: ("0x" + $built[0].PCR1),
+             pcr2: ("0x" + $built[0].PCR2)}' \
+  "$repo_root/proofs/measurements.json" > "$out_dir/measurements.json"
 
 echo
-echo "EIF:  $eif_path"
-echo "PCRs: $out_dir/pcrs.json"
-jq . "$out_dir/pcrs.json"
+echo "EIF:          $eif_path"
+echo "Measurements: $out_dir/measurements.json"
+jq . "$out_dir/measurements.json"

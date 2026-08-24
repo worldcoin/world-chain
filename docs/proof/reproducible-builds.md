@@ -9,15 +9,17 @@ Two mechanisms keep them stable.
 
 ## 1. Measured crates are their own workspaces
 
-A crate is **measured** if it is compiled into a guest ELF or into the enclave binary. Every
-measured crate is excluded from the root workspace and carries its own `Cargo.lock`:
+A crate is **measured** if it is compiled into a guest ELF or into the enclave binary. All
+measured crates live under `proofs/measured/`, excluded from the root workspace. A `Cargo.lock`
+exists per measured **artifact** — the shared libraries have none; their versions resolve
+inside each consumer artifact's lockfile:
 
-| Path | Compiled into |
-|:---|:---|
-| `proofs/core` | both the SP1 guests and the enclave |
-| `proofs/kona/client` | both |
-| `proofs/backends/nitro/enclave` | the enclave binary (EIF → PCR0/PCR2) |
-| `proofs/backends/sp1/programs` | the guest ELFs → vkeys |
+| Path | Compiled into | Lockfile |
+|:---|:---|:---|
+| `proofs/measured/core` | both the SP1 guests and the enclave | none — resolved per artifact |
+| `proofs/measured/kona-client` | both | none — resolved per artifact |
+| `proofs/measured/nitro-enclave` | the enclave binary (EIF → PCR0/PCR2) | own `Cargo.lock` → PCRs |
+| `proofs/measured/sp1-programs` | the guest ELFs → vkeys | own `Cargo.lock` → vkeys |
 
 Each pins its own `[workspace.dependencies]` rather than inheriting the root workspace's.
 That is the whole point: sharing the root's dependency table means a version bump made for
@@ -29,7 +31,7 @@ the node silently rotates an on-chain trust anchor.
 Two consequences worth knowing:
 
 - `cargo build` at the repo root does **not** build these crates as workspace members. Use
-  `--manifest-path`, e.g. `cargo test --manifest-path proofs/core/Cargo.toml`.
+  `--manifest-path`, e.g. `cargo test --manifest-path proofs/measured/core/Cargo.toml`.
 - Host-side code must not leak into a measured crate. On-chain registration lives in
   `proofs/backends/nitro/register` (a root-workspace crate) precisely so `alloy-provider`,
   the transaction signer and their transitive graph stay out of the enclave's lockfile.
@@ -61,8 +63,12 @@ docker load -i ./result
 
 ```bash
 scripts/build-eif.sh target/eif
-cat target/eif/pcrs.json
+diff <(jq -S . proofs/measurements.json) <(jq -S . target/eif/measurements.json)
 ```
+
+It writes a whole `measurements.json` — the committed file with the freshly measured PCRs
+substituted into `.nitro` — so the diff above answers "does this checkout still measure to
+what it claims" directly.
 
 There is no Dockerfile fallback. There used to be one, and it built a Debian-based rootfs —
 a completely different filesystem from the Nix one, and therefore different PCRs. Keeping it

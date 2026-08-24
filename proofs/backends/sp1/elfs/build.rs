@@ -52,9 +52,9 @@ fn main() {
         .unwrap_or(true);
 
     // The SP1 guest programs live in their own nested cargo workspace at
-    // `proofs/backends/sp1/programs/`, but they have path dependencies that
+    // `proofs/measured/sp1-programs/`, but they have path dependencies that
     // reach outside that nested workspace (e.g. `world-chain-proof-core`
-    // at `proofs/core`). By default `sp1_build` mounts the program's
+    // at `proofs/measured/core`). By default `sp1_build` mounts the program's
     // cargo-metadata workspace root into the Docker container at
     // `/root/program`, which would only expose the programs workspace
     // and break those out-of-workspace path deps (causing the container
@@ -92,7 +92,7 @@ fn main() {
             program_dir,
             sp1_build::BuildArgs {
                 docker,
-                // Pin the linux/amd64 manifest that produced vkeys.json. The tag remains in the
+                // Pin the linux/amd64 manifest that produced measurements.json. The tag remains in the
                 // reference for readability, while the digest prevents a mutable tag from
                 // silently rotating the guest ELFs and their on-chain vkeys.
                 tag:

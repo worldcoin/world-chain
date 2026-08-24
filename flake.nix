@@ -4,18 +4,18 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     crane.url = "github:ipetkov/crane";
-    # rust-overlay rather than fenix: it ships the channel manifests in-tree, so resolving a
-    # dated nightly is pure evaluation. fenix reads them through import-from-derivation,
-    # which would make even `nix eval` require an x86_64-linux builder — the flake could then
-    # not be checked from a macOS dev machine at all.
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    optimism = {
+      url = "github:ethereum-optimism/optimism/96ffbb2a94f19886fe7e27c45f3310e64ccd18b3";
+      flake = false;
+    };
   };
 
   outputs =
-    { nixpkgs, crane, rust-overlay, ... }:
+    { nixpkgs, crane, rust-overlay, optimism, ... }:
     let
       # EIFs are linux/amd64 only, so there is nothing to gain from other systems here.
       system = "x86_64-linux";
@@ -37,9 +37,9 @@
       # the code changes — the build output would be identical, but every consumer keyed on
       # the store path would see a change that means nothing.
       measuredDirs = lib.fileset.unions [
-        ./proofs/backends/nitro/enclave
-        ./proofs/core
-        ./proofs/kona/client
+        ./proofs/measured/nitro-enclave
+        ./proofs/measured/core
+        ./proofs/measured/kona-client
       ];
       src = lib.fileset.toSource {
         root = ./.;
@@ -61,24 +61,77 @@
         ];
       };
 
-      manifest = "proofs/backends/nitro/enclave/Cargo.toml";
+      manifest = "proofs/measured/nitro-enclave/Cargo.toml";
+      cargoLockPath = ./proofs/measured/nitro-enclave/Cargo.lock;
+
+      # The optimism rev Cargo.lock pins, so the NUT bundles grafted into the vendor tree below
+      # cannot come from a different commit than the kona crates built against them.
+      lockedOptimismRev =
+        let
+          lock = builtins.fromTOML (builtins.readFile cargoLockPath);
+          sources = lib.unique (lib.filter
+            (source: source != null && lib.hasInfix "ethereum-optimism/optimism" source)
+            (map (package: package.source or null) lock.package));
+        in
+        assert lib.assertMsg (lib.length sources == 1)
+          "expected one ethereum-optimism/optimism git source in Cargo.lock, found ${toString (lib.length sources)}";
+        lib.last (lib.splitString "#" (lib.head sources));
+
+      checkedOptimism =
+        assert lib.assertMsg (optimism.rev == lockedOptimismRev)
+          ("flake input `optimism` is ${optimism.rev} but Cargo.lock pins ${lockedOptimismRev}"
+            + " — point the input at the rev Cargo.lock uses");
+        optimism;
+
+      # kona-hardforks' build script probes its own ancestors for op-core/nuts/bundles/*.json,
+      # which exists only in a monorepo checkout — cargo vendors every crate standalone. The
+      # first ancestor probed is the crate directory itself, so restoring the bundles there
+      # satisfies the probe without patching the build script. Nothing verifies the addition:
+      # cargo writes `{"files":{}}` as the checksum manifest for vendored git crates.
+      #
+      # This has to hook the checkout rather than the assembled vendor directory, whose
+      # config.toml points cargo back at the original store paths by absolute path.
+      cargoVendorDir = craneLib.vendorCargoDeps {
+        cargoLock = cargoLockPath;
+        overrideVendorGitCheckout = packages: drv:
+          if lib.any (package: lib.hasInfix "ethereum-optimism/optimism" (package.source or "")) packages then
+            pkgs.runCommandLocal "optimism-checkout-with-nut-bundles" { } ''
+              cp -R --no-preserve=mode,ownership ${drv} $out
+              chmod -R u+w $out
+              for crate in $out/kona-hardforks-*; do
+                mkdir -p "$crate/op-core/nuts/bundles"
+                cp ${checkedOptimism}/op-core/nuts/bundles/*.json "$crate/op-core/nuts/bundles/"
+              done
+            ''
+          else
+            drv;
+      };
 
       commonArgs = {
-        inherit src;
+        inherit src cargoVendorDir;
         pname = "world-chain-proof-nitro-enclave";
         version = "2.4.2";
         strictDeps = true;
 
         # The enclave is its own workspace; point cargo at it rather than at the repo root,
         # which is not a workspace this source tree even contains.
-        cargoToml = ./proofs/backends/nitro/enclave/Cargo.toml;
-        cargoLock = ./proofs/backends/nitro/enclave/Cargo.lock;
+        cargoToml = ./proofs/measured/nitro-enclave/Cargo.toml;
+        cargoLock = ./proofs/measured/nitro-enclave/Cargo.lock;
         cargoExtraArgs = lib.concatStringsSep " " [
           "--locked"
           "--manifest-path ${manifest}"
           "--features enclave"
           "--bin world-chain-proof-nitro-enclave"
         ];
+
+        # crane hands the deps-only pass a synthesized source tree carrying the lock it was
+        # given at the root, but cargo looks for one next to the manifest — and this manifest
+        # is a nested workspace. Without the copy, resolving the vendored git dependencies
+        # fails with "requires a lock file to be present first". In the real build the two
+        # files are the same lock, so the copy changes nothing.
+        preBuild = ''
+          cp Cargo.lock ${builtins.dirOf manifest}/Cargo.lock
+        '';
 
         # Matches the apt list the Dockerfile installs for kona / rkyv / kzg-rs.
         nativeBuildInputs = with pkgs; [ clang cmake pkg-config ];
@@ -89,7 +142,21 @@
       # Dependencies build once and cache separately from the crate itself.
       cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-      enclave = craneLib.buildPackage (commonArgs // { inherit cargoArtifacts; });
+      enclave = craneLib.buildPackage (commonArgs // {
+        inherit cargoArtifacts;
+
+        # crane decides what to install by running `cargo metadata` from the source root, and
+        # this workspace is nested — there is no manifest up there to find. Do the install from
+        # the crate directory instead. The log path has to be absolutised first: the hook
+        # resolves it against the working directory.
+        doNotPostBuildInstallCargoBinaries = true;
+        installPhaseCommand = ''
+          buildLog=$(realpath "$cargoBuildLog")
+          pushd ${builtins.dirOf manifest} >/dev/null
+          installFromCargoBuildLog "$out" "$buildLog"
+          popd >/dev/null
+        '';
+      });
 
       # The rootfs nitro-cli measures into PCR0 and PCR2.
       #
@@ -99,7 +166,7 @@
       # time rather than "now". None of the timestamp normalisation a Dockerfile needs applies
       # here, because there are no build-time timestamps to normalise.
       enclave-image = pkgs.dockerTools.buildLayeredImage {
-        name = "world-chain-proof-nitro-enclave";
+        name = "world-chain-nitro-enclave";
         tag = "nix";
 
         # `created` and `mtime` default to 1970-01-01T00:00:01Z, so the image carries no

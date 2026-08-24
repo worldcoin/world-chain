@@ -284,7 +284,7 @@ jobs:
           docker load -i "$image"
           for tag in "$TAG" "sha-$SHORT"; do
             ref="$REGISTRY/$IMAGE_NAME-nitro-enclave:$tag"
-            docker tag world-chain-proof-nitro-enclave:nix "$ref"
+            docker tag world-chain-nitro-enclave:nix "$ref"
             docker push "$ref"
           done
       # Reuses the image loaded above; nix build is a store hit, so nothing is recompiled.
@@ -293,13 +293,33 @@ jobs:
       - name: Extract PCRs
         id: pcrs
         run: |
-          jq -r '"pcr0=\(.PCR0)", "pcr1=\(.PCR1)", "pcr2=\(.PCR2)"' \
-            target/eif/pcrs.json >> "$GITHUB_OUTPUT"
-      - name: Upload PCR measurements
+          jq -r '"pcr0=\(.nitro.pcr0)", "pcr1=\(.nitro.pcr1)", "pcr2=\(.nitro.pcr2)"' \
+            target/eif/measurements.json >> "$GITHUB_OUTPUT"
+      - name: Upload measurements
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: nitro-enclave-pcrs
-          path: target/eif/pcrs.json
+          name: nitro-enclave-measurements
+          path: target/eif/measurements.json
+
+      # Surface, never commit: informational only — release-proof.yml is the enforcing
+      # gate. Publishes the fresh `.nitro` half when the committed file has gone stale.
+      - name: Compare measurements to committed
+        run: |
+          set -euo pipefail
+          if diff <(jq -S .nitro proofs/measurements.json) <(jq -S .nitro target/eif/measurements.json) > /tmp/nitro-measurements.diff; then
+            echo "PCRs match the committed proofs/measurements.json." >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Committed \`.nitro\` measurements are stale"
+              echo '```diff'
+              cat /tmp/nitro-measurements.diff
+              echo '```'
+              echo "Fresh \`.nitro\` half — paste into \`proofs/measurements.json\`:"
+              echo '```json'
+              jq -S .nitro target/eif/measurements.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -312,7 +332,7 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          file: proofs/backends/nitro/enclave/Dockerfile.eif
+          file: proofs/measured/nitro-enclave/Dockerfile.eif
           push: true
           platforms: linux/amd64
           tags: |

@@ -18,8 +18,7 @@ and keeps measurement changes reviewable on their own.
 | Artifact                                                 | Notes |
 |:---------------------------------------------------------|:---|
 | `manifest.json`                                          | Single source of truth binding git SHA, ELF sha256s, vkeys, PCRs, and image digests |
-| `vkeys.json`                                             | Range vkey commitment + aggregation vkey, plus hashes of the reproducibly built ELFs |
-| `pcrs.json`                                              | PCR0/PCR1/PCR2 of the enclave EIF |
+| `measurements.json`                                      | `.sp1`: range vkey commitment + aggregation vkey + ELF hashes. `.nitro`: PCR0/PCR1/PCR2 of the enclave EIF. Committed at `proofs/measurements.json` |
 | `world-chain-proof-nitro-enclave.eif`                    | Enclave image, built reproducibly (see below) |
 
 How the measurements are kept reproducible — the measured workspaces and the Nix enclave
@@ -65,7 +64,8 @@ release for human review. Review the measurements section, then publish.
 
 - **SP1 ELFs** are built in the digest-pinned SP1 image and canonical `/root/program` layout,
   then embedded into the host binary at compile time via `sp1_sdk::include_elf!()`. There are no
-  committed ELF binaries; their hashes and derived vkeys are committed in `vkeys.json`. The
+  committed ELF binaries; their hashes and derived vkeys are committed in the `.sp1` half of
+  `proofs/measurements.json`. The
   production worker image consumes the same canonical ELFs and verifies its linked measurements
   before publication. See
   [elf-management.md](./elf-management.md).

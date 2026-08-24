@@ -21,8 +21,8 @@ repository = "https://github.com/worldcoin/world-chain/"
 semicolon_in_expressions_from_macros = "allow"
 
 [workspace.dependencies]
-world-chain-proof-core = { path = "../../../core", default-features = false }
-world-chain-proof-kona-client = { path = "../../../kona/client", default-features = false }
+world-chain-proof-core = { path = "../core", default-features = false }
+world-chain-proof-kona-client = { path = "../kona-client", default-features = false }
 alloy-primitives = { version = "1.6.0", default-features = false, features = [
     "std",
     "map-foldhash",

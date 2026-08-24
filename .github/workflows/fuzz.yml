@@ -4,13 +4,13 @@ on:
   push:
     branches: [main]
     paths:
-      - "proofs/backends/nitro/enclave/**"
+      - "proofs/measured/nitro-enclave/**"
       - "proofs/backends/nitro/fuzz/**"
       - ".github/workflows/fuzz.yml"
   merge_group:
   pull_request:
     paths:
-      - "proofs/backends/nitro/enclave/**"
+      - "proofs/measured/nitro-enclave/**"
       - "proofs/backends/nitro/fuzz/**"
       - ".github/workflows/fuzz.yml"
   workflow_dispatch:

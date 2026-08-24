@@ -1,4 +1,4 @@
-# Standalone workspace, in place. See proofs/core/Cargo.toml for why the
+# Standalone workspace, in place. See proofs/measured/core/Cargo.toml for why the
 # measured crates pin their own dependencies instead of inheriting the root workspace's.
 # 
 # Adding a dependency here is a measurement change. Treat it as one.
@@ -18,7 +18,7 @@ repository = "https://github.com/worldcoin/world-chain/"
 semicolon_in_expressions_from_macros = "allow"
 
 [workspace.dependencies]
-world-chain-proof-core = { path = "../../core", default-features = false }
+world-chain-proof-core = { path = "../core", default-features = false }
 alloy-consensus = { version = "=2.1.1", default-features = false }
 alloy-eips = { version = "=2.1.1", default-features = false, features = [
     "serde",

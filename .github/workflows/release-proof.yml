@@ -1,0 +1,510 @@
+name: release-proof
+
+# Versioned release path for the Nitro enclave, cut on `proof/v*` tag pushes.
+#
+# docker-proof.yml covers the unversioned path: it publishes `nightly` images off main and
+# records the PCRs in a job summary. This workflow cuts the artifacts an operator is expected
+# to *trust* — pinned image tags, a signed manifest tying measurements to a commit, and an
+# allowlist PR — and it refuses to publish any of that unless two independent builds of the
+# same commit land on the same PCRs.
+#
+# That second build is the point. A PCR is only meaningful if anyone holding this commit can
+# re-derive it; flake.nix makes that true by construction, and `verify-reproducible` is what
+# proves the construction still holds for this release. The failure it catches is real and
+# quiet: an input the flake's `src` fileset does not capture (a new include_bytes! asset, a
+# generated file) makes the build depend on something outside the pinned closure, and the
+# published PCR then describes a rootfs nobody else can reproduce.
+
+on:
+  push:
+    tags: ["proof/v*"]
+
+concurrency:
+  group: release-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REPO_NAME: ${{ github.event.repository.name }}
+  IMAGE_NAME: ${{ github.repository }}
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  AWS_REGION: us-east-1
+  SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  approve-release:
+    name: approve release
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: true
+
+  prepare-release:
+    name: prepare release
+    needs: approve-release
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.release.outputs.VERSION }}
+      TAG: ${{ steps.release.outputs.TAG }}
+      SHA: ${{ steps.release.outputs.SHA }}
+      SHORT_SHA: ${{ steps.release.outputs.SHORT_SHA }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - name: Resolve and validate version
+        id: release
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#proof/v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Invalid release tag: $tag (expected proof/vX.Y.Z)" >&2
+            exit 1
+          fi
+
+          # flake.nix carries the enclave version as its own literal, because a Nix derivation
+          # cannot read it out of Cargo.toml without an import-from-derivation. A bump that
+          # misses one of the two publishes an image whose tag disagrees with what it measures,
+          # which is only discoverable by reading the manifest of a release already cut.
+          crate_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' \
+            proofs/measured/nitro-enclave/Cargo.toml | head -n 1)
+          flake_version=$(sed -n 's/^ *version = "\([^"]*\)";.*/\1/p' flake.nix | head -n 1)
+          for pair in "proofs/measured/nitro-enclave/Cargo.toml:$crate_version" "flake.nix:$flake_version"; do
+            file="${pair%%:*}"
+            found="${pair##*:}"
+            if [[ "$version" != "$found" ]]; then
+              echo "Release version $version does not match $file version $found" >&2
+              exit 1
+            fi
+          done
+
+          release_sha=$(git rev-parse HEAD)
+          {
+            echo "VERSION=$version"
+            echo "TAG=$tag"
+            echo "SHA=$release_sha"
+            echo "SHORT_SHA=${release_sha::7}"
+          } >> "$GITHUB_OUTPUT"
+
+  # Two independent builds of the same commit on two ephemeral runners. Neither can shortcut
+  # to the other's result: the enclave derivation exists in no binary cache, so `nix build`
+  # substitutes the pinned nixpkgs closure and then compiles our crate from source on both.
+  #
+  # Only the canonical leg publishes. The reproduction leg builds and measures, nothing else,
+  # so a mismatch fails the release before anything is pushed anywhere.
+  build-enclave:
+    name: build enclave (${{ matrix.attempt }})
+    needs: [prepare-release]
+    environment:
+      name: dev
+      deployment: false
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [canonical, reproduction]
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.SHA }}
+      # nitro-cli is built from source at a pinned tag by build-eif.sh, so the EIF assembly
+      # itself is pinned rather than whatever the runner image happens to ship.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      # TODO: pin by commit SHA once the action is allowlisted, to match every other action
+      # in this repo.
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Build enclave image and EIF
+        run: scripts/build-eif.sh target/eif
+
+      # build-eif.sh already wrote target/eif/measurements.json — the committed file with the
+      # freshly measured PCRs substituted in. This adds the build-side fingerprints, which are
+      # provenance rather than measurements and so stay out of the committed shape.
+      - name: Record build provenance
+        run: |
+          set -euo pipefail
+          store_path=$(cat target/eif/enclave-image-path)
+          # NAR hash of the rootfs tarball PCR0/PCR2 are measured over. Cheaper to compare than
+          # the PCRs and it fails earlier, but it is a leading indicator, not the check: the
+          # store path itself is input-addressed and would match even if the bytes diverged.
+          image_hash=$(nix hash path --type sha256 --sri "$store_path")
+          eif_sha=$(sha256sum target/eif/world-chain-proof-nitro-enclave.eif | cut -d' ' -f1)
+          jq -n --arg imageHash "$image_hash" --arg eifSha256 "$eif_sha" \
+            '{imageHash: $imageHash, eifSha256: $eifSha256}' > target/eif/provenance.json
+          jq . target/eif/measurements.json target/eif/provenance.json
+
+      - name: Log in to GHCR
+        if: matrix.attempt == 'canonical'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The exact rootfs the EIF above was measured from, already loaded into the local docker
+      # daemon by build-eif.sh. Nitro Enclaves are x86_64 only, so there is no manifest to merge.
+      - name: Push the enclave image
+        if: matrix.attempt == 'canonical'
+        id: push-enclave
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.VERSION }}
+          SHORT: ${{ needs.prepare-release.outputs.SHORT_SHA }}
+        run: |
+          set -euo pipefail
+          repo="$REGISTRY/$IMAGE_NAME-nitro-enclave"
+          for tag in "v$VERSION" "sha-$SHORT"; do
+            docker tag world-chain-nitro-enclave:nix "$repo:$tag"
+            docker push "$repo:$tag" | tee push.log
+          done
+          # From the push output rather than `docker inspect .RepoDigests`, which is a list of
+          # every repo this image id has ever been pushed to and is not ordered by anything.
+          digest=$(sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' push.log | tail -n 1)
+          test -n "$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        if: matrix.attempt == 'canonical'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # Carrier image so Kubernetes can pull the EIF via an init container (AWS Nitro Enclaves
+      # K8s device plugin pattern). Its build context is target/eif/, written above.
+      - name: Build and push EIF carrier image
+        if: matrix.attempt == 'canonical'
+        id: push-eif
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: proofs/measured/nitro-enclave/Dockerfile.eif
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nitro-enclave-eif:v${{ needs.prepare-release.outputs.VERSION }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nitro-enclave-eif:sha-${{ needs.prepare-release.outputs.SHORT_SHA }}
+
+      # Digests land in the provenance file rather than in job outputs: matrix legs share one
+      # output namespace, so whichever finished last would win.
+      - name: Record published digests
+        if: matrix.attempt == 'canonical'
+        env:
+          ENCLAVE_DIGEST: ${{ steps.push-enclave.outputs.digest }}
+          EIF_DIGEST: ${{ steps.push-eif.outputs.digest }}
+        run: |
+          set -euo pipefail
+          jq --arg enclave "$ENCLAVE_DIGEST" --arg eif "$EIF_DIGEST" \
+            '. + {images: {enclave: $enclave, eifCarrier: $eif}}' \
+            target/eif/provenance.json > target/eif/provenance.tmp
+          mv target/eif/provenance.tmp target/eif/provenance.json
+
+      - name: Upload measurements
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: enclave-measurements-${{ matrix.attempt }}
+          path: |
+            target/eif/measurements.json
+            target/eif/provenance.json
+          if-no-files-found: error
+
+  verify-reproducible:
+    name: verify reproducible
+    needs: [prepare-release, build-enclave]
+    runs-on: ubuntu-latest
+    outputs:
+      PCR0: ${{ steps.compare.outputs.PCR0 }}
+      PCR1: ${{ steps.compare.outputs.PCR1 }}
+      PCR2: ${{ steps.compare.outputs.PCR2 }}
+      IMAGE_HASH: ${{ steps.compare.outputs.IMAGE_HASH }}
+      EIF_SHA256: ${{ steps.compare.outputs.EIF_SHA256 }}
+      ENCLAVE_DIGEST: ${{ steps.compare.outputs.ENCLAVE_DIGEST }}
+      EIF_DIGEST: ${{ steps.compare.outputs.EIF_DIGEST }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.SHA }}
+      - name: Download measurements
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: enclave-measurements-*
+      - name: Compare builds
+        id: compare
+        run: |
+          set -euo pipefail
+          canonical=enclave-measurements-canonical
+          reproduction=enclave-measurements-reproduction
+
+          if ! diff -u <(jq -S . "$reproduction/measurements.json") \
+                       <(jq -S . "$canonical/measurements.json"); then
+            echo "::error::Enclave build is not reproducible — two builds of the same commit measured to different PCRs."
+            echo "::error::Most likely cause: an input the flake.nix \`src\` fileset does not capture (a newly embedded asset, a generated file), making the build depend on something outside the pinned closure."
+            exit 1
+          fi
+
+          # `images` is excluded: only the publishing leg has it.
+          if ! diff -u <(jq -S '{imageHash, eifSha256}' "$reproduction/provenance.json") \
+                       <(jq -S '{imageHash, eifSha256}' "$canonical/provenance.json"); then
+            echo "::error::Two builds of the same commit produced different rootfs or EIF bytes."
+            exit 1
+          fi
+
+          # The committed measurements are a claim about this commit. A release that measures to
+          # something else means the claim is stale, and the allowlist and the deployment would
+          # be keyed on a number nobody can reproduce from the tree.
+          if [ "$(jq -r '.nitro.pcr0' proofs/measurements.json)" = "null" ]; then
+            echo "::notice::proofs/measurements.json has no PCRs recorded yet; the allowlist PR will fill them in."
+          elif ! diff -u <(jq -S .nitro proofs/measurements.json) \
+                         <(jq -S .nitro "$canonical/measurements.json"); then
+            echo "::error::Built PCRs do not match the PCRs committed in proofs/measurements.json."
+            echo "::error::Re-measure with scripts/build-eif.sh and commit the result before tagging."
+            exit 1
+          fi
+
+          jq -r '"PCR0=\(.nitro.pcr0)", "PCR1=\(.nitro.pcr1)", "PCR2=\(.nitro.pcr2)"' \
+            "$canonical/measurements.json" >> "$GITHUB_OUTPUT"
+          jq -r '"IMAGE_HASH=\(.imageHash)", "EIF_SHA256=\(.eifSha256)",
+                 "ENCLAVE_DIGEST=\(.images.enclave)", "EIF_DIGEST=\(.images.eifCarrier)"' \
+            "$canonical/provenance.json" >> "$GITHUB_OUTPUT"
+
+  draft-release:
+    name: draft release
+    needs: [prepare-release, verify-reproducible]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare-release.outputs.VERSION }}
+      TAG: ${{ needs.prepare-release.outputs.TAG }}
+      RELEASE_SHA: ${{ needs.prepare-release.outputs.SHA }}
+      PCR0: ${{ needs.verify-reproducible.outputs.PCR0 }}
+      PCR1: ${{ needs.verify-reproducible.outputs.PCR1 }}
+      PCR2: ${{ needs.verify-reproducible.outputs.PCR2 }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.SHA }}
+          fetch-depth: 0
+      - name: Download measurements
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: enclave-measurements-canonical
+          path: canonical
+      # The manifest is what a third party checks a rebuild against: the commit, the pinned
+      # flake inputs that commit resolves to, the measurements verbatim, and the images
+      # carrying them. `measurements` is the same object the repo commits, so a rebuild can be
+      # diffed against it directly.
+      - name: Build manifest
+        env:
+          ENCLAVE_DIGEST: ${{ needs.verify-reproducible.outputs.ENCLAVE_DIGEST }}
+          EIF_DIGEST: ${{ needs.verify-reproducible.outputs.EIF_DIGEST }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg version "$VERSION" \
+            --arg tag "$TAG" \
+            --arg gitSha "$RELEASE_SHA" \
+            --arg flakeLockSha256 "$(sha256sum flake.lock | cut -d' ' -f1)" \
+            --arg enclaveImage "ghcr.io/$IMAGE_NAME-nitro-enclave@$ENCLAVE_DIGEST" \
+            --arg eifImage "ghcr.io/$IMAGE_NAME-nitro-enclave-eif@$EIF_DIGEST" \
+            --argjson flakeInputs "$(jq '.nodes | del(.root) | map_values(.locked)' flake.lock)" \
+            --slurpfile measurements canonical/measurements.json \
+            --slurpfile provenance canonical/provenance.json \
+            '{version: $version, tag: $tag, gitSha: $gitSha,
+              flake: {lockSha256: $flakeLockSha256, inputs: $flakeInputs},
+              measurements: $measurements[0],
+              provenance: ($provenance[0] | del(.images)),
+              images: {enclave: $enclaveImage, eifCarrier: $eifImage}}' \
+            > manifest.json
+          jq . manifest.json
+      # Same PGP key and mechanism release.yml uses for the node binaries.
+      - name: Sign manifest
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          export GPG_TTY=$(tty)
+          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab manifest.json
+      - name: Generate changelog
+        id: changelog
+        run: |
+          set -euo pipefail
+          previous=$(git describe --tags --match 'proof/v*' --abbrev=0 "${RELEASE_SHA}^" 2>/dev/null || true)
+          range="${previous:+$previous..}$RELEASE_SHA"
+          {
+            echo "CHANGELOG<<EOF"
+            git log --pretty=format:"- %s" "$range" -- proofs/ flake.nix flake.lock scripts/build-eif.sh
+            echo
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      # The changelog reaches the heredoc as a variable, not as interpolated text: commit
+      # subjects routinely contain backticks, and the heredoc has to stay unquoted for the
+      # PCRs to expand. A variable's value is not re-scanned for command substitution.
+      - name: Create release draft
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGELOG: ${{ steps.changelog.outputs.CHANGELOG }}
+        run: |
+          set -euo pipefail
+          body=$(cat <<- ENDBODY
+          ## Enclave measurements
+
+          Reproduced by two independent builds of \`$RELEASE_SHA\` before this release was cut.
+
+          | PCR | Value |
+          |-----|-------|
+          | PCR0 | \`$PCR0\` |
+          | PCR1 | \`$PCR1\` |
+          | PCR2 | \`$PCR2\` |
+
+          ## Images
+
+          - \`ghcr.io/$IMAGE_NAME-nitro-enclave:v$VERSION\` — the measured rootfs
+          - \`ghcr.io/$IMAGE_NAME-nitro-enclave-eif:v$VERSION\` — EIF carrier for the K8s init container
+
+          ## Verify
+
+          \`\`\`
+          git checkout $RELEASE_SHA && scripts/build-eif.sh target/eif
+          diff <(jq -S . proofs/measurements.json) <(jq -S . target/eif/measurements.json)
+          \`\`\`
+
+          \`manifest.json\` is signed with the PGP key \`C75F BC64 E9D4 8E89 FB60 418B 8949 B352 D042 2E74\`.
+
+          ## Changes
+
+          $CHANGELOG
+          ENDBODY
+          )
+          echo "$body" | gh release create --draft --target "$RELEASE_SHA" \
+            -t "$TAG" -F "-" "$TAG" manifest.json manifest.json.asc
+        shell: bash
+
+  # CI never claims a PCR set is trusted; it proposes one. The deployments file mirrors on-chain
+  # state, so the PR is only mergeable after `approvePCRSet` has actually landed — merging it
+  # first would leave the record asserting an approval that does not exist.
+  #
+  # Opened with GITHUB_TOKEN, so no workflow runs on it: an empty check list on this PR means
+  # nothing was run, not that nothing failed. The measurements were already verified above.
+  allowlist-pr:
+    name: propose PCR allowlist update
+    needs: [prepare-release, verify-reproducible, draft-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      VERSION: ${{ needs.prepare-release.outputs.VERSION }}
+      TAG: ${{ needs.prepare-release.outputs.TAG }}
+      PCR0: ${{ needs.verify-reproducible.outputs.PCR0 }}
+      PCR1: ${{ needs.verify-reproducible.outputs.PCR1 }}
+      PCR2: ${{ needs.verify-reproducible.outputs.PCR2 }}
+      DEPLOYMENTS: pkg/contracts/deployments/alphanet-nitro.json
+      MEASUREMENTS: proofs/measurements.json
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+      - name: Open allowlist PR
+        run: |
+          set -euo pipefail
+          verifier=$(jq -r '.nitroAttestationVerifier' "$DEPLOYMENTS")
+
+          # Re-running a release must not open a second identical PR.
+          if jq -e --arg p0 "$PCR0" '.approvedPCRSets[] | select(.pcr0 == $p0)' "$DEPLOYMENTS" >/dev/null; then
+            echo "PCR set already recorded in $DEPLOYMENTS — nothing to propose."
+            exit 0
+          fi
+
+          # Two files, one PR, because they are one decision: what this commit measures to, and
+          # what the chain is being asked to accept. Splitting them lets the repo record a
+          # measurement nobody approved, or an approval nothing in the tree produces.
+          jq -S --arg pcr0 "$PCR0" --arg pcr1 "$PCR1" --arg pcr2 "$PCR2" \
+             '.nitro = {pcr0: $pcr0, pcr1: $pcr1, pcr2: $pcr2}' \
+             "$MEASUREMENTS" > "$MEASUREMENTS.tmp"
+          mv "$MEASUREMENTS.tmp" "$MEASUREMENTS"
+
+          jq --arg verifier "$verifier" \
+             --arg pcr0 "$PCR0" --arg pcr1 "$PCR1" --arg pcr2 "$PCR2" \
+             '.approvedPCRSets += [{verifier: $verifier, pcr0: $pcr0, pcr1: $pcr1, pcr2: $pcr2}]' \
+             "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp"
+          mv "$DEPLOYMENTS.tmp" "$DEPLOYMENTS"
+
+          branch="allowlist/proof-v$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "chore: record and allowlist enclave PCRs for $TAG"
+          git push origin "$branch"
+
+          gh pr create --base main --head "$branch" \
+            --title "chore: record and allowlist enclave PCRs for $TAG" \
+            --body "$(cat <<- ENDBODY
+          Measurements from \`$TAG\`, reproduced by two independent builds. Records them in
+          \`proofs/measurements.json\` and proposes them for the on-chain allowlist.
+
+          | PCR | Value |
+          |-----|-------|
+          | PCR0 | \`$PCR0\` |
+          | PCR1 | \`$PCR1\` |
+          | PCR2 | \`$PCR2\` |
+
+          Merge **after** the approval lands on chain, since this file records on-chain state:
+
+          \`\`\`
+          cast send $verifier 'approvePCRSet(bytes32,bytes32,bytes32)' $PCR0 $PCR1 $PCR2
+          \`\`\`
+
+          Rollback is \`revokePCRSet\` with the same three values, plus reverting this commit.
+          ENDBODY
+          )"
+
+  summary:
+    name: release summary
+    if: always()
+    needs: [prepare-release, build-enclave, verify-reproducible, draft-release, allowlist-pr]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write summary
+        env:
+          TAG: ${{ needs.prepare-release.outputs.TAG }}
+          REPRO_RESULT: ${{ needs.verify-reproducible.result }}
+          RELEASE_RESULT: ${{ needs.draft-release.result }}
+          ALLOWLIST_RESULT: ${{ needs.allowlist-pr.result }}
+          PCR0: ${{ needs.verify-reproducible.outputs.PCR0 }}
+          PCR1: ${{ needs.verify-reproducible.outputs.PCR1 }}
+          PCR2: ${{ needs.verify-reproducible.outputs.PCR2 }}
+        run: |
+          status() { [ "$1" = "success" ] && echo "✅" || echo "❌ ($1)"; }
+          {
+            echo "## 📦 $TAG"
+            echo ""
+            echo "| Step | Status |"
+            echo "|------|--------|"
+            echo "| Reproducibility check | $(status "$REPRO_RESULT") |"
+            echo "| Draft release | $(status "$RELEASE_RESULT") |"
+            echo "| Allowlist PR | $(status "$ALLOWLIST_RESULT") |"
+            if [ -n "${PCR0:-}" ]; then
+              echo ""
+              echo "| PCR | Value |"
+              echo "|-----|-------|"
+              echo "| PCR0 | \`$PCR0\` |"
+              echo "| PCR1 | \`$PCR1\` |"
+              echo "| PCR2 | \`$PCR2\` |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,12 +1,13 @@
 # Staged CI workflow — copy to .github/workflows/vkeys.yml to activate.
 #
-# Verifies that proofs/backends/sp1/elfs/vkeys.json matches the vkeys derived from
-# the current SP1 guest programs. Runs on PRs that touch proof program sources
-# or the committed vkeys.json itself.
+# Verifies that the `.sp1` half of proofs/measurements.json matches the vkeys derived
+# from the current SP1 guest programs. Runs on PRs that touch proof program sources
+# or the committed measurements themselves. The `.nitro` half is out of scope here —
+# it is measured by scripts/build-eif.sh and checked by release-proof.yml.
 #
 # Prerequisites in the repo:
 #   - `just verify-proof-vkeys` recipe in Justfile (already added)
-#   - proofs/backends/sp1/elfs/vkeys.json committed (already added)
+#   - proofs/measurements.json committed (already added)
 #
 # Uses the `world-chain-prover-sp1` package for the `vkeys` subcommand.
 name: verify-vkeys
@@ -14,11 +15,11 @@ name: verify-vkeys
 on:
   pull_request:
     paths:
-      - 'proofs/backends/sp1/programs/**'
+      - 'proofs/measured/sp1-programs/**'
       - 'proofs/backends/sp1/elfs/**'
-      - 'proofs/backends/sp1/elfs/vkeys.json'
-      - 'proofs/core/**'
-      - 'proofs/kona/client/**'
+      - 'proofs/measurements.json'
+      - 'proofs/measured/core/**'
+      - 'proofs/measured/kona-client/**'
       - 'proofs/protocol/**'
       - 'Cargo.lock'
       - 'Justfile'
@@ -55,3 +56,33 @@ jobs:
         env:
           SP1_BUILD_DOCKER: "true"
         run: just verify-proof-vkeys
+
+      # Surface, never commit: rotating a measurement stays a human act. On a mismatch,
+      # publish the freshly derived `.sp1` half so the author can paste it into
+      # proofs/measurements.json without a local SP1 toolchain.
+      - name: Report fresh vkeys
+        if: failure()
+        run: |
+          set -euo pipefail
+          if [ ! -f /tmp/vkeys-actual-normalized.json ]; then
+            echo "verify-proof-vkeys failed before vkeys were derived — see the step above." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "## Committed \`.sp1\` measurements are stale"
+            echo '```diff'
+            diff -u /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || true
+            echo '```'
+            echo "Fresh \`.sp1\` half — paste into \`proofs/measurements.json\`, or run \`just update-proof-vkeys\` locally:"
+            echo '```json'
+            cat /tmp/vkeys-actual-normalized.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload fresh vkeys
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fresh-sp1-vkeys
+          path: /tmp/vkeys-actual-normalized.json
+          if-no-files-found: ignore

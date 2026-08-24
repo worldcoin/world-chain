@@ -56,24 +56,27 @@ prove *args='':
 proof-vkeys *args='':
     cargo run --release -p world-chain-prover-sp1 -- vkeys $@
 
-# Recompute vkeys from the embedded ELFs and update proofs/backends/sp1/elfs/vkeys.json.
+# Recompute vkeys from the embedded ELFs and update the `.sp1` half of
+# proofs/measurements.json. The `.nitro` half is left alone: it is measured by
+# scripts/build-eif.sh on Linux x86_64 and nothing here can recompute it.
 # Requires Docker and the SP1 toolchain (sp1up v6.3.1) for reproducible ELF builds.
-[doc("Recompute vkeys from the embedded ELFs and update vkeys.json.")]
+[doc("Recompute vkeys from the embedded ELFs and update measurements.json.")]
 [group('proof')]
 update-proof-vkeys:
     cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-update.json
-    jq -S . /tmp/vkeys-update.json > proofs/backends/sp1/elfs/vkeys.json
+    jq -S --slurpfile sp1 /tmp/vkeys-update.json '.sp1 = $sp1[0]' proofs/measurements.json > /tmp/measurements-update.json
+    mv /tmp/measurements-update.json proofs/measurements.json
 
-# Verify that the committed vkeys.json matches what the current source produces.
-# Uses jq -S to normalize key ordering before comparing, so the diff is not
-# sensitive to JSON insertion order. Used by CI. Fails if they differ.
-[doc("Assert the committed vkeys.json matches what the source produces. Used by CI.")]
+# Verify that the `.sp1` half of proofs/measurements.json matches what the current
+# source produces. Uses jq -S to normalize key ordering before comparing, so the diff
+# is not sensitive to JSON insertion order. Used by CI. Fails if they differ.
+[doc("Assert the sp1 half of measurements.json matches what the source produces. Used by CI.")]
 [group('proof')]
 verify-proof-vkeys:
     cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-actual.json
-    jq -S . proofs/backends/sp1/elfs/vkeys.json > /tmp/vkeys-committed.json
+    jq -S .sp1 proofs/measurements.json > /tmp/vkeys-committed.json
     jq -S . /tmp/vkeys-actual.json > /tmp/vkeys-actual-normalized.json
-    diff /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
+    diff /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || (echo "ERROR: the sp1 half of proofs/measurements.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
 
 # Phase 0a – Compute and print the rollup config hash.
 # Sources (checked in priority order):
