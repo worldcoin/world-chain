@@ -111,7 +111,7 @@ The workflow is just normal source-control:
 
 ## CI
 
-The `vkeys.yml` workflow recomputes the manifest through the canonical Docker path. The
+The `verify-measurements.yml` workflow recomputes the manifest through the canonical Docker path. The
 `docker-proof.yml` SP1 worker job uses the dedicated `sp1-worker` target and runs
 `world-chain-proof-sp1-worker vkeys --check` against the linked binary before publishing it.
 

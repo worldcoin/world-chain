@@ -1,33 +1,67 @@
-# Staged CI workflow — copy to .github/workflows/vkeys.yml to activate.
-#
-# Verifies that the `.sp1` half of proofs/measurements.json matches the vkeys derived
-# from the current SP1 guest programs. Runs on PRs that touch proof program sources
-# or the committed measurements themselves. The `.nitro` half is out of scope here —
-# it is measured by scripts/build-eif.sh and checked by release-proof.yml.
-#
-# Prerequisites in the repo:
-#   - `just verify-proof-vkeys` recipe in Justfile (already added)
-#   - proofs/measurements.json committed (already added)
-#
-# Uses the `world-chain-prover-sp1` package for the `vkeys` subcommand.
-name: verify-vkeys
+# Verifies proofs/measurements.json against what the source actually measures to.
+# Two halves, verified independently and only when a file that can move them changed:
+#   .sp1   — guest vkeys, derived by rebuilding the ELFs through the pinned Docker toolchain
+#   .nitro — enclave PCRs, derived by rebuilding the EIF with Nix via scripts/build-eif.sh
+# Both jobs surface the fresh values on mismatch but never commit them: rotating a
+# measurement stays a human act (see release-proof.yml for the release-time PR flow).
+name: verify-measurements
 
 on:
   pull_request:
     paths:
-      - 'proofs/measured/sp1-programs/**'
+      - 'proofs/measured/**'
       - 'proofs/backends/sp1/elfs/**'
-      - 'proofs/measurements.json'
-      - 'proofs/measured/core/**'
-      - 'proofs/measured/kona-client/**'
       - 'proofs/protocol/**'
+      - 'proofs/measurements.json'
       - 'Cargo.lock'
       - 'Justfile'
-      - '.github/workflows/vkeys.yml'
+      - 'justfiles/proof.just'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'rust-toolchain.toml'
+      - 'scripts/build-eif.sh'
+      - '.github/workflows/verify-measurements.yml'
 
 jobs:
+  changes:
+    name: detect measurement-affecting changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      sp1: ${{ steps.filter.outputs.sp1 }}
+      nitro: ${{ steps.filter.outputs.nitro }}
+    steps:
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        with:
+          filters: |
+            sp1:
+              - 'proofs/measured/sp1-programs/**'
+              - 'proofs/measured/core/**'
+              - 'proofs/measured/kona-client/**'
+              - 'proofs/backends/sp1/elfs/**'
+              - 'proofs/protocol/**'
+              - 'proofs/measurements.json'
+              - 'Cargo.lock'
+              - 'Justfile'
+              - 'justfiles/proof.just'
+              - '.github/workflows/verify-measurements.yml'
+            nitro:
+              - 'proofs/measured/nitro-enclave/**'
+              - 'proofs/measured/core/**'
+              - 'proofs/measured/kona-client/**'
+              - 'proofs/measurements.json'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'rust-toolchain.toml'
+              - 'scripts/build-eif.sh'
+              - '.github/workflows/verify-measurements.yml'
+
   verify-vkeys:
     name: verify vkeys match source
+    needs: changes
+    if: needs.changes.outputs.sp1 == 'true'
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -85,4 +119,48 @@ jobs:
         with:
           name: fresh-sp1-vkeys
           path: /tmp/vkeys-actual-normalized.json
+          if-no-files-found: ignore
+
+  verify-pcrs:
+    name: verify PCRs match source
+    needs: changes
+    if: needs.changes.outputs.nitro == 'true'
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # TODO: pin by commit SHA once the action is allowlisted, to match every other action
+      # in this repo.
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Build EIF and measure
+        run: scripts/build-eif.sh target/eif
+
+      - name: Verify PCRs
+        run: |
+          set -euo pipefail
+          if diff <(jq -S .nitro proofs/measurements.json) <(jq -S .nitro target/eif/measurements.json) > /tmp/nitro-measurements.diff; then
+            echo "PCRs match the committed proofs/measurements.json." >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Committed \`.nitro\` measurements are stale"
+              echo '```diff'
+              cat /tmp/nitro-measurements.diff
+              echo '```'
+              echo "Fresh \`.nitro\` half — paste into \`proofs/measurements.json\`:"
+              echo '```json'
+              jq -S .nitro target/eif/measurements.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "ERROR: the .nitro half of proofs/measurements.json is out of date." >&2
+            exit 1
+          fi
+
+      - name: Upload fresh measurements
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fresh-nitro-measurements
+          path: target/eif/measurements.json
           if-no-files-found: ignore
