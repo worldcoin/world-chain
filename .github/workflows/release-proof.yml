@@ -1,7 +1,7 @@
 name: release-proof
 
 # Versioned release path for the measured proof programs — the Nitro enclave and the SP1
-# guests — cut on `proof/v*` tag pushes.
+# guests — cut on `proofs/v*` tag pushes.
 #
 # docker-proof.yml covers the unversioned path: it publishes `nightly` images off main and
 # records the PCRs in a job summary. This workflow cuts the artifacts an operator is expected
@@ -18,7 +18,7 @@ name: release-proof
 
 on:
   push:
-    tags: ["proof/v*"]
+    tags: ["proofs/v*"]
 
 concurrency:
   group: release-proof-${{ github.ref }}
@@ -65,9 +65,9 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          version="${tag#proof/v}"
+          version="${tag#proofs/v}"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
-            echo "Invalid release tag: $tag (expected proof/vX.Y.Z)" >&2
+            echo "Invalid release tag: $tag (expected proofs/vX.Y.Z)" >&2
             exit 1
           fi
 
@@ -270,6 +270,23 @@ jobs:
           path: target/sp1-guests/
           if-no-files-found: error
 
+  # Service and worker images at the release version, from the same commit as the measured
+  # artifacts they embed. Reuses docker-proof.yml's build matrix; `services_only` skips its
+  # enclave/EIF jobs, which build-enclave above publishes from the verified build instead.
+  build-services:
+    name: build service images
+    needs: [prepare-release]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/docker-proof.yml
+    with:
+      ref: ${{ needs.prepare-release.outputs.SHA }}
+      image_tag: v${{ needs.prepare-release.outputs.VERSION }}
+      services_only: true
+    secrets: inherit
+
   verify-reproducible:
     name: verify reproducible
     needs: [prepare-release, build-enclave]
@@ -332,7 +349,7 @@ jobs:
 
   draft-release:
     name: draft release
-    needs: [prepare-release, verify-reproducible, build-guests]
+    needs: [prepare-release, verify-reproducible, build-guests, build-services]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -359,6 +376,26 @@ jobs:
         with:
           name: sp1-guests-canonical
           path: sp1
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # By digest from the registry rather than plumbed through job outputs: the service builds
+      # fan out over a matrix, and matrix legs share one output namespace.
+      - name: Resolve service image digests
+        run: |
+          set -euo pipefail
+          jq -n '{}' > services.json
+          for svc in sp1-worker nitro-worker proposer challenger defender prover-service; do
+            image="$REGISTRY/$IMAGE_NAME-$svc"
+            digest=$(docker buildx imagetools inspect "$image:v$VERSION" --format '{{json .Manifest}}' | jq -r '.digest')
+            test -n "$digest"
+            jq --arg svc "$svc" --arg ref "$image@$digest" '. + {($svc): $ref}' services.json > services.tmp
+            mv services.tmp services.json
+          done
+          jq . services.json
       # The manifest is what a third party checks a rebuild against: the commit, the pinned
       # flake inputs that commit resolves to, the measurements verbatim, and the images
       # carrying them. `measurements` is the same object the repo commits, so a rebuild can be
@@ -377,13 +414,14 @@ jobs:
             --arg enclaveImage "ghcr.io/$IMAGE_NAME-nitro-enclave@$ENCLAVE_DIGEST" \
             --arg eifImage "ghcr.io/$IMAGE_NAME-nitro-enclave-eif@$EIF_DIGEST" \
             --argjson flakeInputs "$(jq '.nodes | del(.root) | map_values(.locked)' flake.lock)" \
+            --argjson services "$(cat services.json)" \
             --slurpfile measurements canonical/measurements.json \
             --slurpfile provenance canonical/provenance.json \
             '{version: $version, tag: $tag, gitSha: $gitSha,
               flake: {lockSha256: $flakeLockSha256, inputs: $flakeInputs},
               measurements: $measurements[0],
               provenance: ($provenance[0] | del(.images)),
-              images: {enclave: $enclaveImage, eifCarrier: $eifImage}}' \
+              images: {enclave: $enclaveImage, eifCarrier: $eifImage, services: $services}}' \
             > manifest.json
           jq . manifest.json
       # Same PGP key and mechanism release.yml uses for the node binaries.
@@ -400,7 +438,7 @@ jobs:
         id: changelog
         run: |
           set -euo pipefail
-          previous=$(git describe --tags --match 'proof/v*' --abbrev=0 "${RELEASE_SHA}^" 2>/dev/null || true)
+          previous=$(git describe --tags --match 'proofs/v*' --abbrev=0 "${RELEASE_SHA}^" 2>/dev/null || true)
           range="${previous:+$previous..}$RELEASE_SHA"
           {
             echo "CHANGELOG<<EOF"
@@ -444,6 +482,8 @@ jobs:
 
           - \`ghcr.io/$IMAGE_NAME-nitro-enclave:v$VERSION\` — the measured rootfs
           - \`ghcr.io/$IMAGE_NAME-nitro-enclave-eif:v$VERSION\` — EIF carrier for the K8s init container
+          - Service images at \`v$VERSION\` (\`-sp1-worker\`, \`-nitro-worker\`, \`-proposer\`,
+            \`-challenger\`, \`-defender\`, \`-prover-service\`) — pinned digests in \`manifest.json\`
 
           ## Verify
 
@@ -519,7 +559,7 @@ jobs:
              "$DEPLOYMENTS" > "$DEPLOYMENTS.tmp"
           mv "$DEPLOYMENTS.tmp" "$DEPLOYMENTS"
 
-          branch="allowlist/proof-v$VERSION"
+          branch="allowlist/proofs-v$VERSION"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
@@ -551,7 +591,7 @@ jobs:
   summary:
     name: release summary
     if: always()
-    needs: [prepare-release, build-enclave, build-guests, verify-reproducible, draft-release, allowlist-pr]
+    needs: [prepare-release, build-enclave, build-guests, build-services, verify-reproducible, draft-release, allowlist-pr]
     runs-on: ubuntu-latest
     steps:
       - name: Write summary
@@ -559,6 +599,7 @@ jobs:
           TAG: ${{ needs.prepare-release.outputs.TAG }}
           REPRO_RESULT: ${{ needs.verify-reproducible.result }}
           GUESTS_RESULT: ${{ needs.build-guests.result }}
+          SERVICES_RESULT: ${{ needs.build-services.result }}
           RELEASE_RESULT: ${{ needs.draft-release.result }}
           ALLOWLIST_RESULT: ${{ needs.allowlist-pr.result }}
           PCR0: ${{ needs.verify-reproducible.outputs.PCR0 }}
@@ -573,6 +614,7 @@ jobs:
             echo "|------|--------|"
             echo "| Reproducibility check | $(status "$REPRO_RESULT") |"
             echo "| SP1 guests | $(status "$GUESTS_RESULT") |"
+            echo "| Service images | $(status "$SERVICES_RESULT") |"
             echo "| Draft release | $(status "$RELEASE_RESULT") |"
             echo "| Allowlist PR | $(status "$ALLOWLIST_RESULT") |"
             if [ -n "${PCR0:-}" ]; then

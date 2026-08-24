@@ -1,6 +1,6 @@
 # Prover release process
 
-Prover deployables are released independently of the node via `proof/vX.Y.Z` tags, handled by
+Prover deployables are released independently of the node via `proofs/vX.Y.Z` tags, handled by
 [`.github/workflows/release-proof.yml`](../../.github/workflows/release-proof.yml). Node releases
 (`vX.Y.Z` tags, `release.yml`) are unaffected.
 
@@ -28,7 +28,7 @@ image — is documented in [reproducible-builds.md](./reproducible-builds.md).
 | `ghcr.io/worldcoin/world-chain-proof:<version>`          | Multi-arch prover image (sp1 + nitro backends, ELFs baked in) |
 
 The draft release notes include a measurements section that diffs the vkeys/PCRs against the
-previous `proof/v*` release and flags when a new game implementation or PCR approval is required.
+previous `proofs/v*` release and flags when a new game implementation or PCR approval is required.
 
 ## Same-domain measurement cutovers
 
@@ -48,8 +48,8 @@ retiring or continuing to defend the old lineage.
 ## Cutting a release
 
 ```bash
-git tag proof/v0.1.0 <sha-on-main>
-git push origin proof/v0.1.0
+git tag proofs/v0.1.0 <sha-on-main>
+git push origin proofs/v0.1.0
 ```
 
 The workflow gates everything on ELF reproducibility (every `cargo build --features sp1` runs

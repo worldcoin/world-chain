@@ -4,7 +4,8 @@ name: docker-proof
 # images to ghcr on merge to main (tag `nightly`) or via manual dispatch with a
 # chosen `image_tag` (e.g. `alpha-v0.1.0`). It does NOT cut a release — versioned
 # releases (manifest.json, signed binaries, EIF, vkeys) are cut by release-proof.yml
-# on `proof/v*` tag pushes once the services are ready.
+# on `proofs/v*` tag pushes, which calls this workflow with `services_only` to publish
+# the service images at the release version.
 
 on:
   workflow_dispatch:
@@ -17,6 +18,21 @@ on:
         description: Custom image tag to publish (e.g. "alpha-v0.1.0").
         required: false
         default: nightly
+  workflow_call:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to build.
+        required: true
+        type: string
+      image_tag:
+        description: Image tag to publish.
+        required: true
+        type: string
+      services_only:
+        description: Skip the enclave/EIF jobs; the caller publishes those from its own verified build.
+        required: false
+        default: false
+        type: boolean
   push:
     branches: [main]
     paths:
@@ -248,6 +264,7 @@ jobs:
   # init container (AWS Nitro Enclaves K8s device plugin pattern).
   build-nitro-enclave-eif-image:
     name: build nitro-enclave image and EIF carrier
+    if: ${{ !inputs.services_only }}
     needs: [resolve-sha]
     runs-on: arc-public-8xlarge-amd64-runner
     outputs:
@@ -341,7 +358,7 @@ jobs:
 
   summary:
     name: Image tags summary
-    if: always()
+    if: ${{ always() && !inputs.services_only }}
     needs:
       - resolve-sha
       - merge-nitro-worker-image
