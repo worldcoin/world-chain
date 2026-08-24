@@ -302,7 +302,6 @@ jobs:
       ref: ${{ needs.prepare-release.outputs.SHA }}
       image_tag: v${{ needs.prepare-release.outputs.VERSION }}
       services_only: true
-    secrets: inherit
 
   verify-reproducible:
     name: verify reproducible
