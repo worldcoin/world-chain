@@ -13,6 +13,11 @@
 #
 # Or use scripts/build-eif.sh, which does both and emits the PCR measurements.
 #
+# NOTE: this Dockerfile is the fallback path (ENCLAVE_BUILD=docker). The measured image is
+# built by Nix — see flake.nix, `nix build .#enclave-image`. Nix produces a reproducible
+# rootfs by construction; everything below is the best a Dockerfile can do at it, and is kept
+# so the enclave can still be built on a host without Nix.
+#
 # The resulting EIF's PCR0/PCR1/PCR2 measurements must be approved on-chain before its signer
 # can register. The worker derives the same values from a verified startup attestation.
 #

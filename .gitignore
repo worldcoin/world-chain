@@ -14,3 +14,7 @@ pkg/contracts/sepolia_load_test.json
 **/.DS_Store
 **/proptest-regressions/
 
+
+# nix build output symlinks
+/result
+/result-*

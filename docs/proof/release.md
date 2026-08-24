@@ -21,6 +21,9 @@ and keeps measurement changes reviewable on their own.
 | `vkeys.json`                                             | Range vkey commitment + aggregation vkey, plus hashes of the reproducibly built ELFs |
 | `pcrs.json`                                              | PCR0/PCR1/PCR2 of the enclave EIF |
 | `world-chain-proof-nitro-enclave.eif`                    | Enclave image, built reproducibly (see below) |
+
+How the measurements are kept reproducible — the measured workspaces and the Nix enclave
+image — is documented in [reproducible-builds.md](./reproducible-builds.md).
 | `world-chain-range-ethereum`, `world-chain-aggregation`  | SP1 guest ELFs, rebuilt from source in CI via `sp1_build` (no committed binaries, no hash manifest — see [elf-management.md](./elf-management.md)) |
 | `world-chain-proof-<version>-<target>.tar.gz` (+ `.asc`) | GPG-signed `proof` CLI binaries (linux x86_64 / aarch64) |
 | `ghcr.io/worldcoin/world-chain-proof:<version>`          | Multi-arch prover image (sp1 + nitro backends, ELFs baked in) |
