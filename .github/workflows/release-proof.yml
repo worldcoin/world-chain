@@ -239,10 +239,11 @@ jobs:
         with:
           ref: ${{ needs.prepare-release.outputs.SHA }}
       - name: Install SP1 toolchain
-        run: |
-          curl -L https://sp1.succinct.xyz | bash
-          ~/.sp1/bin/sp1up --version v6.1.0
-          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
+  run: |
+    curl -fsSL https://sp1.succinct.xyz -o "$RUNNER_TEMP/sp1up-install.sh"
+    bash "$RUNNER_TEMP/sp1up-install.sh"
+    ~/.sp1/bin/sp1up --version v6.1.0
+    echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
       - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: just
