@@ -39,7 +39,7 @@ thiserror = "2"
 tokio = { version = "1.52.3", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-kona-proof = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2" }
+kona-proof = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3" }
 
 [package]
 name = "world-chain-proof-nitro-enclave"

@@ -248,7 +248,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.32.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -265,7 +265,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-hardforks"
 version = "0.5.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-chains",
  "alloy-hardforks",
@@ -1957,21 +1957,12 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
-dependencies = [
- "allocator-api2",
- "equivalent",
- "foldhash",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash",
  "serde",
  "serde_core",
@@ -2267,7 +2258,7 @@ dependencies = [
 [[package]]
 name = "kona-derive"
 version = "0.4.5"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2289,7 +2280,7 @@ dependencies = [
 [[package]]
 name = "kona-driver"
 version = "0.4.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-consensus",
  "alloy-evm",
@@ -2309,7 +2300,7 @@ dependencies = [
 [[package]]
 name = "kona-executor"
 version = "0.4.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2333,7 +2324,7 @@ dependencies = [
 [[package]]
 name = "kona-genesis"
 version = "0.4.5"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -2351,7 +2342,7 @@ dependencies = [
 [[package]]
 name = "kona-hardforks"
 version = "0.4.5"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -2366,7 +2357,7 @@ dependencies = [
 [[package]]
 name = "kona-interop"
 version = "0.4.5"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2386,12 +2377,12 @@ dependencies = [
 [[package]]
 name = "kona-macros"
 version = "0.1.2"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 
 [[package]]
 name = "kona-mpt"
 version = "0.3.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -2403,7 +2394,7 @@ dependencies = [
 [[package]]
 name = "kona-preimage"
 version = "0.3.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -2416,7 +2407,7 @@ dependencies = [
 [[package]]
 name = "kona-proof"
 version = "0.3.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2452,7 +2443,7 @@ dependencies = [
 [[package]]
 name = "kona-protocol"
 version = "0.4.5"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloc-no-stdlib",
  "alloy-consensus",
@@ -2481,7 +2472,7 @@ dependencies = [
 [[package]]
 name = "kona-registry"
 version = "0.4.5"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-chains",
  "alloy-eips",
@@ -2565,11 +2556,11 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "lru"
-version = "0.16.4"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
+checksum = "5d2f2f9b4ba7e6b24d95e7e899329d35be83bcded72c8540cdd5368932d1d90a"
 dependencies = [
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -2878,7 +2869,7 @@ dependencies = [
 [[package]]
 name = "op-alloy"
 version = "2.0.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "op-alloy-consensus",
 ]
@@ -2886,7 +2877,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-consensus"
 version = "2.0.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2904,7 +2895,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types"
 version = "2.0.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2922,7 +2913,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types-engine"
 version = "2.0.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2939,8 +2930,9 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "20.0.0"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.4.2#f863ff4c12531b315d666331d43da3aeb3719388"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
 dependencies = [
+ "alloy-eips",
  "auto_impl",
  "op-alloy-consensus",
  "revm",
