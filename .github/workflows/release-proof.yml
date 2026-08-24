@@ -1,6 +1,7 @@
 name: release-proof
 
-# Versioned release path for the Nitro enclave, cut on `proof/v*` tag pushes.
+# Versioned release path for the measured proof programs — the Nitro enclave and the SP1
+# guests — cut on `proof/v*` tag pushes.
 #
 # docker-proof.yml covers the unversioned path: it publishes `nightly` images off main and
 # records the PCRs in a job summary. This workflow cuts the artifacts an operator is expected
@@ -217,6 +218,58 @@ jobs:
             target/eif/provenance.json
           if-no-files-found: error
 
+  # Same double-build discipline as the enclave. Each leg rebuilds the guest ELFs through the
+  # pinned Docker toolchain and asserts the derived `.sp1` half (vkeys and ELF sha256s) equals
+  # the committed proofs/measurements.json — two legs matching the same commitment is the
+  # reproducibility proof, no cross-leg diff needed.
+  build-guests:
+    name: build sp1 guests (${{ matrix.attempt }})
+    needs: [prepare-release]
+    environment:
+      name: dev
+      deployment: false
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [canonical, reproduction]
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.SHA }}
+      - name: Install SP1 toolchain
+        run: |
+          curl -L https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up --version v6.1.0
+          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build guests and verify vkeys
+        env:
+          SP1_BUILD_DOCKER: "true"
+        run: |
+          set -euo pipefail
+          just verify-proof-vkeys
+          mkdir -p target/sp1-guests
+          elf_dir=proofs/measured/sp1-programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release
+          cp "$elf_dir/world-chain-proof-succinct-range-ethereum" \
+             "$elf_dir/world-chain-proof-succinct-aggregation" target/sp1-guests/
+          (cd target/sp1-guests && sha256sum world-chain-proof-succinct-* > elfs.sha256)
+      - name: Upload guest ELFs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: sp1-guests-${{ matrix.attempt }}
+          path: target/sp1-guests/
+          if-no-files-found: error
+
   verify-reproducible:
     name: verify reproducible
     needs: [prepare-release, build-enclave]
@@ -279,7 +332,7 @@ jobs:
 
   draft-release:
     name: draft release
-    needs: [prepare-release, verify-reproducible]
+    needs: [prepare-release, verify-reproducible, build-guests]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -301,6 +354,11 @@ jobs:
         with:
           name: enclave-measurements-canonical
           path: canonical
+      - name: Download guest ELFs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: sp1-guests-canonical
+          path: sp1
       # The manifest is what a third party checks a rebuild against: the commit, the pinned
       # flake inputs that commit resolves to, the measurements verbatim, and the images
       # carrying them. `measurements` is the same object the repo commits, so a rebuild can be
@@ -359,6 +417,8 @@ jobs:
           CHANGELOG: ${{ steps.changelog.outputs.CHANGELOG }}
         run: |
           set -euo pipefail
+          AGG_VKEY=$(jq -r '.sp1.aggregation_vkey' proofs/measurements.json)
+          RANGE_VKEY=$(jq -r '.sp1.range_vkey_commitment' proofs/measurements.json)
           body=$(cat <<- ENDBODY
           ## Enclave measurements
 
@@ -370,6 +430,16 @@ jobs:
           | PCR1 | \`$PCR1\` |
           | PCR2 | \`$PCR2\` |
 
+          ## SP1 guest programs
+
+          Rebuilt by two independent Docker builds of \`$RELEASE_SHA\`; both derived the vkeys and
+          ELF hashes committed in \`proofs/measurements.json\`. The ELFs are attached as assets.
+
+          | Key | Value |
+          |-----|-------|
+          | aggregation_vkey | \`$AGG_VKEY\` |
+          | range_vkey_commitment | \`$RANGE_VKEY\` |
+
           ## Images
 
           - \`ghcr.io/$IMAGE_NAME-nitro-enclave:v$VERSION\` — the measured rootfs
@@ -380,6 +450,7 @@ jobs:
           \`\`\`
           git checkout $RELEASE_SHA && scripts/build-eif.sh target/eif
           diff <(jq -S . proofs/measurements.json) <(jq -S . target/eif/measurements.json)
+          just verify-proof-vkeys
           \`\`\`
 
           \`manifest.json\` is signed with the PGP key \`C75F BC64 E9D4 8E89 FB60 418B 8949 B352 D042 2E74\`.
@@ -390,7 +461,10 @@ jobs:
           ENDBODY
           )
           echo "$body" | gh release create --draft --target "$RELEASE_SHA" \
-            -t "$TAG" -F "-" "$TAG" manifest.json manifest.json.asc
+            -t "$TAG" -F "-" "$TAG" manifest.json manifest.json.asc \
+            sp1/world-chain-proof-succinct-range-ethereum \
+            sp1/world-chain-proof-succinct-aggregation \
+            sp1/elfs.sha256
         shell: bash
 
   # CI never claims a PCR set is trusted; it proposes one. The deployments file mirrors on-chain
@@ -477,13 +551,14 @@ jobs:
   summary:
     name: release summary
     if: always()
-    needs: [prepare-release, build-enclave, verify-reproducible, draft-release, allowlist-pr]
+    needs: [prepare-release, build-enclave, build-guests, verify-reproducible, draft-release, allowlist-pr]
     runs-on: ubuntu-latest
     steps:
       - name: Write summary
         env:
           TAG: ${{ needs.prepare-release.outputs.TAG }}
           REPRO_RESULT: ${{ needs.verify-reproducible.result }}
+          GUESTS_RESULT: ${{ needs.build-guests.result }}
           RELEASE_RESULT: ${{ needs.draft-release.result }}
           ALLOWLIST_RESULT: ${{ needs.allowlist-pr.result }}
           PCR0: ${{ needs.verify-reproducible.outputs.PCR0 }}
@@ -497,6 +572,7 @@ jobs:
             echo "| Step | Status |"
             echo "|------|--------|"
             echo "| Reproducibility check | $(status "$REPRO_RESULT") |"
+            echo "| SP1 guests | $(status "$GUESTS_RESULT") |"
             echo "| Draft release | $(status "$RELEASE_RESULT") |"
             echo "| Allowlist PR | $(status "$ALLOWLIST_RESULT") |"
             if [ -n "${PCR0:-}" ]; then
