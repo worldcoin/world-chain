@@ -303,6 +303,13 @@ jobs:
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: stable
+      # build-eif.sh builds the measured rootfs with Nix. Without this the script exits
+      # rather than silently falling back to the Dockerfile, which produces a different
+      # rootfs and therefore different PCRs.
+      # TODO: pin by commit SHA once the action is allowlisted, to match every other action
+      # in this repo.
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
       - name: Build EIF
         run: scripts/build-eif.sh target/eif
       - name: Extract PCRs

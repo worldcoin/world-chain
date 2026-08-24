@@ -50,6 +50,9 @@ case "${ENCLAVE_BUILD:-nix}" in
     docker tag world-chain-proof-nitro-enclave:nix "$ENCLAVE_IMAGE_TAG"
     ;;
   docker)
+    # Different rootfs, therefore different PCRs. Usable for a smoke build, never for
+    # recording measurements that will be registered on-chain.
+    echo "[WARN] ENCLAVE_BUILD=docker: PCRs from this build will NOT match the Nix image." >&2
     docker build -t "$ENCLAVE_IMAGE_TAG" -f proofs/backends/nitro/enclave/Dockerfile .
     ;;
   *)

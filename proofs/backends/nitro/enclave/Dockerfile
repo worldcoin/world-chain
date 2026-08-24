@@ -48,11 +48,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
+# The enclave is its own workspace (excluded from the root one), so `-p` against the root
+# manifest is rejected by cargo — point at the manifest directly. CARGO_TARGET_DIR keeps the
+# artifact at a fixed path rather than under the enclave workspace's own target dir.
+ENV CARGO_TARGET_DIR=/src/target
 RUN cargo build \
         --release \
         --locked \
+        --manifest-path proofs/backends/nitro/enclave/Cargo.toml \
         --bin world-chain-proof-nitro-enclave \
-        -p world-chain-proof-nitro-enclave \
         --features enclave
 
 # ---- runtime image (kept minimal so PCR0 stays stable) ---------------------
