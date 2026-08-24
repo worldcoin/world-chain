@@ -1,0 +1,28 @@
+[package]
+name = "world-chain-measurements"
+description = "Proof measurements: manifest consistency, measurement capture, and releases"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+# Depends on nothing from the proof system. `xtask` reaches the prover through
+# world-chain-devnet, so anything hosted there compiles the SP1 guests before it can run —
+# which would make the cheap checks here as expensive as a full guest build.
+[dependencies]
+alloy-primitives.workspace = true
+clap.workspace = true
+eyre.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[[bin]]
+name = "measurements"
+path = "src/main.rs"
+
+[lints]
+workspace = true

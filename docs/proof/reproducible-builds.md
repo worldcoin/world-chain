@@ -94,9 +94,49 @@ Not covered:
 - **The EIF assembly** is `nitro-cli build-enclave`'s job. Nix makes its input deterministic;
   turning that rootfs into an EIF is deterministic given a deterministic rootfs.
 
+## Recording measurements and cutting a release
+
+Measurements live in one generated file, `measurements.toml`. There is no separate release
+log: **a release is the tag `proofs/vX.Y.Z`**, and what it shipped is that file at that tag.
+
+```bash
+just check-manifests        # measured workspaces pin shared deps identically (cheap, every PR)
+just measure                # rebuild everything, write measurements.toml
+just measure --check        # rebuild, fail if the committed file is stale (CI)
+just measurements           # the committed file, as JSON
+just proof-release 1.0.0-rc.1   # verify, then tag
+```
+
+`just proof-release` refuses on a dirty tree, refuses if the tag exists, and refuses unless a
+full rebuild reproduces `measurements.toml` exactly — so no tag can name measurements nobody
+reproduced. It creates the tag locally and prints the push command; releasing is still a
+deliberate act.
+
+To see what any release shipped:
+
+```bash
+git show proofs/v1.0.0:measurements.toml
+git tag -l 'proofs/v*'
+```
+
+That is the whole log. A second file recording the same measurements can disagree with the
+lock and then something has to arbitrate; a tag cannot disagree with the tree it points at.
+
+### Why the manifest check exists
+
+Each measured crate pins its own `[workspace.dependencies]`, and they compile each other —
+`proofs/core` is built inside the enclave's resolve *and* inside the SP1 guests' resolve. If
+two tables name the same crate at different versions or from different sources, cargo treats
+them as unrelated packages and the build fails a long way from the cause. `just
+check-manifests` compares version and source across all four (features are excluded: separate
+workspaces are separate resolves, so features cannot collide).
+
+It found a real one on introduction: `alloy-consensus` was `=2.1.1` in `proofs/core` and
+`2.0.5` in the SP1 guests, unifying to 2.1.1 only by luck of the ranges overlapping.
+
 ## When a measurement changes
 
-1. Rebuild and read the new values: `scripts/build-eif.sh target/eif`.
+1. Rebuild and read the new values: `just measure`, then `just measurements`.
 2. Confirm the change was intended. A measurement moving without a deliberate change to a
    measured crate means something leaked into the measured graph — find it before shipping.
 3. Re-register: new PCRs need on-chain approval, and a new `tee_image_id` needs the enclave

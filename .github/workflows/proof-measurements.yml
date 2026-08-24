@@ -1,0 +1,100 @@
+# Proof measurement gate.
+#
+# `measurements.toml` records what the proof system commits to: SP1 vkeys and guest ELF
+# digests, enclave PCRs, tee_image_id. Two jobs guard it.
+#
+#   consistency  cheap, every PR. The measured workspaces each pin their own dependencies
+#                (that is what keeps node churn out of a vkey), so nothing but this stops
+#                them drifting apart. No prover linkage, so no guest build.
+#   measure      expensive, only when a measured input changed. Rebuilds the guests and the
+#                EIF from source and fails unless measurements.toml matches.
+#
+# A release is the tag `proofs/vX.Y.Z`; what it shipped is measurements.toml at that tag.
+# `just proof-release X.Y.Z` will not create a tag until the rebuild reproduces the file.
+
+name: proof-measurements
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - "proofs/**"
+      - "measurements.toml"
+      - "flake.nix"
+      - "flake.lock"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/proof-measurements.yml"
+
+jobs:
+  consistency:
+    name: measured workspaces agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-07-01
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Check manifests
+        run: cargo run -q -p world-chain-measurements -- check-manifests
+      - name: Unit tests
+        run: cargo test -p world-chain-measurements
+
+  # Cheap merge-base diff so the rebuild only runs when a measurement input moved. The set is
+  # enumerable precisely because every measured crate is a standalone workspace.
+  changes:
+    name: detect measurement input changes
+    runs-on: ubuntu-latest
+    outputs:
+      measured: ${{ steps.filter.outputs.measured }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Filter changed files
+        id: filter
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          base=$(git merge-base "origin/$BASE_REF" HEAD)
+          changed=$(git diff --name-only "$base" HEAD)
+          echo "Changed files:"; echo "$changed"
+          if grep -qE '^(proofs/core/|proofs/kona/client/|proofs/backends/nitro/enclave/|proofs/backends/sp1/(programs|elfs)/|measurements\.toml$|flake\.(nix|lock)$)' <<< "$changed"; then
+            echo "measured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "measured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  measure:
+    name: measurements.toml is up to date
+    needs: changes
+    if: needs.changes.outputs.measured == 'true'
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      # TODO: pin by commit SHA once the action is allowlisted, to match every other action
+      # in this repo.
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-07-01
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Rebuild and compare
+        run: cargo run --release -p world-chain-measurements -- measure --check
+      - name: Upload EIF
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: enclave-eif
+          path: target/measurements/world-chain-proof-nitro-enclave.eif
+          if-no-files-found: warn
+          retention-days: 7

@@ -75,6 +75,38 @@ verify-proof-vkeys:
     jq -S . /tmp/vkeys-actual.json > /tmp/vkeys-actual-normalized.json
     diff /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
 
+# ------------------------------------------------------------------------------
+# Measurements and releases
+# ------------------------------------------------------------------------------
+
+# Cheap: world-chain-measurements links nothing from the proof system, so this does
+# not build the SP1 guests.
+[doc("Fail if the measured workspaces pin a shared dependency differently.")]
+[group('proof')]
+check-manifests:
+    cargo run -q -p world-chain-measurements -- check-manifests
+
+# Rebuilds the SP1 guests and the enclave EIF from source. `--check` compares against
+# the committed file instead of writing it, which is what CI runs.
+# Requires Linux x86_64, Docker and Nix.
+[doc("Rebuild every proof measurement and write measurements.toml.")]
+[group('proof')]
+measure *args='':
+    cargo run --release -p world-chain-measurements -- measure $@
+
+[doc("Print measurements.toml as flat JSON.")]
+[group('proof')]
+measurements:
+    cargo run -q -p world-chain-measurements -- show
+
+# Refuses unless the tree is clean and a rebuild reproduces measurements.toml exactly.
+# The tag is the release log: `git show proofs/v1.0.0:measurements.toml`.
+# Usage: just proof-release 1.0.0-rc.1
+[doc("Tag the current commit as a proof release, after verifying its measurements.")]
+[group('proof')]
+proof-release version *args='':
+    cargo run --release -p world-chain-measurements -- release {{version}} $@
+
 # Phase 0a – Compute and print the rollup config hash.
 # Sources (checked in priority order):
 #   L2_RPC_URL        – op-node RPC endpoint (port 9545, NOT the execution client on 8545)

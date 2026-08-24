@@ -18776,6 +18776,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-measurements"
+version = "2.4.2"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "color-eyre",
+ "hex",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "world-chain-node"
 version = "2.4.2"
 dependencies = [
