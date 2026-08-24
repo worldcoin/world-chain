@@ -1,3 +1,46 @@
+
+# Standalone workspace: this crate is compiled into the EIF, so PCR0 and PCR2 are a function
+# of exactly the dependency versions resolved here. Sharing the root workspace's
+# `Cargo.lock` would mean any node-side dependency bump could rotate the enclave's
+# measurements — and therefore its on-chain approval — for no reason.
+#
+# Adding a dependency here is a measurement change. Treat it as one.
+[workspace]
+resolver = "3"
+members = ["."]
+
+[workspace.package]
+version = "2.4.2"
+edition = "2024"
+rust-version = "1.95.0"
+license = "MIT"
+homepage = "https://world.org/world-chain"
+repository = "https://github.com/worldcoin/world-chain/"
+
+[workspace.lints.rust]
+semicolon_in_expressions_from_macros = "allow"
+
+[workspace.dependencies]
+world-chain-proof-core = { path = "../../../core", default-features = false }
+world-chain-proof-kona-client = { path = "../../../kona/client", default-features = false }
+alloy-primitives = { version = "1.6.0", default-features = false, features = [
+    "std",
+    "map-foldhash",
+] }
+alloy-sol-types = "1.6.0"
+anyhow = { version = "1.0.86", default-features = false }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+hex = "0.4.3"
+rkyv = { version = "0.8", features = ["hashbrown-0_15", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10.9"
+thiserror = "2"
+tokio = { version = "1.52.3", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+kona-proof = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.4.2" }
+
 [package]
 name = "world-chain-proof-nitro-enclave"
 version.workspace = true
@@ -25,12 +68,6 @@ enclave = [
     "dep:tokio-vsock",
     "dep:tracing-subscriber",
     "dep:world-chain-proof-kona-client",
-    "dep:alloy-contract",
-    "dep:alloy-provider",
-    "dep:alloy-signer",
-    "dep:alloy-signer-local",
-    "dep:url",
-    "dep:world-chain-proof-tx-signer",
 ]
 
 [dependencies]
@@ -71,17 +108,6 @@ tokio-vsock = { version = "0.5", optional = true }
 aws-nitro-enclaves-nsm-api = { version = "0.5", features = ["nix"] }
 kona-proof = { workspace = true, optional = true }
 world-chain-proof-kona-client = { workspace = true, optional = true }
-
-# On-chain registration (register::submit).
-alloy-contract = { workspace = true, optional = true }
-alloy-provider = { workspace = true, features = [
-    "reqwest",
-    "reqwest-rustls-tls",
-], optional = true }
-alloy-signer = { workspace = true, optional = true }
-alloy-signer-local = { workspace = true, optional = true }
-url = { workspace = true, optional = true }
-world-chain-proof-tx-signer = { workspace = true, optional = true }
 
 tracing-subscriber = { workspace = true, optional = true }
 

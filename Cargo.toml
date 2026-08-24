@@ -25,17 +25,15 @@ members = [
     "crates/commands",
     "crates/devnet",
     "crates/test-utils",
-    "proofs/core",
     "proofs/protocol",
     "proofs/metrics",
     "proofs/it",
-    "proofs/kona/client",
     "proofs/kona/host",
     "proofs/backends/sp1/guest-builder",
     "proofs/backends/sp1/elfs",
     "proofs/backends/sp1/host",
     "proofs/backends/sp1/types",
-    "proofs/backends/nitro/enclave",
+    "proofs/backends/nitro/register",
     "proofs/workers/core",
     "proofs/workers/sp1",
     "proofs/workers/nitro",
@@ -52,7 +50,16 @@ members = [
     "xtask",
 ]
 
-exclude = ["proofs/backends/sp1/programs", "proofs/backends/nitro/fuzz"]
+exclude = [
+    # Measured crates. Each is its own workspace with its own lockfile, because the versions
+    # it resolves are an input to a vkey or a PCR — resolving them together with the node's
+    # dependency graph would let an unrelated bump rotate an on-chain trust anchor.
+    "proofs/core",
+    "proofs/kona/client",
+    "proofs/backends/sp1/programs",
+    "proofs/backends/nitro/enclave",
+    "proofs/backends/nitro/fuzz",
+]
 
 default-members = ["bin/world-chain"]
 
@@ -107,6 +114,7 @@ world-chain-proof-sp1-elfs = { path = "proofs/backends/sp1/elfs" }
 world-chain-proof-sp1-host = { path = "proofs/backends/sp1/host", default-features = false }
 world-chain-proof-sp1-types = { path = "proofs/backends/sp1/types", default-features = false }
 world-chain-proof-nitro-enclave = { path = "proofs/backends/nitro/enclave", default-features = false }
+world-chain-proof-nitro-register = { path = "proofs/backends/nitro/register", default-features = false }
 world-chain-proof-worker = { path = "proofs/workers/core", default-features = false }
 world-chain-proof-sp1-worker = { path = "proofs/workers/sp1", default-features = false }
 world-chain-proof-nitro-worker = { path = "proofs/workers/nitro", default-features = false }

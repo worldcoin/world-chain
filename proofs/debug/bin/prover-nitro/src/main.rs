@@ -151,6 +151,9 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
         host::{EnclaveEndpoint, NitroProver},
         protocol::transition_commitment,
     };
+    use world_chain_proof_nitro_register::{
+        RegisterParams, RegistrationOutcome, SignerType, register_enclave_key,
+    };
     use world_chain_prover::{build_range_input_from_args, write_json};
 
     let input = build_range_input_from_args(&args.rpc).await?;
@@ -222,7 +225,6 @@ async fn nitro_prove(_args: NitroArgs) -> Result<()> {
 async fn register(args: RegisterArgs) -> Result<()> {
     use world_chain_proof_nitro_enclave::{
         ExpectedPcrs,
-        register::{RegisterParams, RegistrationOutcome, SignerType, register_enclave_key},
     };
 
     // Initialise logging so the registration flow's progress logs are visible. `info` by
