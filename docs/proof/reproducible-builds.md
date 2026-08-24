@@ -64,15 +64,11 @@ scripts/build-eif.sh target/eif
 cat target/eif/pcrs.json
 ```
 
-It defaults to the Nix path. To fall back to the Dockerfile:
-
-```bash
-ENCLAVE_BUILD=docker scripts/build-eif.sh target/eif
-```
-
-The Dockerfile is kept for hosts without Nix. It reaches for the same property by pinning
-base images by digest and apt to a `snapshot.debian.org` timestamp, but it is doing by hand
-what Nix does by construction, so prefer the Nix path when recording measurements.
+There is no Dockerfile fallback. There used to be one, and it built a Debian-based rootfs —
+a completely different filesystem from the Nix one, and therefore different PCRs. Keeping it
+meant the published enclave image and the measured enclave image could disagree, which makes
+a PCR impossible to trust. The script now fails if Nix is missing rather than quietly
+measuring something else.
 
 ### Development shell
 

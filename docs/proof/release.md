@@ -70,10 +70,11 @@ release for human review. Review the measurements section, then publish.
   before publication. See
   [elf-management.md](./elf-management.md).
 - **The enclave EIF** must be bit-for-bit reproducible so anyone can re-derive the game-pinned
-  PCRs from source: `proofs/backends/nitro/Dockerfile` pins base images by digest and apt packages to a
-  fixed snapshot.debian.org timestamp, and `scripts/build-eif.sh` pins the nitro-cli version that
-  assembles the EIF. Bumping any of these pins changes the PCRs — expect to approve the new PCR set,
-  register new image-bound signers, and activate a game implementation pinned to its PCR0 image ID.
+  PCRs from source: `flake.nix` builds the rootfs — reproducible by construction, no apt state and
+  no build timestamps — and `scripts/build-eif.sh` pins the nitro-cli version that assembles the
+  EIF. Bumping either changes the PCRs — expect to approve the new PCR set, register new
+  image-bound signers, and activate a game implementation pinned to its PCR0 image ID. See
+  [reproducible-builds.md](./reproducible-builds.md).
 
 ## Verifying a release locally
 

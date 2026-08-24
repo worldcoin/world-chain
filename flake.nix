@@ -32,14 +32,31 @@
 
       craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-      # Only the measured sources. Anything not listed here cannot affect the binary, which
-      # is what makes "did this change the PCRs?" answerable by reading a diff.
+      # Only the measured sources, and within them only files cargo actually reads. Whole
+      # directories would make the derivation hash move when a README or a Dockerfile next to
+      # the code changes — the build output would be identical, but every consumer keyed on
+      # the store path would see a change that means nothing.
+      measuredDirs = lib.fileset.unions [
+        ./proofs/backends/nitro/enclave
+        ./proofs/core
+        ./proofs/kona/client
+      ];
       src = lib.fileset.toSource {
         root = ./.;
         fileset = lib.fileset.unions [
-          ./proofs/backends/nitro/enclave
-          ./proofs/core
-          ./proofs/kona/client
+          (lib.fileset.intersection measuredDirs
+            (lib.fileset.fileFilter
+              (file:
+                file.hasExt "rs"
+                || file.name == "Cargo.toml"
+                || file.name == "Cargo.lock"
+                # Assets embedded with include_str!/include_bytes!: the AWS Nitro root CA in
+                # attestation.rs, and the certificate fixtures its tests parse. Adding a new
+                # embedded asset type means adding it here — the build fails loudly if you
+                # forget, but it fails on Linux CI, so check when you add one.
+                || file.hasExt "pem"
+                || file.hasExt "der")
+              ./.))
           ./rust-toolchain.toml
         ];
       };

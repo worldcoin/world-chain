@@ -302,14 +302,15 @@ just proof-vkeys
 installed. The enclave binary and the `world-chain-prover-nitro prove` command must both run on
 the same instance; vsock (AF_VSOCK) is Linux-only and does not cross machine boundaries.
 
-### 1. Build the Docker image
+### 1. Build the enclave image
 
-Run from the repo root. The Dockerfile at `proofs/backends/nitro/Dockerfile` compiles the enclave
-binary inside the container.
+Run from the repo root. `flake.nix` builds the rootfs the enclave runs from; it is
+reproducible by construction, which is what makes the resulting PCRs re-derivable. See
+[reproducible-builds.md](./reproducible-builds.md).
 
 ```bash
-docker build -t world-chain-proof-nitro-enclave \
-  -f proofs/backends/nitro/Dockerfile .
+nix build .#enclave-image
+docker load -i ./result
 ```
 
 ### 2. Package as an EIF

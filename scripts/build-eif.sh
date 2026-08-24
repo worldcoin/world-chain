@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Build the world-chain-proof-nitro-enclave EIF and emit its PCR measurements.
 #
-# Builds the enclave container image from proofs/backends/nitro/enclave/Dockerfile, then converts
+# Builds the enclave container image with Nix (see flake.nix), then converts
 # it to an EIF with nitro-cli (built from source at a pinned tag so the EIF
 # assembly itself is pinned). Runs on any Linux x86_64 host with Docker — Nitro
 # hardware is only needed to *run* the enclave, not to build it.
@@ -17,7 +17,6 @@ set -euo pipefail
 # Env overrides:
 #   NITRO_CLI_VERSION   tag of aws/aws-nitro-enclaves-cli to build (default v1.4.2)
 #   ENCLAVE_IMAGE_TAG   docker tag for the intermediate container image
-#   ENCLAVE_BUILD       'nix' (default) or 'docker' for the legacy Dockerfile path
 
 if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
   echo "[ERROR] EIF builds require Linux x86_64 (got $(uname -s)/$(uname -m))." >&2
@@ -34,32 +33,19 @@ out_dir="${1:-target/eif}"
 mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd)"
 
-# Nix builds the rootfs PCR0/PCR2 are measured over. It is reproducible by construction —
-# no apt state, no build timestamps, every path content-addressed — which is what makes the
-# recorded PCRs re-derivable by anyone with this commit. Set ENCLAVE_BUILD=docker to fall
-# back to the Dockerfile, which needs its own normalisation to get close to the same place.
+# Nix builds the rootfs PCR0/PCR2 are measured over. Reproducible by construction — no apt
+# state, no build timestamps, every path content-addressed — which is what makes the recorded
+# PCRs re-derivable by anyone with this commit. There is deliberately no fallback: a second
+# way to build the rootfs is a second set of PCRs.
 echo "[1/3] Building enclave container image ($ENCLAVE_IMAGE_TAG)..."
-case "${ENCLAVE_BUILD:-nix}" in
-  nix)
-    command -v nix >/dev/null || {
-      echo "[ERROR] nix not found. Install it, or set ENCLAVE_BUILD=docker." >&2
-      exit 1
-    }
-    nix build .#enclave-image --out-link "$out_dir/enclave-image"
-    docker load -i "$out_dir/enclave-image"
-    docker tag world-chain-proof-nitro-enclave:nix "$ENCLAVE_IMAGE_TAG"
-    ;;
-  docker)
-    # Different rootfs, therefore different PCRs. Usable for a smoke build, never for
-    # recording measurements that will be registered on-chain.
-    echo "[WARN] ENCLAVE_BUILD=docker: PCRs from this build will NOT match the Nix image." >&2
-    docker build -t "$ENCLAVE_IMAGE_TAG" -f proofs/backends/nitro/enclave/Dockerfile .
-    ;;
-  *)
-    echo "[ERROR] ENCLAVE_BUILD must be 'nix' or 'docker' (got '$ENCLAVE_BUILD')." >&2
-    exit 1
-    ;;
-esac
+command -v nix >/dev/null || {
+  echo "[ERROR] nix not found. The enclave rootfs is built by flake.nix; there is no" >&2
+  echo "        Dockerfile fallback, because a different rootfs means different PCRs." >&2
+  exit 1
+}
+nix build .#enclave-image --no-link --print-out-paths > "$out_dir/enclave-image-path"
+docker load -i "$(cat "$out_dir/enclave-image-path")"
+docker tag world-chain-proof-nitro-enclave:nix "$ENCLAVE_IMAGE_TAG"
 
 echo "[2/3] Building nitro-cli $NITRO_CLI_VERSION..."
 nitro_cli_dir="$out_dir/aws-nitro-enclaves-cli-$NITRO_CLI_VERSION"
