@@ -61,6 +61,8 @@ mod tests {
             "http://127.0.0.1:5052",
             "--worker-id",
             "test",
+            "--sp1-kms-key-id",
+            "alias/prover",
         ]);
 
         assert!(matches!(cli.command, Command::Run(_)));
@@ -82,6 +84,39 @@ mod tests {
         ]);
 
         assert!(matches!(cli.command, Command::Deposit(_)));
+    }
+
+    #[test]
+    fn deposit_requires_exactly_one_signer() {
+        let base_args = || {
+            vec![
+                "sp1-worker",
+                "deposit",
+                "--amount",
+                "100",
+                "--sp1-network-l1-rpc-url",
+                "https://ethereum.example",
+                "--succinct-vapp-address",
+                "0x0000000000000000000000000000000000000001",
+            ]
+        };
+
+        assert_eq!(
+            Cli::try_parse_from(base_args()).unwrap_err().kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+
+        let mut multiple = base_args();
+        multiple.extend([
+            "--sp1-private-key",
+            "0x1234",
+            "--sp1-kms-key-id",
+            "alias/prover",
+        ]);
+        assert_eq!(
+            Cli::try_parse_from(multiple).unwrap_err().kind(),
+            clap::error::ErrorKind::ArgumentConflict
+        );
     }
 
     #[test]
