@@ -111,9 +111,7 @@
             drv;
       };
 
-      # The proof system's release version — validated against the proofs/v* tag by
-      # release-proof.yml. Deliberately independent of the crate version below: the crate
-      # tracks the workspace, the proof system versions its own trust anchors.
+      # The proof system's release version
       version = "1.0.0-rc.1";
 
       # The crate's own version, read from its manifest so the two never drift.
