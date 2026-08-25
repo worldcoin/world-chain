@@ -430,7 +430,7 @@ impl LineageProvider for FakeExecution {
 #[async_trait]
 impl ProposerClient for FakeExecution {
     /// The fake has no registry finality airgap: a resolved game is immediately closeable.
-    async fn is_game_finalized(&self, _game: Address) -> Result<bool, ProposerError> {
+    async fn is_game_claim_valid(&self, _game: Address) -> Result<bool, ProposerError> {
         Ok(true)
     }
 
