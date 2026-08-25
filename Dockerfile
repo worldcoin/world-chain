@@ -40,6 +40,11 @@ ARG SCCACHE_S3_KEY_PREFIX
 
 COPY --from=planner /app/recipe.json recipe.json
 
+# The measured crates are standalone workspaces (excluded from the root workspace), which
+# cargo-chef's recipe cannot reconstruct — cook needs their real sources to resolve the
+# root workspace's path dependencies on them.
+COPY proofs/measured proofs/measured
+
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \

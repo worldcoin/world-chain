@@ -46,10 +46,10 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
 # SP1 worker build, so arm64 never has to emulate the SP1 compiler.
 FROM scratch AS sp1-guests-context
 COPY --from=sp1-guests \
-    /root/program/proofs/backends/sp1/programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-range-ethereum \
+    /root/program/proofs/measured/sp1-programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-range-ethereum \
     /riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-range-ethereum
 COPY --from=sp1-guests \
-    /root/program/proofs/backends/sp1/programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-aggregation \
+    /root/program/proofs/measured/sp1-programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-aggregation \
     /riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-aggregation
 
 FROM base AS planner
@@ -79,6 +79,11 @@ RUN test -n "${PROVER_PACKAGE}" || (echo "ERROR: PROVER_PACKAGE build arg is req
 RUN test -n "${PROVER_BIN}" || (echo "ERROR: PROVER_BIN build arg is required" && exit 1)
 
 COPY --from=planner /app/recipe.json recipe.json
+
+# The measured crates are standalone workspaces (excluded from the root workspace), which
+# cargo-chef's recipe cannot reconstruct — cook needs their real sources to resolve the
+# root workspace's path dependencies on them.
+COPY proofs/measured proofs/measured
 
 FROM builder-common AS builder-deps
 
@@ -126,10 +131,10 @@ ENV SP1_BUILD_DOCKER=true \
 
 COPY --from=sp1-guests-context \
     /riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-range-ethereum \
-    /app/proofs/backends/sp1/programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-range-ethereum
+    /app/proofs/measured/sp1-programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-range-ethereum
 COPY --from=sp1-guests-context \
     /riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-aggregation \
-    /app/proofs/backends/sp1/programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-aggregation
+    /app/proofs/measured/sp1-programs/target/elf-compilation/docker/riscv64im-succinct-zkvm-elf/release/world-chain-proof-succinct-aggregation
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
@@ -163,7 +168,7 @@ RUN profile_dir="${PROFILE}" && \
 
 # Validate the bytes actually linked into the worker, not only the intermediate files.
 RUN /app/bin/${PROVER_BIN} vkeys \
-    --check /app/proofs/backends/sp1/elfs/vkeys.json
+    --check /app/proofs/measurements.json
 
 FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime
 WORKDIR /app

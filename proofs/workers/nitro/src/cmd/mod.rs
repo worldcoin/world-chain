@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use world_chain_proof_nitro_enclave::register::SignerType;
+use world_chain_proof_nitro_register::SignerType;
 
 pub mod common;
 pub mod get_attestation;

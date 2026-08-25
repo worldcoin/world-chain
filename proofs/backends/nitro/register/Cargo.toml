@@ -1,0 +1,36 @@
+[package]
+name = "world-chain-proof-nitro-register"
+description = "Host-side on-chain registration of a Nitro enclave's ephemeral signing key"
+version = "1.0.0-rc.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+# Host-side on purpose. This code submits transactions to L1, so it must never enter the
+# enclave's dependency graph: every crate it pulls in would otherwise land in the measured
+# lockfile and move PCR0/PCR2 whenever any of them moved.
+[dependencies]
+alloy-contract.workspace = true
+alloy-primitives.workspace = true
+alloy-provider = { workspace = true, features = ["reqwest", "reqwest-rustls-tls"] }
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+alloy-sol-types.workspace = true
+anyhow.workspace = true
+ciborium = "0.2"
+hex.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+url.workspace = true
+world-chain-proof-nitro-enclave = { workspace = true, features = ["enclave"] }
+world-chain-proof-tx-signer.workspace = true
+
+[lints]
+workspace = true
+
+# Proofs release train: cargo-release bumps every shared-version member in lockstep.
+[package.metadata.release]
+shared-version = "proofs"
