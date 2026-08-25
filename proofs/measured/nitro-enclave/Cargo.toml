@@ -17,7 +17,7 @@ members = ["."]
 trim-paths = "object"
 
 [workspace.package]
-version = "2.4.2"
+version = "1.0.0-rc.1"
 edition = "2024"
 rust-version = "1.95.0"
 license = "MIT"

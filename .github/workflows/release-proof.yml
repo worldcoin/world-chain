@@ -71,12 +71,27 @@ jobs:
             exit 1
           fi
 
-          # flake.nix is the single source of the proof-system version; the tag must match it.
-          # The crate version is deliberately not checked — it tracks the workspace and
-          # versions the code, not the trust anchors (the flake reads it from Cargo.toml).
-          flake_version=$(sed -n 's/^ *version = "\([^"]*\)";.*/\1/p' flake.nix | head -n 1)
-          if [[ "$version" != "$flake_version" ]]; then
-            echo "Release version $version does not match flake.nix version $flake_version" >&2
+          # Every proofs crate carries the proof-system version (cargo-release's "proofs"
+          # shared-version group; flake.nix reads it from the enclave manifest). The tag
+          # must match all of them — a partial bump fails here, before anything builds.
+          mismatches=$(python3 - "$version" <<'EOF'
+          import glob, sys, tomllib
+          want = sys.argv[1]
+          for path in sorted(glob.glob("proofs/**/Cargo.toml", recursive=True)):
+              if "/target/" in path or path.endswith("fuzz/Cargo.toml"):
+                  continue
+              with open(path, "rb") as f:
+                  manifest = tomllib.load(f)
+              found = manifest.get("workspace", {}).get("package", {}).get("version") \
+                  or manifest.get("package", {}).get("version")
+              # non-strings are workspace-inherited members; their workspace is checked above
+              if isinstance(found, str) and found != want:
+                  print(f"{path}: {found}")
+          EOF
+          )
+          if [[ -n "$mismatches" ]]; then
+            echo "Release version $version does not match:" >&2
+            echo "$mismatches" >&2
             exit 1
           fi
 

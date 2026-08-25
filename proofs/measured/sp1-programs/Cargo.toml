@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.2.0"
+version = "1.0.0-rc.1"
 edition = "2024"
 license = "MIT"
 homepage = "https://world.org/world-chain"

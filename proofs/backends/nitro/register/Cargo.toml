@@ -1,7 +1,7 @@
 [package]
 name = "world-chain-proof-nitro-register"
 description = "Host-side on-chain registration of a Nitro enclave's ephemeral signing key"
-version.workspace = true
+version = "1.0.0-rc.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -30,3 +30,7 @@ world-chain-proof-tx-signer.workspace = true
 
 [lints]
 workspace = true
+
+# Proofs release train: cargo-release bumps every shared-version member in lockstep.
+[package.metadata.release]
+shared-version = "proofs"

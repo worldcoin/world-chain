@@ -111,18 +111,16 @@
             drv;
       };
 
-      # The proof system's release version
-      version = "1.0.0-rc.1";
-
-      # The crate's own version, read from its manifest so the two never drift.
-      crateVersion =
+      # The proof system's release version, read from the measured manifest — the single
+      # source every proofs crate shares (enforced by cargo-release's shared-version group
+      # and by release-proof.yml's tag check).
+      version =
         (builtins.fromTOML (builtins.readFile ./proofs/measured/nitro-enclave/Cargo.toml))
           .workspace.package.version;
 
       commonArgs = {
-        inherit src cargoVendorDir;
+        inherit src cargoVendorDir version;
         pname = "world-chain-proof-nitro-enclave";
-        version = crateVersion;
         strictDeps = true;
 
         # The enclave is its own workspace; point cargo at it rather than at the repo root,

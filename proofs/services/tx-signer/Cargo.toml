@@ -1,6 +1,6 @@
 [package]
 name = "world-chain-proof-tx-signer"
-version.workspace = true
+version = "1.0.0-rc.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -29,3 +29,7 @@ url.workspace = true
 [dev-dependencies]
 alloy-primitives.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+# Proofs release train: cargo-release bumps every shared-version member in lockstep.
+[package.metadata.release]
+shared-version = "proofs"

@@ -1,6 +1,6 @@
 [package]
 name = "world-chain-proof-sp1-elfs"
-version.workspace = true
+version = "1.0.0-rc.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -13,3 +13,7 @@ sp1-build = "=6.3.1"
 
 [dependencies]
 sp1-sdk = { version = "=6.3.1", features = ["network"] }
+
+# Proofs release train: cargo-release bumps every shared-version member in lockstep.
+[package.metadata.release]
+shared-version = "proofs"
