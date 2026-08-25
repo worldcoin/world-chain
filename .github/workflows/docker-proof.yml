@@ -267,6 +267,7 @@ jobs:
     if: ${{ !inputs.services_only }}
     needs: [resolve-sha]
     runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 90
     outputs:
       pcr0: ${{ steps.pcrs.outputs.pcr0 }}
       pcr1: ${{ steps.pcrs.outputs.pcr1 }}
@@ -276,36 +277,10 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.resolve-sha.outputs.full }}
-      # Pinned single-user install. The ARC runner image ships /nix world-writable (a volume
-      # mount), which nix refuses, and offers neither systemd nor a local docker daemon for
-      # the Determinate installer's daemon modes — its docker shim exits 125 because the
-      # DinD sidecar cannot mount this pod's /nix. A single-user install needs neither.
+      # Sandbox-less, hand-rolled single-user install; the composite documents why the
+      # marketplace installers cannot run on these pods.
       - name: Install Nix
-        env:
-          NIX_VERSION: 2.30.1
-          # sha256 of the install script below. The script embeds per-platform tarball
-          # hashes, so pinning it pins the entire install.
-          NIX_INSTALLER_SHA256: b88ba4f48180d7cd30f453a5010abb5c3edf5e16202edd586120f24d7735479b
-        run: |
-          set -euo pipefail
-          if [ -L /nix ]; then sudo rm /nix; fi
-          sudo mkdir -p /nix
-          sudo chown "$(id -u):$(id -g)" /nix
-          sudo chmod 0755 /nix
-          # Sandbox-less builds run wherever nix puts them, and cargo hashes the build path
-          # into every binary. flake.nix relocates the enclave build to /build (the sandbox's
-          # constant path) when it exists — create it so that kicks in.
-          sudo mkdir -p /build
-          sudo chown "$(id -u):$(id -g)" /build
-          curl --proto '=https' --tlsv1.2 -sSf -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" -o "$RUNNER_TEMP/nix-install.sh"
-          echo "$NIX_INSTALLER_SHA256  $RUNNER_TEMP/nix-install.sh" | sha256sum -c
-          sh "$RUNNER_TEMP/nix-install.sh" --no-daemon
-          # Build sandboxing needs unprivileged user namespaces, which the pod does not
-          # grant. Determinism is carried by the pinned closure and the double-build
-          # reproducibility check, not the sandbox.
-          mkdir -p ~/.config/nix
-          printf 'experimental-features = nix-command flakes\nsandbox = false\n' > ~/.config/nix/nix.conf
-          echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/install-nix
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
