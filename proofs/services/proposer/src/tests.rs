@@ -700,7 +700,7 @@ async fn scan_selected_lineage_stops_at_finalized_l2_block() {
 }
 
 #[tokio::test]
-async fn resolve_games_caps_submissions_and_keeps_scanning_finalized_games() {
+async fn resolve_games_caps_submissions_and_keeps_scanning_resolved_games() {
     let game_2 = game_address(2);
     let game_3 = game_address(3);
     let resolutions = Arc::default();
@@ -743,22 +743,22 @@ async fn resolve_games_caps_submissions_and_keeps_scanning_finalized_games() {
         selected_game(game_3, 30),
     ];
 
-    let highest_finalized_game = proposer.resolve_games(&games).await.unwrap();
+    let highest_resolved_game = proposer.resolve_games(&games).await.unwrap();
     assert_eq!(
         *resolutions.lock().expect("not poisoned"),
         vec![GAME_1, game_2]
     );
-    assert_eq!(highest_finalized_game, Some(selected_game(game_3, 30)));
+    assert_eq!(highest_resolved_game, Some(selected_game(game_3, 30)));
 
     proposer
-        .advance_anchor(highest_finalized_game)
+        .advance_anchor(highest_resolved_game)
         .await
         .unwrap();
     assert_eq!(*closures.lock().expect("not poisoned"), vec![game_3]);
 }
 
 #[tokio::test]
-async fn finalized_games_do_not_consume_resolution_budget() {
+async fn resolved_games_do_not_consume_resolution_budget() {
     let game_2 = game_address(2);
     let game_3 = game_address(3);
     let resolutions = Arc::default();
@@ -797,10 +797,10 @@ async fn finalized_games_do_not_consume_resolution_budget() {
         selected_game(game_3, 30),
     ];
 
-    let highest_finalized_game = proposer.resolve_games(&games).await.unwrap();
+    let highest_resolved_game = proposer.resolve_games(&games).await.unwrap();
 
     assert_eq!(*resolutions.lock().expect("not poisoned"), vec![game_2]);
-    assert_eq!(highest_finalized_game, Some(selected_game(game_2, 20)));
+    assert_eq!(highest_resolved_game, Some(selected_game(game_2, 20)));
 }
 
 #[tokio::test]

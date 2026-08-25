@@ -36,9 +36,10 @@ parentRef, attempt)` and the game's factory UUID is
 - if a game exists, it becomes the `parent_ref` and we continue this loop
 - if it doesn't exist - i.e. the address is `0x00..00`, then the current `parent_ref` is returned
 
-The proposer resolves every determined game on this selected lineage. A positive resolution may
-advance the anchor after the registry finality delay; a proof-timeout resolution permits the next
-attempt to be created.
+The proposer resolves every determined game parent-first on this selected lineage. A child may
+resolve as soon as its parent resolves successfully, so consecutive games' registry finality
+windows can overlap. A positive resolution may advance the anchor after its own finality delay; a
+proof-timeout resolution permits the next attempt to be created.
 
 ## Retry operations
 
