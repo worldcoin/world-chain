@@ -111,10 +111,13 @@
             drv;
       };
 
+      # Single source for the enclave version here; release-proof.yml's prepare-release step
+      # checks it against Cargo.toml's before cutting a release.
+      version = "2.4.2";
+
       commonArgs = {
-        inherit src cargoVendorDir;
+        inherit src cargoVendorDir version;
         pname = "world-chain-proof-nitro-enclave";
-        version = "2.4.2";
         strictDeps = true;
 
         # The enclave is its own workspace; point cargo at it rather than at the repo root,
@@ -189,8 +192,8 @@
       # runtime made PCR0/PCR2 depend on the machine doing the conversion, which is exactly
       # what a recorded measurement cannot afford.
       eif = nitro-util.lib.${system}.buildEif {
+        inherit version;
         name = "world-chain-proof-nitro-enclave";
-        version = "2.4.2";
         arch = "x86_64";
         kernel = nitroBlobs.kernel;
         kernelConfig = nitroBlobs.kernelConfig;
