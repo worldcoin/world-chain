@@ -111,10 +111,16 @@
             drv;
       };
 
+      # The proof system's release version, read from the measured manifest — the single
+      # source every proofs crate shares (enforced by cargo-release's shared-version group
+      # and by release-proof.yml's tag check).
+      version =
+        (builtins.fromTOML (builtins.readFile ./proofs/measured/nitro-enclave/Cargo.toml))
+          .workspace.package.version;
+
       commonArgs = {
-        inherit src cargoVendorDir;
+        inherit src cargoVendorDir version;
         pname = "world-chain-proof-nitro-enclave";
-        version = "2.4.2";
         strictDeps = true;
 
         # The enclave is its own workspace; point cargo at it rather than at the repo root,
@@ -127,6 +133,12 @@
           "--features enclave"
           "--bin world-chain-proof-nitro-enclave"
         ];
+
+        # Panic locations embed absolute source paths; trimmed, they are identical on every
+        # machine. Via env-config rather than manifest keys, because stable and succinct
+        # cargo parse this manifest through the root workspace and reject cargo-features.
+        CARGO_PROFILE_RELEASE_TRIM_PATHS = "object";
+        CARGO_UNSTABLE_TRIM_PATHS = "true";
 
         # Cargo hashes the absolute workspace path into each crate's -Cmetadata (the path is
         # the SourceId of every path dependency), so the same source built in two different
@@ -189,8 +201,8 @@
       # runtime made PCR0/PCR2 depend on the machine doing the conversion, which is exactly
       # what a recorded measurement cannot afford.
       eif = nitro-util.lib.${system}.buildEif {
+        inherit version;
         name = "world-chain-proof-nitro-enclave";
-        version = "2.4.2";
         arch = "x86_64";
         kernel = nitroBlobs.kernel;
         kernelConfig = nitroBlobs.kernelConfig;

@@ -1,0 +1,42 @@
+name: Install Nix
+description: >
+  Pinned single-user Nix install for the ARC runners, which cannot run the Determinate
+  installer (the pod image ships /nix world-writable, offers no systemd, and its DinD
+  sidecar cannot mount this pod's /nix) and grant no user namespaces, so builds run
+  without the Nix sandbox. This is the single source of the version+hash pair: the nix
+  toolchain is a PCR-affecting input, so verify-measurements.yml triggers on this file.
+
+inputs:
+  nix_version:
+    description: Nix release to install.
+    required: false
+    default: "2.30.1"
+  installer_sha256:
+    description: sha256 of that release's install script, which embeds the per-platform tarball hashes — pinning it pins the entire install.
+    required: false
+    default: "b88ba4f48180d7cd30f453a5010abb5c3edf5e16202edd586120f24d7735479b"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Nix
+      shell: bash
+      env:
+        NIX_VERSION: ${{ inputs.nix_version }}
+        NIX_INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
+      run: |
+        set -euo pipefail
+        if [ -L /nix ]; then sudo rm /nix; fi
+        # /build too: cargo hashes the build path into every binary (and so the PCRs);
+        # flake.nix relocates sandbox-less builds to the sandbox's constant /build.
+        sudo mkdir -p /nix /build
+        sudo chown "$(id -u):$(id -g)" /nix /build
+        sudo chmod 0755 /nix
+        curl --proto '=https' --tlsv1.2 -sSf -L \
+          --retry 3 --retry-all-errors --connect-timeout 10 --max-time 120 \
+          "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" -o "$RUNNER_TEMP/nix-install.sh"
+        echo "$NIX_INSTALLER_SHA256  $RUNNER_TEMP/nix-install.sh" | sha256sum -c
+        sh "$RUNNER_TEMP/nix-install.sh" --no-daemon
+        mkdir -p ~/.config/nix
+        printf 'experimental-features = nix-command flakes\nsandbox = false\n' > ~/.config/nix/nix.conf
+        echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"

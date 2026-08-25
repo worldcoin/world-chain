@@ -1,4 +1,3 @@
-cargo-features = ["trim-paths"]
 
 # Standalone workspace: this crate is compiled into the EIF, so PCR0 and PCR2 are a function
 # of exactly the dependency versions resolved here. Sharing the root workspace's
@@ -6,18 +5,16 @@ cargo-features = ["trim-paths"]
 # measurements — and therefore its on-chain approval — for no reason.
 #
 # Adding a dependency here is a measurement change. Treat it as one.
+#
+# No `cargo-features` here: this manifest is parsed by stable and succinct cargo through
+# the root workspace's path dependencies, and unstable features break that parse.
+# trim-paths is applied by flake.nix on the measured build instead.
 [workspace]
 resolver = "3"
 members = ["."]
 
-# Panic locations embed absolute source paths, and sandbox-less Nix builders (the CI pods)
-# get a random per-build directory — without trimming, every such build measures to
-# different PCRs. Trimmed paths are the same on every machine.
-[profile.release]
-trim-paths = "object"
-
 [workspace.package]
-version = "2.4.2"
+version = "1.0.0-rc.1"
 edition = "2024"
 rust-version = "1.95.0"
 license = "MIT"

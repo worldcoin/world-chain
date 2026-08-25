@@ -71,21 +71,29 @@ jobs:
             exit 1
           fi
 
-          # flake.nix carries the enclave version as its own literal, because a Nix derivation
-          # cannot read it out of Cargo.toml without an import-from-derivation. A bump that
-          # misses one of the two publishes an image whose tag disagrees with what it measures,
-          # which is only discoverable by reading the manifest of a release already cut.
-          crate_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' \
-            proofs/measured/nitro-enclave/Cargo.toml | head -n 1)
-          flake_version=$(sed -n 's/^ *version = "\([^"]*\)";.*/\1/p' flake.nix | head -n 1)
-          for pair in "proofs/measured/nitro-enclave/Cargo.toml:$crate_version" "flake.nix:$flake_version"; do
-            file="${pair%%:*}"
-            found="${pair##*:}"
-            if [[ "$version" != "$found" ]]; then
-              echo "Release version $version does not match $file version $found" >&2
-              exit 1
-            fi
-          done
+          # Every proofs crate carries the proof-system version (cargo-release's "proofs"
+          # shared-version group; flake.nix reads it from the enclave manifest). The tag
+          # must match all of them — a partial bump fails here, before anything builds.
+          mismatches=$(python3 - "$version" <<'EOF'
+          import glob, sys, tomllib
+          want = sys.argv[1]
+          for path in sorted(glob.glob("proofs/**/Cargo.toml", recursive=True)):
+              if "/target/" in path or path.endswith("fuzz/Cargo.toml"):
+                  continue
+              with open(path, "rb") as f:
+                  manifest = tomllib.load(f)
+              found = manifest.get("workspace", {}).get("package", {}).get("version") \
+                  or manifest.get("package", {}).get("version")
+              # non-strings are workspace-inherited members; their workspace is checked above
+              if isinstance(found, str) and found != want:
+                  print(f"{path}: {found}")
+          EOF
+          )
+          if [[ -n "$mismatches" ]]; then
+            echo "Release version $version does not match:" >&2
+            echo "$mismatches" >&2
+            exit 1
+          fi
 
           release_sha=$(git rev-parse HEAD)
           {
@@ -112,36 +120,16 @@ jobs:
       matrix:
         attempt: [canonical, reproduction]
     runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 90
     steps:
       - name: Check Out Repo
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.prepare-release.outputs.SHA }}
-      # Pinned single-user install. The ARC runner image ships /nix world-writable (a volume
-      # mount), which nix refuses, and offers neither systemd nor a local docker daemon for
-      # the Determinate installer's daemon modes — its docker shim exits 125 because the
-      # DinD sidecar cannot mount this pod's /nix. A single-user install needs neither.
+      # Sandbox-less, hand-rolled single-user install; the composite documents why the
+      # marketplace installers cannot run on these pods.
       - name: Install Nix
-        env:
-          NIX_VERSION: 2.30.1
-        run: |
-          set -euo pipefail
-          if [ -L /nix ]; then sudo rm /nix; fi
-          sudo mkdir -p /nix
-          sudo chown "$(id -u):$(id -g)" /nix
-          sudo chmod 0755 /nix
-          # Sandbox-less builds run wherever nix puts them, and cargo hashes the build path
-          # into every binary. flake.nix relocates the enclave build to /build (the sandbox's
-          # constant path) when it exists — create it so that kicks in.
-          sudo mkdir -p /build
-          sudo chown "$(id -u):$(id -g)" /build
-          curl --proto '=https' --tlsv1.2 -sSf -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" | sh -s -- --no-daemon
-          # Build sandboxing needs unprivileged user namespaces, which the pod does not
-          # grant. Determinism is carried by the pinned closure and the double-build
-          # reproducibility check, not the sandbox.
-          mkdir -p ~/.config/nix
-          printf 'experimental-features = nix-command flakes\nsandbox = false\n' > ~/.config/nix/nix.conf
-          echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/install-nix
 
       - name: Build enclave image and EIF
         run: scripts/build-eif.sh target/eif
@@ -254,11 +242,22 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.prepare-release.outputs.SHA }}
+      # sp1up fetched at the toolchain's own tag and hash-checked, instead of the
+      # https://sp1.succinct.xyz bootstrap script, which fetches sp1up from `main` unpinned.
       - name: Install SP1 toolchain
+        env:
+          SP1_VERSION: "v6.3.1"
+          SP1UP_SHA256: 55d4f6ef8e79e04a7ccd064f75c6a6b44a1694b21cd41aa8e7d0d53eb880a71d
         run: |
-          curl -fsSL https://sp1.succinct.xyz -o "$RUNNER_TEMP/sp1up-install.sh"
-          bash "$RUNNER_TEMP/sp1up-install.sh"
-          ~/.sp1/bin/sp1up --version v6.1.0
+          set -euo pipefail
+          mkdir -p ~/.sp1/bin
+          curl --proto '=https' --tlsv1.2 -sSf -L \
+            --retry 3 --retry-all-errors --connect-timeout 10 --max-time 120 \
+            "https://raw.githubusercontent.com/succinctlabs/sp1/${SP1_VERSION}/sp1up/sp1up" \
+            -o ~/.sp1/bin/sp1up
+          echo "$SP1UP_SHA256  $HOME/.sp1/bin/sp1up" | sha256sum -c
+          chmod +x ~/.sp1/bin/sp1up
+          ~/.sp1/bin/sp1up --version "$SP1_VERSION"
           echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
       - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
@@ -458,7 +457,7 @@ jobs:
           range="${previous:+$previous..}$RELEASE_SHA"
           {
             echo "CHANGELOG<<EOF"
-            git log --pretty=format:"- %s" "$range" -- proofs/ flake.nix flake.lock scripts/build-eif.sh
+            git log --pretty=format:"- %s" "$range" -- proofs/ flake.nix flake.lock scripts/build-eif.sh .github/actions/install-nix
             echo
             echo "EOF"
           } >> "$GITHUB_OUTPUT"

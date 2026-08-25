@@ -1,6 +1,6 @@
 [package]
 name = "world-chain-proposer"
-version.workspace = true
+version = "1.0.0-rc.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -43,3 +43,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "
 tracing.workspace = true
 telemetry-batteries.workspace = true
 url.workspace = true
+
+# Proofs release train: cargo-release bumps every shared-version member in lockstep.
+[package.metadata.release]
+shared-version = "proofs"
