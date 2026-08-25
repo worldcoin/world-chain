@@ -132,6 +132,11 @@
           "--manifest-path ${manifest}"
           "--features enclave"
           "--bin world-chain-proof-nitro-enclave"
+          # Panic locations embed absolute source paths; trimmed, they are identical on
+          # every machine. As flags rather than manifest keys, because stable and succinct
+          # cargo parse this manifest through the root workspace and reject cargo-features.
+          "-Ztrim-paths"
+          "--config profile.release.trim-paths=\"object\""
         ];
 
         # Cargo hashes the absolute workspace path into each crate's -Cmetadata (the path is
