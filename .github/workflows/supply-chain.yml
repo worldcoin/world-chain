@@ -34,6 +34,8 @@ jobs:
           toolchain: nightly-2026-07-01
       - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
-          tool: just,cargo-deny,cargo-vet
+          # deny/vet pinned to the versions that generated deny.toml and supply-chain/:
+          # their on-disk schemas are version-coupled (imports.lock parse breaks across versions)
+          tool: just,cargo-deny@0.20.2,cargo-vet@0.10.2
       - name: Audit enclave dependency tree
         run: just audit-enclave-deps
