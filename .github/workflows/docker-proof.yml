@@ -283,6 +283,9 @@ jobs:
       - name: Install Nix
         env:
           NIX_VERSION: 2.30.1
+          # sha256 of the install script below. The script embeds per-platform tarball
+          # hashes, so pinning it pins the entire install.
+          NIX_INSTALLER_SHA256: b88ba4f48180d7cd30f453a5010abb5c3edf5e16202edd586120f24d7735479b
         run: |
           set -euo pipefail
           if [ -L /nix ]; then sudo rm /nix; fi
@@ -294,7 +297,9 @@ jobs:
           # constant path) when it exists — create it so that kicks in.
           sudo mkdir -p /build
           sudo chown "$(id -u):$(id -g)" /build
-          curl --proto '=https' --tlsv1.2 -sSf -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" | sh -s -- --no-daemon
+          curl --proto '=https' --tlsv1.2 -sSf -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" -o "$RUNNER_TEMP/nix-install.sh"
+          echo "$NIX_INSTALLER_SHA256  $RUNNER_TEMP/nix-install.sh" | sha256sum -c
+          sh "$RUNNER_TEMP/nix-install.sh" --no-daemon
           # Build sandboxing needs unprivileged user namespaces, which the pod does not
           # grant. Determinism is carried by the pinned closure and the double-build
           # reproducibility check, not the sandbox.
