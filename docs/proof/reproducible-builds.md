@@ -36,12 +36,29 @@ Two consequences worth knowing:
   `proofs/backends/nitro/register` (a root-workspace crate) precisely so `alloy-provider`,
   the transaction signer and their transitive graph stay out of the enclave's lockfile.
 
-## 2. The enclave image is built with Nix
+## 2. The EIF is built with Nix, end to end
 
-`flake.nix` builds the rootfs that `nitro-cli` measures into PCR0 and PCR2. It is
-reproducible by construction: there is no `apt`, so no dpkg database, no apt logs and no
-ldconfig aux-cache embedding inode numbers; every path is a content-addressed store path; and
-`dockerTools` stamps a fixed creation time instead of "now".
+`flake.nix` builds the enclave binary, its rootfs, and the EIF itself. The assembly is
+[monzo/aws-nitro-util](https://github.com/monzo/aws-nitro-util): deterministic cpio ramdisks
+(sorted entries, epoch mtimes, root-owned) fed to AWS's own `eif_build`, using the same
+AWS-published kernel/init/nsm.ko blobs `nitro-cli` ships. No Docker daemon or linuxkit is
+involved anywhere in the measured path.
+
+That last part is load-bearing. The previous pipeline converted the Nix rootfs to an EIF via
+`docker load` + `nitro-cli build-enclave` (linuxkit), and the resulting PCR0/PCR2 depended on
+the machine doing the conversion — three builds of the same commit produced three PCR sets.
+Three things fixed it:
+
+- **EIF assembly moved into Nix** (above), so the ramdisks are a pure function of the flake
+  inputs rather than of a container daemon's export behavior.
+- **A constant build path.** Cargo hashes the absolute workspace path into every crate's
+  `-Cmetadata`, so the same source built in two directories produces two binaries. Sandboxed
+  Nix builds all run in `/build`; sandbox-less builders (the CI pods, which cannot use user
+  namespaces) get a random per-build directory, so `flake.nix` relocates the build to
+  `/build` when it exists and the CI workflows pre-create it.
+- **`trim-paths` in the enclave's release profile**, so panic locations stop embedding
+  absolute source paths — defense in depth for any builder where neither the sandbox nor
+  `/build` applies.
 
 ### Prerequisites
 
@@ -50,16 +67,13 @@ ldconfig aux-cache embedding inode numbers; every path is a content-addressed st
   local machine. On macOS you need a remote builder or `nix.linux-builder`; evaluation works
   anywhere, building does not.
 
-### Build the image
-
-```bash
-nix build .#enclave-image      # -> ./result, a docker archive
-docker load -i ./result
-```
-
 ### Build the EIF and read the PCRs
 
-`scripts/build-eif.sh` does the image build, the `nitro-cli` build and the conversion:
+```bash
+nix build .#eif                # -> ./result/image.eif + ./result/pcr.json
+```
+
+Or via the script, which also emits a comparable `measurements.json`:
 
 ```bash
 scripts/build-eif.sh target/eif
@@ -76,6 +90,9 @@ meant the published enclave image and the measured enclave image could disagree,
 a PCR impossible to trust. The script now fails if Nix is missing rather than quietly
 measuring something else.
 
+The OCI image (`nix build .#enclave-image`) still exists and is published with releases, but
+it is provenance and a local-run convenience — nothing measured is derived from it.
+
 ### Development shell
 
 ```bash
@@ -87,18 +104,17 @@ Gives you the toolchain from `rust-toolchain.toml` plus `clang`, `cmake`, `pkg-c
 
 ## What Nix does and does not cover
 
-Covered — the enclave rootfs, and therefore **PCR0** and **PCR2**.
+Covered — the enclave binary, the rootfs, the ramdisks and the EIF assembly, and therefore
+**PCR0**, **PCR1** and **PCR2**.
 
 Not covered:
 
-- **PCR1** is the kernel and bootstrap ramdisk, which come from prebuilt blobs shipped in
-  `aws-nitro-enclaves-cli`. Pinning the nitro-cli version pins PCR1; the blobs themselves are
-  vendored binaries, not built from source.
+- **The kernel, init and nsm.ko** inside the EIF are AWS's prebuilt blobs (the same ones
+  `nitro-cli` ships), pinned through the `nitro-util` flake input. They are vendored
+  binaries, not built from source; pinning the input pins their bytes and so their PCRs.
 - **The SP1 guest ELFs** are already reproducible a different way — `sp1_build` compiles them
   in the SP1 toolchain image pinned by digest in `proofs/backends/sp1/elfs/build.rs`. Nix is
   not involved and does not need to be.
-- **The EIF assembly** is `nitro-cli build-enclave`'s job. Nix makes its input deterministic;
-  turning that rootfs into an EIF is deterministic given a deterministic rootfs.
 
 ## When a measurement changes
 
@@ -110,10 +126,12 @@ Not covered:
 
 ## Verifying reproducibility
 
-Build the image twice and compare. With Nix the store path is the answer:
+Build the EIF twice and compare:
 
 ```bash
-nix build .#enclave-image --rebuild
+nix build .#eif --rebuild
 ```
 
 `--rebuild` builds again and fails if the result differs from what is already in the store.
+That catches same-machine nondeterminism; cross-machine agreement is what CI's
+verify-measurements job checks on every PR that touches a measured input.

@@ -70,10 +70,10 @@ release for human review. Review the measurements section, then publish.
   before publication. See
   [elf-management.md](./elf-management.md).
 - **The enclave EIF** must be bit-for-bit reproducible so anyone can re-derive the game-pinned
-  PCRs from source: `flake.nix` builds the rootfs — reproducible by construction, no apt state and
-  no build timestamps — and `scripts/build-eif.sh` pins the nitro-cli version that assembles the
-  EIF. Bumping either changes the PCRs — expect to approve the new PCR set, register new
-  image-bound signers, and activate a game implementation pinned to its PCR0 image ID. See
+  PCRs from source: `flake.nix` builds the binary, the rootfs, and the EIF itself, all from
+  pinned flake inputs — no Docker daemon or nitro-cli in the measured path. Bumping any flake
+  input or measured dependency changes the PCRs — expect to approve the new PCR set, register
+  new image-bound signers, and activate a game implementation pinned to its PCR0 image ID. See
   [reproducible-builds.md](./reproducible-builds.md).
 
 ## Verifying a release locally
@@ -82,7 +82,7 @@ release for human review. Review the measurements section, then publish.
 # Reproduce the guest ELFs and on-chain verification keys from source
 just proof-vkeys
 
-# Reproduce the enclave EIF and PCRs (Linux x86_64 + Docker)
+# Reproduce the enclave EIF and PCRs (Linux x86_64 + Nix)
 scripts/build-eif.sh
 ```
 

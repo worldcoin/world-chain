@@ -12,10 +12,14 @@
       url = "github:ethereum-optimism/optimism/96ffbb2a94f19886fe7e27c45f3310e64ccd18b3";
       flake = false;
     };
+    nitro-util = {
+      url = "github:monzo/aws-nitro-util";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    { nixpkgs, crane, rust-overlay, optimism, ... }:
+    { nixpkgs, crane, rust-overlay, optimism, nitro-util, ... }:
     let
       # EIFs are linux/amd64 only, so there is nothing to gain from other systems here.
       system = "x86_64-linux";
@@ -124,6 +128,24 @@
           "--bin world-chain-proof-nitro-enclave"
         ];
 
+        # Cargo hashes the absolute workspace path into each crate's -Cmetadata (the path is
+        # the SourceId of every path dependency), so the same source built in two different
+        # directories produces two different binaries — and two different PCRs. Sandboxed
+        # builds all run in /build; give sandbox-less builders (the CI pods, which cannot use
+        # user namespaces) the same path. Their workflows pre-create /build writable; anywhere
+        # /build is absent this is a no-op and the sandbox is what carries reproducibility.
+        # NIX_BUILD_TOP is re-exported so the cc/ld wrappers treat /build as the build tree
+        # (their purity check refuses to link objects outside it) and derive the same
+        # path-mapping flags a sandboxed build gets.
+        postUnpack = ''
+          if [ "$NIX_BUILD_TOP" != /build ] && [ -d /build ] && [ -w /build ]; then
+            rm -rf "/build/$sourceRoot"
+            mv "$sourceRoot" "/build/$sourceRoot"
+            cd /build
+            export NIX_BUILD_TOP=/build
+          fi
+        '';
+
         # crane hands the deps-only pass a synthesized source tree carrying the lock it was
         # given at the root, but cargo looks for one next to the manifest — and this manifest
         # is a nested workspace. Without the copy, resolving the vendored git dependencies
@@ -158,13 +180,39 @@
         '';
       });
 
-      # The rootfs nitro-cli measures into PCR0 and PCR2.
-      #
-      # Reproducible by construction, which is the whole reason this exists. There is no apt,
-      # so no dpkg database, no apt logs and no ldconfig aux-cache embedding inode numbers;
-      # every path is a content-addressed store path; and dockerTools stamps a fixed creation
-      # time rather than "now". None of the timestamp normalisation a Dockerfile needs applies
-      # here, because there are no build-time timestamps to normalise.
+      nitroBlobs = nitro-util.lib.${system}.blobs.x86_64;
+
+      # The EIF itself, assembled entirely inside Nix by monzo/aws-nitro-util: deterministic
+      # cpio ramdisks (sorted entries, epoch mtimes, root-owned) fed to AWS's eif_build, with
+      # the same AWS-published kernel/init/nsm.ko blobs nitro-cli ships. No Docker daemon or
+      # linuxkit anywhere in the measured path — converting the rootfs through a container
+      # runtime made PCR0/PCR2 depend on the machine doing the conversion, which is exactly
+      # what a recorded measurement cannot afford.
+      eif = nitro-util.lib.${system}.buildEif {
+        name = "world-chain-proof-nitro-enclave";
+        version = "2.4.2";
+        arch = "x86_64";
+        kernel = nitroBlobs.kernel;
+        kernelConfig = nitroBlobs.kernelConfig;
+        nsmKo = nitroBlobs.nsmKo;
+        # AWS's blob init — the same binary nitro-cli EIFs boot — rather than nitro-util's
+        # from-source Go rewrite, which does not evaluate against this nixpkgs.
+        init = nitroBlobs.init;
+        copyToRoot = pkgs.buildEnv {
+          name = "world-chain-nitro-enclave-root";
+          paths = [ enclave pkgs.cacert ];
+          pathsToLink = [ "/bin" "/etc" ];
+        };
+        entrypoint = "/bin/world-chain-proof-nitro-enclave";
+        env = ''
+          RUST_LOG=info
+          NITRO_VSOCK_PORT=5005
+          SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt
+        '';
+      };
+
+      # OCI tarball of the same rootfs, published alongside releases for provenance and local
+      # runs. Not on the measured path: PCR0/PCR2 come from `eif` above.
       enclave-image = pkgs.dockerTools.buildLayeredImage {
         name = "world-chain-nitro-enclave";
         tag = "nix";
@@ -185,8 +233,8 @@
     in
     {
       packages.${system} = {
-        default = enclave-image;
-        inherit enclave enclave-image;
+        default = eif;
+        inherit enclave enclave-image eif;
       };
 
       # The image is linux-only, but the shell should work on whatever people develop on.

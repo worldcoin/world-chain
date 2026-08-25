@@ -146,6 +146,11 @@ jobs:
           sudo mkdir -p /nix
           sudo chown "$(id -u):$(id -g)" /nix
           sudo chmod 0755 /nix
+          # Sandbox-less builds run wherever nix puts them, and cargo hashes the build path
+          # into every binary. flake.nix relocates the enclave build to /build (the sandbox's
+          # constant path) when it exists — create it so that kicks in.
+          sudo mkdir -p /build
+          sudo chown "$(id -u):$(id -g)" /build
           curl --proto '=https' --tlsv1.2 -sSf -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" | sh -s -- --no-daemon
           # Build sandboxing needs unprivileged user namespaces, which the pod does not
           # grant. Determinism is carried by the pinned closure and the double-build

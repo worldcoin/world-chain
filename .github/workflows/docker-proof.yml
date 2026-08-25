@@ -276,10 +276,6 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.resolve-sha.outputs.full }}
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: stable
       # Pinned single-user install. The ARC runner image ships /nix world-writable (a volume
       # mount), which nix refuses, and offers neither systemd nor a local docker daemon for
       # the Determinate installer's daemon modes — its docker shim exits 125 because the
@@ -293,6 +289,11 @@ jobs:
           sudo mkdir -p /nix
           sudo chown "$(id -u):$(id -g)" /nix
           sudo chmod 0755 /nix
+          # Sandbox-less builds run wherever nix puts them, and cargo hashes the build path
+          # into every binary. flake.nix relocates the enclave build to /build (the sandbox's
+          # constant path) when it exists — create it so that kicks in.
+          sudo mkdir -p /build
+          sudo chown "$(id -u):$(id -g)" /build
           curl --proto '=https' --tlsv1.2 -sSf -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" | sh -s -- --no-daemon
           # Build sandboxing needs unprivileged user namespaces, which the pod does not
           # grant. Determinism is carried by the pinned closure and the double-build
@@ -306,8 +307,8 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Publishes the exact rootfs the EIF below is measured from. Nitro Enclaves are x86_64
-      # only, so there is no manifest to merge.
+      # Publishes the same enclave binary the EIF below packages, as an OCI image for
+      # provenance/local runs. Nitro Enclaves are x86_64 only, so there is no manifest to merge.
       - name: Build and push the enclave image
         env:
           TAG: ${{ inputs.image_tag || 'nightly' }}
@@ -320,7 +321,7 @@ jobs:
             docker tag world-chain-nitro-enclave:nix "$ref"
             docker push "$ref"
           done
-      # Reuses the image loaded above; nix build is a store hit, so nothing is recompiled.
+      # The enclave binary is a store hit from the image build above; only the EIF assembly runs.
       - name: Build EIF
         run: scripts/build-eif.sh target/eif
       - name: Extract PCRs
