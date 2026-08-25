@@ -9,7 +9,7 @@ fn main() -> Result<()> {
         .nth(4)
         .context("guest builder must live at proofs/backends/sp1/guest-builder")?
         .to_path_buf();
-    let programs_root = repo_root.join("proofs/backends/sp1/programs");
+    let programs_root = repo_root.join("proofs/measured/sp1-programs");
     let target_root = programs_root.join("target/elf-compilation");
 
     for program in ["range-ethereum", "aggregation"] {

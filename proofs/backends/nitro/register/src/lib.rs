@@ -10,12 +10,18 @@
 //!   `public_key`-embedding attestation document into the exact
 //!   `(attestationTbs, signature, attestationSigHints)` triple that
 //!   `NitroEnclaveKeyRegistry.registerKey` expects. It reuses
-//!   [`crate::cose::decode_attestation_tbs`], [`crate::attestation::leaf_cert_pubkey_xy`],
-//!   and [`crate::p384_hints::collect_hints`].
+//!   [`decode_attestation_tbs`], [`leaf_cert_pubkey_xy`],
+//!   and [`collect_hints`].
 //! - [`register_enclave_key`] (Linux + `enclave` feature) — the full flow: fetch the
 //!   attestation from a running enclave over vsock, build the calldata, submit `registerKey`
 //!   to L1, and confirm registration. Used by both the `world-chain-prover-nitro register`
 //!   subcommand and the worker's `--auto-register` startup hook.
+
+// Submitting `registerKey` means talking to a running enclave over AF_VSOCK, so the whole
+// crate is Linux-only — the same shape `world-chain-proof-nitro-worker` uses. Nothing here
+// runs inside the enclave; it exists as a separate crate so that alloy-provider, the tx
+// signer and their transitive graph stay out of the measured lockfile.
+#![cfg(target_os = "linux")]
 
 use std::time::Duration;
 
@@ -30,7 +36,12 @@ use tracing::{info, warn};
 use url::Url;
 use world_chain_proof_tx_signer::{TransactionSigner, build_transaction_signer};
 
-use crate::prewarm::{ColdCert, build_prewarm_plan, packed_cert_not_after};
+use world_chain_proof_nitro_enclave::{
+    attestation::leaf_cert_pubkey_xy,
+    cose::decode_attestation_tbs,
+    p384_hints::collect_hints,
+    prewarm::{ColdCert, build_prewarm_plan, packed_cert_not_after},
+};
 
 /// Max attempts for the `registerKey` submission. Retries let the flow survive transient
 /// RPC errors and funding-account nonce contention when several worker replicas share the
@@ -50,7 +61,7 @@ enum AttemptError {
     Transient(anyhow::Error),
 }
 
-use crate::{
+use world_chain_proof_nitro_enclave::{
     ExpectedPcrs,
     host::{EnclaveEndpoint, NitroProver},
 };
@@ -78,16 +89,16 @@ pub struct RegistrationCalldata {
 /// Returns an error if the document is not a well-formed COSE_Sign1 structure, is missing
 /// its leaf certificate, or if hint generation fails.
 fn build_registration_calldata(attestation_doc: &[u8]) -> Result<RegistrationCalldata> {
-    let (attestation_tbs, signature) = crate::cose::decode_attestation_tbs(attestation_doc)
-        .context("decoding attestation TBS + signature")?;
+    let (attestation_tbs, signature) =
+        decode_attestation_tbs(attestation_doc).context("decoding attestation TBS + signature")?;
 
-    let leaf_pubkey = crate::attestation::leaf_cert_pubkey_xy(attestation_doc)
+    let leaf_pubkey = leaf_cert_pubkey_xy(attestation_doc)
         .map_err(|e| anyhow::anyhow!("extracting leaf certificate public key: {e}"))?;
 
     // The attestation signature covers SHA-384 of the TBS bytes.
     let hash = Sha384::digest(&attestation_tbs);
 
-    let attestation_sig_hints = crate::p384_hints::collect_hints(&hash, &signature, &leaf_pubkey)
+    let attestation_sig_hints = collect_hints(&hash, &signature, &leaf_pubkey)
         .context("generating P-384 attestation signature hints")?;
 
     Ok(RegistrationCalldata {

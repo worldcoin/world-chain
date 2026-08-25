@@ -25,17 +25,15 @@ members = [
     "crates/commands",
     "crates/devnet",
     "crates/test-utils",
-    "proofs/core",
     "proofs/protocol",
     "proofs/metrics",
     "proofs/it",
-    "proofs/kona/client",
-    "proofs/kona/host",
+    "proofs/kona-host",
     "proofs/backends/sp1/guest-builder",
     "proofs/backends/sp1/elfs",
     "proofs/backends/sp1/host",
     "proofs/backends/sp1/types",
-    "proofs/backends/nitro/enclave",
+    "proofs/backends/nitro/register",
     "proofs/workers/core",
     "proofs/workers/sp1",
     "proofs/workers/nitro",
@@ -52,7 +50,13 @@ members = [
     "xtask",
 ]
 
-exclude = ["proofs/backends/sp1/programs", "proofs/backends/nitro/fuzz"]
+exclude = [
+    # Measured crates: everything under proofs/measured resolves outside the node's
+    # dependency graph, so an unrelated bump cannot rotate an on-chain trust anchor.
+    # One lockfile per measured artifact (sp1-programs → vkeys, nitro-enclave → PCRs).
+    "proofs/measured",
+    "proofs/backends/nitro/fuzz",
+]
 
 default-members = ["bin/world-chain"]
 
@@ -100,13 +104,14 @@ world-chain-test-utils = { path = "crates/test-utils", default-features = false 
 world-chain-prover = { path = "proofs/debug/prover", default-features = false }
 world-chain-prover-sp1 = { path = "proofs/debug/bin/prover-sp1", default-features = false }
 world-chain-prover-nitro = { path = "proofs/debug/bin/prover-nitro", default-features = false }
-world-chain-proof-core = { path = "proofs/core", default-features = false }
-world-chain-proof-kona-client = { path = "proofs/kona/client", default-features = false }
-world-chain-proof-kona-host = { path = "proofs/kona/host", default-features = false }
+world-chain-proof-core = { path = "proofs/measured/core", default-features = false }
+world-chain-proof-kona-client = { path = "proofs/measured/kona-client", default-features = false }
+world-chain-proof-kona-host = { path = "proofs/kona-host", default-features = false }
 world-chain-proof-sp1-elfs = { path = "proofs/backends/sp1/elfs" }
 world-chain-proof-sp1-host = { path = "proofs/backends/sp1/host", default-features = false }
 world-chain-proof-sp1-types = { path = "proofs/backends/sp1/types", default-features = false }
-world-chain-proof-nitro-enclave = { path = "proofs/backends/nitro/enclave", default-features = false }
+world-chain-proof-nitro-enclave = { path = "proofs/measured/nitro-enclave", default-features = false }
+world-chain-proof-nitro-register = { path = "proofs/backends/nitro/register", default-features = false }
 world-chain-proof-worker = { path = "proofs/workers/core", default-features = false }
 world-chain-proof-sp1-worker = { path = "proofs/workers/sp1", default-features = false }
 world-chain-proof-nitro-worker = { path = "proofs/workers/nitro", default-features = false }

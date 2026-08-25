@@ -4,7 +4,8 @@ name: docker-proof
 # images to ghcr on merge to main (tag `nightly`) or via manual dispatch with a
 # chosen `image_tag` (e.g. `alpha-v0.1.0`). It does NOT cut a release — versioned
 # releases (manifest.json, signed binaries, EIF, vkeys) are cut by release-proof.yml
-# on `proof/v*` tag pushes once the services are ready.
+# on `proofs/v*` tag pushes, which calls this workflow with `services_only` to publish
+# the service images at the release version.
 
 on:
   workflow_dispatch:
@@ -17,6 +18,21 @@ on:
         description: Custom image tag to publish (e.g. "alpha-v0.1.0").
         required: false
         default: nightly
+  workflow_call:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to build.
+        required: true
+        type: string
+      image_tag:
+        description: Image tag to publish.
+        required: true
+        type: string
+      services_only:
+        description: Skip the enclave/EIF jobs; the caller publishes those from its own verified build.
+        required: false
+        default: false
+        type: boolean
   push:
     branches: [main]
     paths:
@@ -239,56 +255,17 @@ jobs:
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
 
-  # nitro-enclave uses its own Dockerfile (proofs/backends/nitro/enclave/Dockerfile) and
-  # is x86_64 only (Nitro Enclaves are x86_64).
-  build-nitro-enclave-image:
-    name: build nitro-enclave image
-    needs: [resolve-sha]
-    environment:
-      name: dev
-      deployment: false
-    runs-on: arc-public-8xlarge-amd64-runner
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ needs.resolve-sha.outputs.full }}
-      - name: Build and push digest
-        uses: ./.github/actions/docker-build-push-digest
-        with:
-          platform: linux/amd64
-          registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}-nitro-enclave
-          aws_region: ${{ env.AWS_REGION }}
-          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          dockerfile: proofs/backends/nitro/enclave/Dockerfile
-          digest_artifact_prefix: digests-nitro-enclave
-
-  merge-nitro-enclave-image:
-    name: merge nitro-worker-enclave image manifest
-    needs: [resolve-sha, build-nitro-enclave-image]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ needs.resolve-sha.outputs.full }}
-      - name: Merge multi-arch manifest
-        uses: ./.github/actions/docker-merge-manifest
-        with:
-          registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}-nitro-enclave
-          digest_artifact_prefix: digests-nitro-enclave
-          tags: |
-            type=raw,value=${{ inputs.image_tag || 'nightly' }}
-            type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
-
-  # Build the Nitro Enclave Image Format (EIF) file from the enclave Docker image,
-  # then package it into a minimal OCI carrier image pushed to GHCR so Kubernetes
-  # pods can pull it via an init container (AWS Nitro Enclaves K8s device plugin pattern).
+  # One Nix build produces both published artifacts: the enclave image itself and the EIF
+  # measured from it. They were two jobs building two different rootfs images — the Dockerfile
+  # one was published while the Nix one was measured — which is exactly the discrepancy that
+  # makes a PCR impossible to trust. Same rootfs now, by construction.
+  #
+  # The EIF is packaged into a minimal OCI carrier image so Kubernetes pods can pull it via an
+  # init container (AWS Nitro Enclaves K8s device plugin pattern).
   build-nitro-enclave-eif-image:
-    name: build nitro-worker-enclave EIF carrier image
-    needs: [resolve-sha, build-nitro-enclave-image]
+    name: build nitro-enclave image and EIF carrier
+    if: ${{ !inputs.services_only }}
+    needs: [resolve-sha]
     runs-on: arc-public-8xlarge-amd64-runner
     outputs:
       pcr0: ${{ steps.pcrs.outputs.pcr0 }}
@@ -299,22 +276,84 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.resolve-sha.outputs.full }}
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      # Pinned single-user install. The ARC runner image ships /nix world-writable (a volume
+      # mount), which nix refuses, and offers neither systemd nor a local docker daemon for
+      # the Determinate installer's daemon modes — its docker shim exits 125 because the
+      # DinD sidecar cannot mount this pod's /nix. A single-user install needs neither.
+      - name: Install Nix
+        env:
+          NIX_VERSION: 2.30.1
+        run: |
+          set -euo pipefail
+          if [ -L /nix ]; then sudo rm /nix; fi
+          sudo mkdir -p /nix
+          sudo chown "$(id -u):$(id -g)" /nix
+          sudo chmod 0755 /nix
+          # Sandbox-less builds run wherever nix puts them, and cargo hashes the build path
+          # into every binary. flake.nix relocates the enclave build to /build (the sandbox's
+          # constant path) when it exists — create it so that kicks in.
+          sudo mkdir -p /build
+          sudo chown "$(id -u):$(id -g)" /build
+          curl --proto '=https' --tlsv1.2 -sSf -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" | sh -s -- --no-daemon
+          # Build sandboxing needs unprivileged user namespaces, which the pod does not
+          # grant. Determinism is carried by the pinned closure and the double-build
+          # reproducibility check, not the sandbox.
+          mkdir -p ~/.config/nix
+          printf 'experimental-features = nix-command flakes\nsandbox = false\n' > ~/.config/nix/nix.conf
+          echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
-          toolchain: stable
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Publishes the same enclave binary the EIF below packages, as an OCI image for
+      # provenance/local runs. Nitro Enclaves are x86_64 only, so there is no manifest to merge.
+      - name: Build and push the enclave image
+        env:
+          TAG: ${{ inputs.image_tag || 'nightly' }}
+          SHORT: ${{ needs.resolve-sha.outputs.short }}
+        run: |
+          image=$(nix build .#enclave-image --no-link --print-out-paths)
+          docker load -i "$image"
+          for tag in "$TAG" "sha-$SHORT"; do
+            ref="$REGISTRY/$IMAGE_NAME-nitro-enclave:$tag"
+            docker tag world-chain-nitro-enclave:nix "$ref"
+            docker push "$ref"
+          done
+      # The enclave binary is a store hit from the image build above; only the EIF assembly runs.
       - name: Build EIF
         run: scripts/build-eif.sh target/eif
       - name: Extract PCRs
         id: pcrs
         run: |
-          jq -r '"pcr0=\(.PCR0)", "pcr1=\(.PCR1)", "pcr2=\(.PCR2)"' \
-            target/eif/pcrs.json >> "$GITHUB_OUTPUT"
-      - name: Upload PCR measurements
+          jq -r '"pcr0=\(.nitro.pcr0)", "pcr1=\(.nitro.pcr1)", "pcr2=\(.nitro.pcr2)"' \
+            target/eif/measurements.json >> "$GITHUB_OUTPUT"
+      - name: Upload measurements
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: nitro-enclave-pcrs
-          path: target/eif/pcrs.json
+          name: nitro-enclave-measurements
+          path: target/eif/measurements.json
+
+      # Surface, never commit: informational only — release-proof.yml is the enforcing
+      # gate. Publishes the fresh `.nitro` half when the committed file has gone stale.
+      - name: Compare measurements to committed
+        run: |
+          set -euo pipefail
+          if diff <(jq -S .nitro proofs/measurements.json) <(jq -S .nitro target/eif/measurements.json) > /tmp/nitro-measurements.diff; then
+            echo "PCRs match the committed proofs/measurements.json." >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Committed \`.nitro\` measurements are stale"
+              echo '```diff'
+              cat /tmp/nitro-measurements.diff
+              echo '```'
+              echo "Fresh \`.nitro\` half — paste into \`proofs/measurements.json\`:"
+              echo '```json'
+              jq -S .nitro target/eif/measurements.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -327,7 +366,7 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          file: proofs/backends/nitro/enclave/Dockerfile.eif
+          file: proofs/measured/nitro-enclave/Dockerfile.eif
           push: true
           platforms: linux/amd64
           tags: |
@@ -336,11 +375,10 @@ jobs:
 
   summary:
     name: Image tags summary
-    if: always()
+    if: ${{ always() && !inputs.services_only }}
     needs:
       - resolve-sha
       - merge-nitro-worker-image
-      - merge-nitro-enclave-image
       - build-nitro-enclave-eif-image
       - merge-service-images
     runs-on: ubuntu-latest
@@ -350,7 +388,7 @@ jobs:
           TAG:                 ${{ inputs.image_tag || 'nightly' }}
           SHORT:               ${{ needs.resolve-sha.outputs.short }}
           NITRO_WORKER_RESULT: ${{ needs.merge-nitro-worker-image.result }}
-          NITRO_ENCLAVE_RESULT:      ${{ needs.merge-nitro-enclave-image.result }}
+          NITRO_ENCLAVE_RESULT: ${{ needs.build-nitro-enclave-eif-image.result }}
           EIF_RESULT:          ${{ needs.build-nitro-enclave-eif-image.result }}
           SERVICES_RESULT:     ${{ needs.merge-service-images.result }}
           PCR0:                ${{ needs.build-nitro-enclave-eif-image.outputs.pcr0 }}

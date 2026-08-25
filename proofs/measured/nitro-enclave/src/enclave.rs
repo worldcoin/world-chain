@@ -348,7 +348,7 @@ fn handle_public_key(nonce: [u8; 32]) -> Result<EnclaveResponse> {
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Runs the full Kona derivation + execution range program. Mirrors the implementation in
-/// `proofs/backends/sp1/programs/range/utils/src/lib.rs` since that crate is excluded from
+/// `proofs/measured/sp1-programs/range-utils/src/lib.rs` since that crate is excluded from
 /// the workspace.
 async fn run_full_range_program<E>(
     executor: E,

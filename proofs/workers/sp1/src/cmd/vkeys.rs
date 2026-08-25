@@ -14,10 +14,17 @@ pub struct VkeysArgs {
 pub async fn vkeys(args: VkeysArgs) -> Result<()> {
     let actual = embedded_vkey_manifest().await?;
     if let Some(path) = args.check {
-        let expected: EmbeddedVkeyManifest = serde_json::from_slice(
+        let document: serde_json::Value = serde_json::from_slice(
             &fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?,
         )
         .with_context(|| format!("failed to parse {}", path.display()))?;
+        // proofs/measurements.json nests the SP1 half under `sp1` alongside the enclave PCRs.
+        // A bare manifest — what `--output` writes — is accepted as-is.
+        let expected: EmbeddedVkeyManifest = match document.get("sp1") {
+            Some(sp1) => serde_json::from_value(sp1.clone()),
+            None => serde_json::from_value(document),
+        }
+        .with_context(|| format!("failed to parse SP1 measurements from {}", path.display()))?;
         if actual != expected {
             bail!(
                 "embedded SP1 measurements do not match {}\nexpected: {expected:#?}\nactual: {actual:#?}",

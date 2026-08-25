@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-world-chain-proof-nitro-enclave = { path = "../enclave" }
+world-chain-proof-nitro-enclave = { path = "../../../measured/nitro-enclave" }
 
 [[bin]]
 name = "attestation_parse"

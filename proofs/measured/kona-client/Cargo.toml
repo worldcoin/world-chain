@@ -1,0 +1,92 @@
+# Standalone workspace, in place. See proofs/measured/core/Cargo.toml for why the
+# measured crates pin their own dependencies instead of inheriting the root workspace's.
+# 
+# Adding a dependency here is a measurement change. Treat it as one.
+[workspace]
+resolver = "3"
+members = ["."]
+
+[workspace.package]
+version = "2.4.2"
+edition = "2024"
+rust-version = "1.95.0"
+license = "MIT"
+homepage = "https://world.org/world-chain"
+repository = "https://github.com/worldcoin/world-chain/"
+
+[workspace.lints.rust]
+semicolon_in_expressions_from_macros = "allow"
+
+[workspace.dependencies]
+world-chain-proof-core = { path = "../core", default-features = false }
+alloy-consensus = { version = "=2.1.1", default-features = false }
+alloy-eips = { version = "=2.1.1", default-features = false, features = [
+    "serde",
+] }
+alloy-evm = { version = "0.37.0", default-features = false }
+alloy-op-evm = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
+alloy-primitives = { version = "1.6.0", default-features = false, features = [
+    "std",
+    "map-foldhash",
+] }
+alloy-rlp = { version = "0.3.16", default-features = false, features = [
+    "derive",
+] }
+anyhow = { version = "1.0.86", default-features = false }
+async-trait = "0.1.88"
+kona-derive = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
+kona-driver = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3" }
+kona-executor = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3" }
+kona-genesis = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
+kona-preimage = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", features = [
+    "rkyv",
+    "serde",
+] }
+kona-proof = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3" }
+kona-protocol = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
+kzg-rs = { version = "0.2.8", features = ["rkyv", "serde"] }
+op-alloy-consensus = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
+op-revm = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
+revm = { version = "41.0.0", default-features = false }
+revm-precompile = { version = "41.0.0", default-features = false }
+serde = { version = "1", features = ["derive"] }
+spin = "0.10"
+tracing = "0.1"
+
+[package]
+name = "world-chain-proof-kona-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-evm.workspace = true
+alloy-op-evm.workspace = true
+alloy-primitives = { workspace = true, features = ["serde"] }
+alloy-rlp.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+kona-derive.workspace = true
+kona-driver.workspace = true
+kona-executor.workspace = true
+kona-genesis.workspace = true
+kona-preimage.workspace = true
+kona-proof.workspace = true
+kona-protocol.workspace = true
+kzg-rs.workspace = true
+op-alloy-consensus.workspace = true
+op-revm.workspace = true
+revm.workspace = true
+revm-precompile.workspace = true
+serde = { workspace = true, features = ["derive"] }
+spin.workspace = true
+tracing.workspace = true
+world-chain-proof-core.workspace = true

@@ -53,8 +53,6 @@ pub mod p384_hints;
 pub mod prewarm;
 
 /// On-chain enclave key registration (calldata builder + self-registration flow).
-#[cfg(all(feature = "enclave", target_os = "linux"))]
-pub mod register;
 
 #[cfg(all(feature = "enclave", target_os = "linux"))]
 pub mod host;
