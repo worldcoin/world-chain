@@ -87,6 +87,16 @@ verify-proof-vkeys:
     jq -S . /tmp/vkeys-actual.json > /tmp/vkeys-actual-normalized.json
     diff /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || (echo "ERROR: the sp1 half of proofs/measurements.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
 
+# Everything in the measured workspace's lockfile is compiled into the EIF, so a
+# compromised crate there ships inside the attested TCB. cargo-deny rejects known-bad
+# crates (advisories, unknown sources, duplicate versions); cargo-vet fails when the
+# lockfile gains a crate version with neither an imported audit nor an exemption.
+[doc("Audit the measured enclave dependency tree with cargo-deny and cargo-vet. Used by CI.")]
+[group('proof')]
+audit-enclave-deps:
+    cd proofs/measured/nitro-enclave && cargo deny check advisories bans sources
+    cd proofs/measured/nitro-enclave && cargo vet --locked
+
 # Phase 0a – Compute and print the rollup config hash.
 # Sources (checked in priority order):
 #   L2_RPC_URL        – op-node RPC endpoint (port 9545, NOT the execution client on 8545)
