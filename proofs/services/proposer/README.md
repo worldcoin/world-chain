@@ -39,7 +39,9 @@ parentRef, attempt)` and the game's factory UUID is
 The proposer resolves every determined game parent-first on this selected lineage. A child may
 resolve as soon as its parent resolves successfully, so consecutive games' registry finality
 windows can overlap. A positive resolution may advance the anchor after its own finality delay; a
-proof-timeout resolution permits the next attempt to be created.
+proof-timeout resolution permits the next attempt to be created. For anchor advancement, the
+proposer walks resolved defender-winning games newest-to-oldest and closes the first game whose
+claim is valid according to the registry, allowing it to skip a newer game still in its airgap.
 
 ## Retry operations
 
