@@ -1,0 +1,38 @@
+# Supply-chain gate for the measured enclave workspace. Every crate in this lockfile is
+# compiled into the EIF, so a dependency change here rotates PCR0/PCR2 — and a compromised
+# crate here ships inside the attested TCB. Pairs with cargo-vet (supply-chain/): deny
+# catches known-bad crates, vet requires an audit for new or bumped ones.
+
+[advisories]
+ignore = [
+    # serde_cbor is unmaintained; sole consumer is AWS's own aws-nitro-enclaves-nsm-api
+    "RUSTSEC-2021-0127",
+    # paste is unmaintained but ubiquitous across the alloy/revm ecosystem
+    "RUSTSEC-2024-0436",
+    # bincode 1.x is unmaintained; pulled in transitively by the kona stack
+    "RUSTSEC-2025-0141",
+]
+
+[bans]
+multiple-versions = "deny"
+# Version-epoch splits inherited from the alloy/revm/kona upstreams
+skip = [
+    "block-buffer",
+    "cpufeatures",
+    "crypto-common",
+    "digest",
+    "half",
+    "hashbrown",
+    "itertools",
+    "num-bigint",
+    "spin",
+    "syn",
+    "windows-sys",
+    "winnow",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# kona-proof and its tree, pinned by rev in Cargo.toml
+allow-git = ["https://github.com/ethereum-optimism/optimism"]
