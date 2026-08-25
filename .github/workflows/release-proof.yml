@@ -71,21 +71,14 @@ jobs:
             exit 1
           fi
 
-          # flake.nix carries the enclave version as its own literal, because a Nix derivation
-          # cannot read it out of Cargo.toml without an import-from-derivation. A bump that
-          # misses one of the two publishes an image whose tag disagrees with what it measures,
-          # which is only discoverable by reading the manifest of a release already cut.
-          crate_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' \
-            proofs/measured/nitro-enclave/Cargo.toml | head -n 1)
+          # flake.nix is the single source of the proof-system version; the tag must match it.
+          # The crate version is deliberately not checked — it tracks the workspace and
+          # versions the code, not the trust anchors (the flake reads it from Cargo.toml).
           flake_version=$(sed -n 's/^ *version = "\([^"]*\)";.*/\1/p' flake.nix | head -n 1)
-          for pair in "proofs/measured/nitro-enclave/Cargo.toml:$crate_version" "flake.nix:$flake_version"; do
-            file="${pair%%:*}"
-            found="${pair##*:}"
-            if [[ "$version" != "$found" ]]; then
-              echo "Release version $version does not match $file version $found" >&2
-              exit 1
-            fi
-          done
+          if [[ "$version" != "$flake_version" ]]; then
+            echo "Release version $version does not match flake.nix version $flake_version" >&2
+            exit 1
+          fi
 
           release_sha=$(git rev-parse HEAD)
           {
