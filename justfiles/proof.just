@@ -67,6 +67,15 @@ update-proof-vkeys:
     jq -S --slurpfile sp1 /tmp/vkeys-update.json '.sp1 = $sp1[0]' proofs/measurements.json > /tmp/measurements-update.json
     mv /tmp/measurements-update.json proofs/measurements.json
 
+# Recomputes both halves: `.sp1` via the recipe above, then `.nitro` via
+# scripts/build-eif.sh, whose output already carries the fresh `.sp1` forward.
+# Needs Linux x86_64 with Nix (EIF), plus Docker and sp1up (vkeys).
+[doc("Recompute all of proofs/measurements.json: sp1 vkeys and nitro PCRs.")]
+[group('proof')]
+update-measurements: update-proof-vkeys
+    scripts/build-eif.sh target/eif
+    cp target/eif/measurements.json proofs/measurements.json
+
 # Verify that the `.sp1` half of proofs/measurements.json matches what the current
 # source produces. Uses jq -S to normalize key ordering before comparing, so the diff
 # is not sensitive to JSON insertion order. Used by CI. Fails if they differ.
