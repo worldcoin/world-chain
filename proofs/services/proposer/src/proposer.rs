@@ -240,7 +240,8 @@ where
     pub async fn tick(&self) -> Result<(), ProposerError> {
         // 1. refresh the anchor and canonical line
         let scan = self.scan_selected_lineage().await?;
-        // 2. resolve positive-ready games parent-first
+        // 2. Keep every defender-winning game: the newest may still be inside the ASR airgap,
+        // while an older game is already eligible to advance the anchor.
         let resolved_games = self.resolve_games(scan.lineage().games()).await?;
         // 3. advance the anchor to the highest ASR-valid resolved game
         self.advance_anchor(&resolved_games).await?;
