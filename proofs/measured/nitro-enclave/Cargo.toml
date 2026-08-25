@@ -1,3 +1,4 @@
+cargo-features = ["trim-paths"]
 
 # Standalone workspace: this crate is compiled into the EIF, so PCR0 and PCR2 are a function
 # of exactly the dependency versions resolved here. Sharing the root workspace's
@@ -8,6 +9,12 @@
 [workspace]
 resolver = "3"
 members = ["."]
+
+# Panic locations embed absolute source paths, and sandbox-less Nix builders (the CI pods)
+# get a random per-build directory — without trimming, every such build measures to
+# different PCRs. Trimmed paths are the same on every machine.
+[profile.release]
+trim-paths = "object"
 
 [workspace.package]
 version = "2.4.2"
