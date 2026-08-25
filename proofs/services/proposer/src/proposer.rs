@@ -101,15 +101,15 @@ where
         Ok(ProposerScan::new(lineage, next_action))
     }
 
-    /// Resolves positively resolvable games parent-first and returns the highest finalized game.
+    /// Resolves positively resolvable games parent-first and returns all defender-winning games.
     ///
-    /// Games finalized by an earlier iteration or another keeper are included so anchor
+    /// Games resolved by an earlier iteration or another keeper are included so anchor
     /// advancement can be retried.
     pub async fn resolve_games(
         &self,
         games: &[SelectedLineageGame],
-    ) -> Result<Option<SelectedLineageGame>, ProposerError> {
-        let mut highest_finalized_game = None;
+    ) -> Result<Vec<SelectedLineageGame>, ProposerError> {
+        let mut resolved_games = Vec::new();
         let mut resolutions_submitted = 0;
         for selected in games {
             let game = selected.game;
@@ -136,47 +136,41 @@ where
                     tx_hash = ?resolve_submission.tx_hash,
                     "resolved World Chain proof-system game"
                 );
-                highest_finalized_game = Some(*selected);
+                resolved_games.push(*selected);
                 resolutions_submitted += 1;
             } else if resolution_status.outcome == GameStatus::DefenderWins {
-                // the game was finalized in an earlier iteration or by another keeper
-                highest_finalized_game = Some(*selected);
+                // the game was resolved in an earlier iteration or by another keeper
+                resolved_games.push(*selected);
             }
         }
-        Ok(highest_finalized_game)
+        Ok(resolved_games)
     }
 
-    /// Advances the anchor to the highest finalized game, if one is available.
+    /// Advances the anchor to the highest ASR-valid defender-winning game, if one is available.
     pub async fn advance_anchor(
         &self,
-        highest_finalized_game: Option<SelectedLineageGame>,
+        resolved_games: &[SelectedLineageGame],
     ) -> Result<(), ProposerError> {
-        if let Some(highest_finalized_game) = highest_finalized_game {
-            // `closeGame` reverts until the registry's finality airgap has elapsed. Gate on it
-            // so the routine wait is not reported as a failed tick every poll interval.
+        for selected in resolved_games.iter().rev() {
             if !self
                 .execution_provider
-                .is_game_finalized(highest_finalized_game.game.address)
+                .is_game_claim_valid(selected.game.address)
                 .await?
             {
-                info!(
-                    game_address = %highest_finalized_game.game.address,
-                    l2_block_number = highest_finalized_game.transition.l2_block_number,
-                    "waiting for dispute-game finality delay before closing game"
-                );
-                return Ok(());
+                continue;
             }
 
             let close_game_submission = self
                 .execution_provider
-                .close_game(highest_finalized_game.game.address)
+                .close_game(selected.game.address)
                 .await?;
             info!(
-                game_address = %highest_finalized_game.game.address,
-                l2_block_number = highest_finalized_game.transition.l2_block_number,
+                game_address = %selected.game.address,
+                l2_block_number = selected.transition.l2_block_number,
                 tx_hash = ?close_game_submission.tx_hash,
                 "closed World Chain proof-system game"
             );
+            break;
         }
         Ok(())
     }
@@ -246,10 +240,11 @@ where
     pub async fn tick(&self) -> Result<(), ProposerError> {
         // 1. refresh the anchor and canonical line
         let scan = self.scan_selected_lineage().await?;
-        // 2. resolve positive-ready games parent-first
-        let highest_finalized_game = self.resolve_games(scan.lineage().games()).await?;
-        // 3. advance the anchor to the highest finalized canonical game
-        self.advance_anchor(highest_finalized_game).await?;
+        // 2. Keep every defender-winning game: the newest may still be inside the ASR airgap,
+        // while an older game is already eligible to advance the anchor.
+        let resolved_games = self.resolve_games(scan.lineage().games()).await?;
+        // 3. advance the anchor to the highest ASR-valid resolved game
+        self.advance_anchor(&resolved_games).await?;
         // 4. resolve a negative tip, or submit a new proposal or retry
         self.submit_next_proposal(&scan).await?;
         Ok(())

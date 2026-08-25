@@ -60,8 +60,8 @@ pub trait ProposerClient: LineageProvider {
     /// Submits a resolve transaction to the provided game.
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError>;
 
-    /// Returns whether the registry's finality airgap has elapsed for the provided game.
-    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError>;
+    /// Returns whether the registry considers the game's claim valid for anchor advancement.
+    async fn is_game_claim_valid(&self, game: Address) -> Result<bool, ProposerError>;
 
     /// Submits a closeGame transaction to the provided game.
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError>;
