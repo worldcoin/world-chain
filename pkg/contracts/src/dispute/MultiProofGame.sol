@@ -719,10 +719,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             payouts[payoutCount++] = IWLDStakingVault.Payout({recipient: candidate, amount: amount});
         }
 
-        // Shrink the ABI-visible array length to the number of populated payouts.
-        assembly ("memory-safe") {
-            mstore(payouts, payoutCount)
-        }
+        // Unused entries remain zero-value payouts, which do not affect vault accounting.
     }
 
     ////////////////////////////////////////////////////////////////
