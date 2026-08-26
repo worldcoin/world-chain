@@ -123,8 +123,8 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         emit Withdrawn(msg.sender, amount);
     }
 
-    // TODO(gas): Consider an optimized precomputed-UUID reservation path once permissionless
-    // keepers can reliably obtain and validate the full creation data.
+    // Derive the UUID from the canonical creation data onchain; accepting a precomputed UUID
+    // would make its correctness an offchain responsibility.
     /// @inheritdoc IWLDStakingVault
     function reserveProposal(Claim rootClaim, bytes calldata extraData) external returns (Hash uuid) {
         return _reserveProposal(msg.sender, rootClaim, extraData);
