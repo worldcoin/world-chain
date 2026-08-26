@@ -177,9 +177,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice The total bonds deposited into the game.
     uint256 public totalBonds;
 
-    /// @notice Account that reserved and funded the proposer bond.
-    address public bondProposer;
-
     /// @notice Reward recipient recorded for each accepted proof lane, indexed by `ProofLane`.
     mapping(uint8 laneId => address recipient) public laneRecipient;
 
@@ -409,8 +406,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // Set the game as initialized.
         initialized = true;
 
-        bondProposer = bondVault.consumeProposal();
-        _depositBond(bondProposer, proposerBond);
+        // Pull the proposer bond from the creator's WLD allowance; the vault authenticates this
+        // clone against the factory's deterministic deployment address.
+        bondVault.pullProposerBond();
+        _depositBond(gameCreator(), proposerBond);
 
         // Set the game's starting timestamp.
         createdAt = Timestamp.wrap(uint64(block.timestamp));
@@ -465,7 +464,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // at the challenge, so late challenges cannot extend the game.
         claimData.deadline = proofDeadline();
 
-        bondVault.reserveChallenge();
+        bondVault.pullChallengerBond();
         _depositBond(msg.sender, challengerBond);
 
         emit Challenged(msg.sender, claimData.deadline.raw());
@@ -557,7 +556,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             // An invalid parent invalidates this game regardless of its own proof state.
             status = GameStatus.CHALLENGER_WINS;
             claimData.invalidationReason = InvalidationReason.INVALID_PARENT;
-            normalModeCredit[bondProposer] += proposerBond;
+            normalModeCredit[gameCreator()] += proposerBond;
             if (claimData.challenger != address(0)) {
                 normalModeCredit[claimData.challenger] += challengerBond;
             }
@@ -621,7 +620,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             }
         }
 
-        normalModeCredit[bondProposer] += totalBonds - distributed;
+        normalModeCredit[gameCreator()] += totalBonds - distributed;
     }
 
     /// @inheritdoc IMultiProofGame
@@ -684,7 +683,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     function _settlementCandidates() internal view returns (address[] memory candidates) {
         // Possible recipients are the proposer, challenger, protocol, and one recipient per proof lane.
         candidates = new address[](3 + LibProof.PROOF_LANE_COUNT);
-        candidates[0] = bondProposer;
+        candidates[0] = gameCreator();
         candidates[1] = claimData.challenger;
         candidates[2] = protocolFeeRecipient;
         for (uint8 laneId; laneId < LibProof.PROOF_LANE_COUNT; laneId++) {

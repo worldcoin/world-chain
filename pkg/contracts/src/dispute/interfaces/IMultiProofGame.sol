@@ -191,9 +191,6 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice L1 block number of `l1Head`.
     function l1OriginNumber() external view returns (uint256);
 
-    /// @notice Account that reserved and funded the proposer bond.
-    function bondProposer() external view returns (address);
-
     ////////////////////////////////////////////////////////////////
     //                       Game progress                        //
     ////////////////////////////////////////////////////////////////
@@ -240,7 +237,8 @@ interface IMultiProofGame is IDisputeGame {
     //                    Challenge and proofs                    //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Disputes a proposal and reserves `challengerBond` WLD from the caller's vault balance.
+    /// @notice Disputes a proposal, pulling `challengerBond` WLD from the caller's allowance to
+    ///         the bond vault.
     function challenge() external returns (ProposalStatus);
 
     /// @notice Submits a compact proof payload. Before a challenge, any accepted lane satisfies

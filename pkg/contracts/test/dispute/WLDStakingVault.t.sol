@@ -5,15 +5,63 @@ import {OPStackFixtures} from "./OPStackFixtures.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {WLDStakingVault} from "../../src/dispute/WLDStakingVault.sol";
 import {IWLDStakingVault} from "../../src/dispute/interfaces/IWLDStakingVault.sol";
+import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 
 import {Claim, GameType, Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
+import {IncorrectBondAmount} from "@optimism-bedrock/src/dispute/lib/Errors.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 
 contract UnregisteredGameHarness {
     function gameData() external pure returns (GameType, Claim, bytes memory) {
         return (GameTypes.MULTI_PROOF_GAME_TYPE, Claim.wrap(bytes32(uint256(1))), hex"");
+    }
+}
+
+/// @dev Mimics a mid-creation game's surface but was not deployed by the factory, so it cannot
+///      occupy the deterministic clone address the vault recomputes.
+contract ImpersonatingGameHarness {
+    IDisputeGameFactory internal immutable FACTORY;
+    IWLDStakingVault internal immutable VAULT;
+    address internal immutable VICTIM;
+
+    constructor(IDisputeGameFactory factory, IWLDStakingVault vault, address victim) {
+        FACTORY = factory;
+        VAULT = vault;
+        VICTIM = victim;
+    }
+
+    function gameType() external pure returns (GameType) {
+        return GameTypes.MULTI_PROOF_GAME_TYPE;
+    }
+
+    function disputeGameFactory() external view returns (IDisputeGameFactory) {
+        return FACTORY;
+    }
+
+    function bondVault() external view returns (IWLDStakingVault) {
+        return VAULT;
+    }
+
+    function gameData() external pure returns (GameType, Claim, bytes memory) {
+        return (GameTypes.MULTI_PROOF_GAME_TYPE, Claim.wrap(bytes32(uint256(1))), hex"");
+    }
+
+    function gameCreator() external view returns (address) {
+        return VICTIM;
+    }
+
+    function l1Head() external pure returns (Hash) {
+        return Hash.wrap(bytes32(0));
+    }
+
+    function proposerBond() external pure returns (uint256) {
+        return 1e18;
+    }
+
+    function pull() external {
+        VAULT.pullProposerBond();
     }
 }
 
@@ -35,92 +83,133 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         vault.initialize(wld, ISystemConfig(address(systemConfig)), dgf);
     }
 
-    function test_DepositAndDelayedWithdrawalKeepExactLiabilities() public {
-        vm.prank(proposer);
-        bondVault.requestWithdrawal(40 * WLD_UNIT);
+    function test_Create_PullsProposerBondFromCreatorAllowance() public {
+        MultiProofGame game = _proposeAtAnchor();
 
-        assertEq(bondVault.availableBalance(proposer), 60 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
+        assertEq(game.gameCreator(), proposer);
+        assertEq(wld.balanceOf(proposer), 100 * WLD_UNIT - PROPOSER_BOND);
+        assertEq(wld.balanceOf(address(bondVault)), PROPOSER_BOND);
+        assertEq(bondVault.totalLiabilities(), PROPOSER_BOND);
         assertTrue(bondVault.isSolvent());
+
+        (uint256 proposerBond_, uint256 challengerBond_, bool settled_) = bondVault.gameBonds(address(game));
+        assertEq(proposerBond_, PROPOSER_BOND);
+        assertEq(challengerBond_, 0);
+        assertFalse(settled_);
+    }
+
+    function test_Create_RevertsWithoutAllowance() public {
+        address unapproved = makeAddr("unapproved-proposer");
+        wld.mint(unapproved, PROPOSER_BOND);
+
+        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        Claim claim = Claim.wrap(_rootClaimFor(target));
+        bytes memory extraData = _extraData(target, type(uint256).max, 0);
+
+        vm.prank(unapproved);
+        vm.expectRevert();
+        dgf.create(WC_GAME_TYPE, claim, extraData);
+    }
+
+    function test_Create_RejectsNonzeroFactoryEthBond() public {
+        dgf.setInitBond(WC_GAME_TYPE, 1);
+        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        Claim claim = Claim.wrap(_rootClaimFor(target));
+        bytes memory extraData = _extraData(target, type(uint256).max, 0);
+
+        vm.deal(proposer, 1);
+        vm.prank(proposer);
+        vm.expectRevert(IncorrectBondAmount.selector);
+        dgf.create{value: 1}(WC_GAME_TYPE, claim, extraData);
+    }
+
+    function test_Create_RejectsDivergedFactoryAndVaultOwners() public {
+        address newFactoryOwner = makeAddr("new-factory-owner");
+        dgf.transferOwnership(newFactoryOwner);
+
+        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        Claim claim = Claim.wrap(_rootClaimFor(target));
+        bytes memory extraData = _extraData(target, type(uint256).max, 0);
+
+        vm.prank(proposer);
+        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.OwnerMismatch.selector, newFactoryOwner, address(this)));
+        dgf.create(WC_GAME_TYPE, claim, extraData);
+    }
+
+    function test_PullProposerBond_RejectsNonFactoryClone() public {
+        ImpersonatingGameHarness impersonator = new ImpersonatingGameHarness(dgf, bondVault, proposer);
+
+        vm.expectRevert();
+        impersonator.pull();
+        assertEq(wld.balanceOf(proposer), 100 * WLD_UNIT);
+        assertEq(bondVault.totalLiabilities(), 0);
+    }
+
+    function test_PullChallengerBond_RejectsUnregisteredGame() public {
+        UnregisteredGameHarness game = new UnregisteredGameHarness();
+
+        vm.prank(address(game));
+        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.GameNotRegistered.selector, address(game)));
+        bondVault.pullChallengerBond();
+    }
+
+    function test_Settlement_DelayedWithdrawalKeepsExactLiabilities() public {
+        MultiProofGame game = _proposeAtAnchor();
+        _resolveUnchallenged(game);
+        _passAirgap(game);
+        game.closeGame();
+
+        assertEq(bondVault.availableBalance(proposer), PROPOSER_BOND);
+        assertEq(bondVault.totalLiabilities(), PROPOSER_BOND);
+        assertTrue(bondVault.isSolvent());
+
+        vm.prank(proposer);
+        bondVault.requestWithdrawal(PROPOSER_BOND);
+        assertEq(bondVault.availableBalance(proposer), 0);
+        assertEq(bondVault.totalLiabilities(), PROPOSER_BOND);
 
         vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS);
         vm.prank(proposer);
-        bondVault.withdraw(40 * WLD_UNIT);
+        bondVault.withdraw(PROPOSER_BOND);
 
-        assertEq(wld.balanceOf(proposer), 40 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 160 * WLD_UNIT);
+        assertEq(wld.balanceOf(proposer), 100 * WLD_UNIT);
+        assertEq(bondVault.totalLiabilities(), 0);
         assertTrue(bondVault.isSolvent());
     }
 
-    function test_ReserveAndCreate_BindsBondProposerRatherThanFactoryCaller() public {
-        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
-        Claim claim = Claim.wrap(_rootClaimFor(target));
-        bytes memory extraData = _extraData(target, type(uint256).max, 0);
+    function test_WithdrawalRequestResetsDelayAndPauseOnlyBlocksTransfer() public {
+        MultiProofGame game = _proposeAtAnchor();
+        _resolveUnchallenged(game);
+        _passAirgap(game);
+        game.closeGame();
 
         vm.prank(proposer);
-        MultiProofGame game = MultiProofGame(address(bondVault.reserveAndCreate(claim, extraData)));
-
-        assertEq(game.gameCreator(), address(bondVault));
-        assertEq(game.bondProposer(), proposer);
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT - PROPOSER_BOND);
-    }
-
-    function test_Reservation_CanBeCreatedByPermissionlessKeeper() public {
-        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
-        Claim claim = Claim.wrap(_rootClaimFor(target));
-        bytes memory extraData = _extraData(target, type(uint256).max, 0);
-        _reserve(proposer, claim, extraData);
-
-        address keeper = makeAddr("permissionless-keeper");
-        vm.prank(keeper);
-        MultiProofGame game = MultiProofGame(address(dgf.create(WC_GAME_TYPE, claim, extraData)));
-
-        assertEq(game.gameCreator(), keeper);
-        assertEq(game.bondProposer(), proposer);
-    }
-
-    function test_Reservation_RequiresZeroFactoryEthBond() public {
-        dgf.setInitBond(WC_GAME_TYPE, 1);
-        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        bondVault.requestWithdrawal(PROPOSER_BOND / 2);
+        vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS - 1);
 
         vm.prank(proposer);
-        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.FactoryBondMustBeZero.selector, 1));
-        bondVault.reserveProposal(Claim.wrap(_rootClaimFor(target)), _extraData(target, type(uint256).max, 0));
-    }
-
-    function test_Reservation_CancelRefundsOnlyBeforeCreation() public {
-        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
-        Claim claim = Claim.wrap(_rootClaimFor(target));
-        bytes memory extraData = _extraData(target, type(uint256).max, 0);
-        _reserve(proposer, claim, extraData);
-
-        vm.prank(challengerAccount);
+        bondVault.requestWithdrawal(PROPOSER_BOND / 4);
+        (, uint256 resetAt) = bondVault.withdrawals(proposer);
+        vm.warp(block.timestamp + 1);
+        vm.prank(proposer);
         vm.expectRevert(
-            abi.encodeWithSelector(IWLDStakingVault.NotReservedProposer.selector, challengerAccount, proposer)
+            abi.encodeWithSelector(
+                IWLDStakingVault.WithdrawalDelayNotMet.selector, resetAt + WLD_WITHDRAWAL_DELAY_SECONDS
+            )
         );
-        bondVault.cancelProposal(claim, extraData);
+        bondVault.withdraw(PROPOSER_BOND / 4);
 
+        vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS - 1);
+        systemConfig.setPaused(true);
         vm.prank(proposer);
-        bondVault.cancelProposal(claim, extraData);
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
-    }
+        vm.expectRevert(IWLDStakingVault.WithdrawalPaused.selector);
+        bondVault.withdraw(PROPOSER_BOND / 4);
 
-    function test_Reservation_ImplReplacementMakesReservationStaleAndRefundable() public {
-        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
-        Claim claim = Claim.wrap(_rootClaimFor(target));
-        bytes memory extraData = _extraData(target, type(uint256).max, 0);
-        Hash uuid = dgf.getGameUUID(WC_GAME_TYPE, claim, extraData);
-        _reserve(proposer, claim, extraData);
-
-        MultiProofGame replacement = new MultiProofGame(_gameConfig());
-        dgf.setImplementation(WC_GAME_TYPE, IDisputeGame(address(replacement)), hex"");
-
-        vm.prank(creationKeeper);
-        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.StaleReservation.selector, uuid));
-        dgf.create(WC_GAME_TYPE, claim, extraData);
-
-        bondVault.invalidateStaleProposal(claim, extraData);
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
+        systemConfig.setPaused(false);
+        vm.prank(proposer);
+        bondVault.withdraw(PROPOSER_BOND / 4);
+        (uint256 pending,) = bondVault.withdrawals(proposer);
+        assertEq(pending, PROPOSER_BOND / 2);
     }
 
     function test_RegisteredOldImplementationCanSettleAfterReplacement() public {
@@ -134,48 +223,23 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         (,, bool settled) = bondVault.gameBonds(address(game));
         assertTrue(settled);
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
-    }
-
-    function test_WithdrawalRequestResetsDelayAndPauseOnlyBlocksTransfer() public {
-        vm.prank(proposer);
-        bondVault.requestWithdrawal(10 * WLD_UNIT);
-        vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS - 1);
-
-        vm.prank(proposer);
-        bondVault.requestWithdrawal(5 * WLD_UNIT);
-        (, uint256 resetAt) = bondVault.withdrawals(proposer);
-        vm.warp(block.timestamp + 1);
-        vm.prank(proposer);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IWLDStakingVault.WithdrawalDelayNotMet.selector, resetAt + WLD_WITHDRAWAL_DELAY_SECONDS
-            )
-        );
-        bondVault.withdraw(WLD_UNIT);
-
-        vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS - 1);
-        systemConfig.setPaused(true);
-        vm.prank(proposer);
-        vm.expectRevert(IWLDStakingVault.WithdrawalPaused.selector);
-        bondVault.withdraw(WLD_UNIT);
-
-        systemConfig.setPaused(false);
-        vm.prank(proposer);
-        bondVault.withdraw(WLD_UNIT);
-        (uint256 pending,) = bondVault.withdrawals(proposer);
-        assertEq(pending, 14 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(proposer), PROPOSER_BOND);
     }
 
     function test_BreakGlassHoldAndRecoverMirrorDelayedWETHTrust() public {
-        bondVault.hold(proposer, 25 * WLD_UNIT);
-        assertEq(bondVault.availableBalance(proposer), 75 * WLD_UNIT);
-        assertEq(bondVault.availableBalance(address(this)), 25 * WLD_UNIT);
+        MultiProofGame game = _proposeAtAnchor();
+        _resolveUnchallenged(game);
+        _passAirgap(game);
+        game.closeGame();
+
+        bondVault.hold(proposer, PROPOSER_BOND);
+        assertEq(bondVault.availableBalance(proposer), 0);
+        assertEq(bondVault.availableBalance(address(this)), PROPOSER_BOND);
         assertTrue(bondVault.isSolvent());
 
-        bondVault.recover(WLD_UNIT);
+        bondVault.recover(PROPOSER_BOND);
         assertFalse(bondVault.isSolvent());
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
+        assertEq(bondVault.totalLiabilities(), PROPOSER_BOND);
     }
 
     function test_BreakGlassHoldAndRecoverRejectUnauthorizedCaller() public {
@@ -193,12 +257,12 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
     function test_DirectDonationCreatesSurplusWithoutChangingLiabilities() public {
         wld.mint(address(bondVault), 5 * WLD_UNIT);
 
-        assertEq(wld.balanceOf(address(bondVault)), 205 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
+        assertEq(wld.balanceOf(address(bondVault)), 5 * WLD_UNIT);
+        assertEq(bondVault.totalLiabilities(), 0);
         assertTrue(bondVault.isSolvent());
     }
 
-    function test_InsolvencyDoesNotBlockInternalSettlementOrReservation() public {
+    function test_InsolvencyDoesNotBlockInternalSettlementOrCreation() public {
         MultiProofGame game = _proposeAtAnchor();
         _challenge(game);
         _submitLanes(game, PROOF_THRESHOLD);
@@ -209,12 +273,12 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         _passAirgap(game);
         game.closeGame();
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
+        assertEq(bondVault.totalLiabilities(), PROPOSER_BOND + CHALLENGER_BOND);
 
-        (, uint256 anchorBlock) = asr.getAnchorRoot();
-        uint256 target = anchorBlock + BLOCK_INTERVAL;
-        _reserve(proposer, Claim.wrap(_rootClaimFor(target)), _extraDataForParent(target, address(game), 0));
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
+        MultiProofGame next = _proposeChild(0);
+        assertEq(bondVault.totalLiabilities(), 2 * PROPOSER_BOND + CHALLENGER_BOND);
+        (uint256 proposerBond_,,) = bondVault.gameBonds(address(next));
+        assertEq(proposerBond_, PROPOSER_BOND);
     }
 
     function test_OverlappingParticipantRolesSettleOnceAndConserveLiabilities() public {
@@ -229,8 +293,8 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         _passAirgap(game);
         game.closeGame();
 
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(proposer), PROPOSER_BOND + CHALLENGER_BOND);
+        assertEq(bondVault.totalLiabilities(), PROPOSER_BOND + CHALLENGER_BOND);
     }
 
     function test_Settle_RejectsUnregisteredGame() public {
