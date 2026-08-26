@@ -31,8 +31,9 @@ abstract contract OPStackFixtures is Test {
     uint256 internal constant WLD_WITHDRAWAL_DELAY_SECONDS = 7 days;
     uint64 internal constant CHALLENGE_PERIOD = 1 days;
     uint64 internal constant PROOF_PERIOD = 7 days;
-    uint256 internal constant PROPOSER_BOND = 1 ether;
-    uint256 internal constant CHALLENGER_BOND = 1 ether;
+    uint256 internal constant WLD_UNIT = 1e18;
+    uint256 internal constant PROPOSER_BOND = WLD_UNIT;
+    uint256 internal constant CHALLENGER_BOND = WLD_UNIT;
     uint8 internal constant PROOF_THRESHOLD = 2;
 
     uint256 internal constant CHAIN_ID = 480;
@@ -114,8 +115,8 @@ abstract contract OPStackFixtures is Test {
         // The registry retires every game created at or before its initialization timestamp.
         vm.warp(block.timestamp + 1);
 
-        _depositWLD(proposer, 100 ether);
-        _depositWLD(challengerAccount, 100 ether);
+        _depositWLD(proposer, 100 * WLD_UNIT);
+        _depositWLD(challengerAccount, 100 * WLD_UNIT);
     }
 
     /// @dev Address of the implementation most recently deployed by `_proxied`.
