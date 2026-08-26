@@ -52,12 +52,12 @@ async fn settle_with_proposer(proposer: &WorldChainProposer<FakeExecution, FakeC
         .scan_selected_lineage()
         .await
         .expect("selected lineage reconstructed");
-    let highest_finalized_game = proposer
+    let resolved_games = proposer
         .resolve_games(scan.lineage().games())
         .await
         .expect("canonical games resolved");
     proposer
-        .advance_anchor(highest_finalized_game)
+        .advance_anchor(&resolved_games)
         .await
         .expect("anchor advanced");
 }

@@ -105,6 +105,14 @@ where
             .map_err(Into::into)
     }
 
+    async fn read_is_game_claim_valid(&self, game: Address) -> Result<bool, ProposerError> {
+        self.anchor
+            .isGameClaimValid(game)
+            .call()
+            .await
+            .map_err(Into::into)
+    }
+
     async fn send_resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
         let _permit = self.semaphore.acquire().await?;
         let pending = self.game(game).resolve().send().await?;
@@ -317,8 +325,8 @@ where
         self.send_resolve_game(game).await
     }
 
-    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
-        self.read_is_game_finalized(game).await
+    async fn is_game_claim_valid(&self, game: Address) -> Result<bool, ProposerError> {
+        self.read_is_game_claim_valid(game).await
     }
 
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {

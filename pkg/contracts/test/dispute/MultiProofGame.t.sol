@@ -565,7 +565,7 @@ contract MultiProofGameTest is OPStackFixtures {
         dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, claim, retryExtraData);
     }
 
-    function test_ChildWaitsForParentThenFinalizes() public {
+    function test_ChildWaitsForParentResolutionNotFinality() public {
         MultiProofGame parent = _proposeAtAnchor();
         MultiProofGame child = _proposeChild(0);
         _challenge(child);
@@ -575,11 +575,13 @@ contract MultiProofGameTest is OPStackFixtures {
         child.resolve();
 
         _resolveUnchallenged(parent);
+        assertFalse(asr.isGameFinalized(IDisputeGame(address(parent))));
 
-        vm.expectRevert(ParentGameNotResolved.selector);
-        child.resolve();
+        (bool resolvable, GameStatus outcome, InvalidationReason reason) = child.resolutionStatus();
+        assertTrue(resolvable);
+        assertEq(uint8(outcome), uint8(GameStatus.DEFENDER_WINS));
+        assertEq(uint8(reason), uint8(InvalidationReason.NONE));
 
-        _passAirgap(parent);
         child.resolve();
         assertEq(uint8(child.status()), uint8(GameStatus.DEFENDER_WINS));
     }

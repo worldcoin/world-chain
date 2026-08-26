@@ -1,0 +1,41 @@
+# Supply-chain gate for the measured enclave workspace (proofs/measured/nitro-enclave).
+# verify-measurements.yml proves the EIF binary matches the source; this proves the
+# source's dependency tree is vetted: cargo-deny rejects known-bad crates, cargo-vet
+# fails when the lockfile gains a crate version without an imported audit or exemption.
+# The weekly run catches advisories published against an unchanged lockfile.
+name: supply-chain
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - "proofs/measured/**"
+      - "justfiles/proof.just"
+      - ".github/workflows/supply-chain.yml"
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  audit-enclave-deps:
+    name: audit measured enclave dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-07-01
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          # deny/vet pinned to the versions that generated deny.toml and supply-chain/:
+          # their on-disk schemas are version-coupled (imports.lock parse breaks across versions)
+          tool: just,cargo-deny@0.20.2,cargo-vet@0.10.2
+      - name: Audit enclave dependency tree
+        run: just audit-enclave-deps
