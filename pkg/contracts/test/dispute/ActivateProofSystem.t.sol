@@ -66,26 +66,26 @@ contract ActivateProofSystemTest is OPStackFixtures {
     function test_validate_rejectsDuplicateProofLaneVerifiers() public {
         IMultiProofGame.GameConfig memory gameConfig = _gameConfig();
         gameConfig.teeVerifier = gameConfig.validityProofVerifier;
-        MultiProofGame candidate = new MultiProofGame(gameConfig);
+        MultiProofGame implementation = new MultiProofGame(gameConfig);
 
         vm.expectRevert("ActivateProofSystem: proof lane verifiers must be distinct");
-        activation.validate(_activationConfig(false), IMultiProofGame(address(candidate)));
+        activation.validate(_activationConfig(false), IMultiProofGame(address(implementation)));
     }
 
-    function test_run_registersValidatedCandidate() public {
-        MultiProofGame candidate = new MultiProofGame(_gameConfig());
+    function test_run_registersValidatedImplementation() public {
+        MultiProofGame implementation = new MultiProofGame(_gameConfig());
         vm.setEnv("DGF_OWNER_KEY", vm.toString(DGF_OWNER_KEY));
         vm.setEnv("DISPUTE_GAME_FACTORY", vm.toString(address(dgf)));
         vm.setEnv("ANCHOR_STATE_REGISTRY", vm.toString(address(asr)));
         vm.setEnv("SYSTEM_CONFIG", vm.toString(address(systemConfig)));
         vm.setEnv("OP_CHAIN_PROXY_ADMIN", vm.toString(address(proxyAdmin)));
         vm.setEnv("WLD_TOKEN", vm.toString(address(wld)));
-        vm.setEnv("GAME_IMPLEMENTATION", vm.toString(address(candidate)));
+        vm.setEnv("GAME_IMPLEMENTATION", vm.toString(address(implementation)));
 
         IMultiProofGame activated = activation.run();
 
-        assertEq(address(activated), address(candidate));
-        assertEq(address(dgf.gameImpls(WC_GAME_TYPE)), address(candidate));
+        assertEq(address(activated), address(implementation));
+        assertEq(address(dgf.gameImpls(WC_GAME_TYPE)), address(implementation));
         assertEq(dgf.initBonds(WC_GAME_TYPE), 0);
         assertEq(dgf.gameArgs(WC_GAME_TYPE), hex"");
     }

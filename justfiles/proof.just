@@ -20,7 +20,7 @@
 #   Phase 0a  proof-rollup-config-hash   – Compute rollup config hash from an L2 RPC
 #   Phase 1   proof-deploy-nitro         – Deploy Nitro attestation contracts
 #   Phase 1b  proof-deploy-mocks         – Deploy proof-lane test doubles (devnet only)
-#   Phase 2   proof-deploy-system        – Deploy candidate proof system contracts
+#   Phase 2   proof-deploy-system        – Deploy proof system implementation and vault
 #   Phase 3a  proof-certmanager-prewarm  – Pre-warm CertManager with CA certs
 #   Phase 3b  proof-approve-pcrs         – Approve a PCR set on the verifier
 #   —         proof-activate-system      – Validate, register, and activate WIP-1006
@@ -185,7 +185,7 @@ proof-deploy-mocks env="alphanet":
 # run `proof-deploy-mocks` first and read the four addresses out of
 # deployments/<env>-proof-mocks.json. An existing deployment record supplies the singleton
 # WLD vault automatically during rotations unless WLD_STAKING_VAULT is set explicitly.
-# Phase 2 – Deploy the candidate proof system contracts.
+# Phase 2 – Deploy the proof system implementation and vault.
 [group('proof')]
 proof-deploy-system env="alphanet":
     #!/usr/bin/env bash
@@ -245,9 +245,9 @@ proof-deploy-system env="alphanet":
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
-# Register and activate the candidate WIP-1006 implementation after validating its wiring and current anchor.
+# Register and activate the WIP-1006 implementation after validating its wiring and current anchor.
 # Set REQUIRE_FRESH_ANCHOR=true during a clean chain bootstrap.
-[doc("Validate, register, and activate a candidate WIP-1006 implementation.")]
+[doc("Validate, register, and activate a WIP-1006 implementation.")]
 [group('proof')]
 proof-activate-system env="alphanet":
     #!/usr/bin/env bash
@@ -270,7 +270,7 @@ proof-activate-system env="alphanet":
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
     fi
-    echo "Registering and activating WIP-1006 candidate $GAME_IMPLEMENTATION (require fresh anchor: $REQUIRE_FRESH_ANCHOR)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
+    echo "Registering and activating WIP-1006 implementation $GAME_IMPLEMENTATION (require fresh anchor: $REQUIRE_FRESH_ANCHOR)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
     cd pkg/contracts && forge script scripts/devnet/ActivateProofSystem.s.sol:ActivateProofSystem \
         --rpc-url "$L1_RPC_URL" --private-key "$DGF_OWNER_KEY" $BROADCAST_FLAG --slow
 
