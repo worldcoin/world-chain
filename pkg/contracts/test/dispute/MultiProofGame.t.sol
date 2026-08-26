@@ -330,7 +330,7 @@ contract MultiProofGameTest is OPStackFixtures {
         address keeper = makeAddr("keeper");
         vm.prank(keeper);
         game.closeGame();
-        assertEq(bondVault.availableBalance(proposer), 100 ether);
+        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
 
         (Hash anchorRoot, uint256 anchorBlock) = asr.getAnchorRoot();
         assertEq(Hash.unwrap(anchorRoot), Claim.unwrap(game.rootClaim()));
@@ -392,7 +392,7 @@ contract MultiProofGameTest is OPStackFixtures {
         game.challenge();
 
         assertEq(game.challenger(), address(0));
-        assertEq(bondVault.availableBalance(challengerAccount), 100 ether);
+        assertEq(bondVault.availableBalance(challengerAccount), 100 * WLD_UNIT);
     }
 
     function test_Challenge_DoesNotExtendProofDeadline() public {
@@ -712,7 +712,7 @@ contract MultiProofGameTest is OPStackFixtures {
     /// @dev A proposer cannot recover a forfeited bond by challenging from a second address.
     function test_SelfChallenge_IsAlwaysLossMaking() public {
         address sybil = makeAddr("proposer-sybil");
-        _depositWLD(sybil, 10 ether);
+        _depositWLD(sybil, 10 * WLD_UNIT);
 
         // Challenging a proofless proposal still burns part of the proposer's bond.
         MultiProofGame proofless = _proposeAtAnchor();
@@ -776,7 +776,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         _passAirgap(game);
         game.closeGame();
-        assertEq(bondVault.availableBalance(proposer), 100 ether + CHALLENGER_BOND);
+        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT + CHALLENGER_BOND);
     }
 
     /// @dev Each lane recipient is independently credited in the shared vault.
