@@ -3,7 +3,6 @@ pragma solidity 0.8.28;
 
 import {Script} from "forge-std/Script.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {ProofSystemDeploymentLib} from "./ProofSystemDeploymentLib.sol";
 
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 import {LibProof} from "../../src/dispute/lib/LibProof.sol";
@@ -14,6 +13,7 @@ import {IWLDStakingVault} from "../../src/dispute/interfaces/IWLDStakingVault.so
 import {IWorldChainProofVerifier} from "../../src/dispute/interfaces/IWorldChainProofVerifier.sol";
 
 import {GameType} from "@optimism-bedrock/src/dispute/lib/Types.sol";
+import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
 import {IProxyAdmin} from "@optimism-bedrock/interfaces/universal/IProxyAdmin.sol";
@@ -198,7 +198,7 @@ contract DeployProofSystem is Script {
             config.disputeGameFactory.owner() == config.proxyAdmin.owner(),
             "DeployProofSystem: DGF and ProxyAdmin owners must match"
         );
-        IWLDStakingVault currentBondVault = ProofSystemDeploymentLib.currentBondVault(config.disputeGameFactory);
+        IWLDStakingVault currentBondVault = _currentBondVault(config.disputeGameFactory);
         if (address(currentBondVault) != address(0)) {
             require(
                 address(config.existingBondVault) != address(0),
@@ -245,6 +245,17 @@ contract DeployProofSystem is Script {
         require(config.proofPeriod > config.challengePeriod, "DeployProofSystem: proof period must exceed challenge");
         require(config.proposerBond > 0, "DeployProofSystem: proposer bond required");
         require(config.challengerBond > 0, "DeployProofSystem: challenger bond required");
+    }
+
+    function _currentBondVault(IDisputeGameFactory factory) internal view returns (IWLDStakingVault bondVault) {
+        IDisputeGame currentImplementation = factory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE);
+        if (address(currentImplementation) == address(0)) return IWLDStakingVault(address(0));
+
+        try IMultiProofGame(address(currentImplementation)).bondVault() returns (IWLDStakingVault currentBondVault) {
+            bondVault = currentBondVault;
+        } catch {
+            // The first WLD migration may replace a legacy implementation without this getter.
+        }
     }
 
     function _gameConfig(Deployment memory deployment, Config memory config)

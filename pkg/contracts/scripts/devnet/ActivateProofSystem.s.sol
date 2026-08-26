@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import {Script} from "forge-std/Script.sol";
-import {ProofSystemDeploymentLib} from "./ProofSystemDeploymentLib.sol";
 
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
@@ -147,7 +146,7 @@ contract ActivateProofSystem is Script {
         require(gameImpl.bondVault().proxyAdmin() == config.proxyAdmin, "ActivateProofSystem: vault ProxyAdmin mismatch");
         require(gameImpl.bondVault().isSolvent(), "ActivateProofSystem: vault insolvent");
 
-        IWLDStakingVault currentBondVault = ProofSystemDeploymentLib.currentBondVault(config.disputeGameFactory);
+        IWLDStakingVault currentBondVault = _currentBondVault(config.disputeGameFactory);
         require(
             address(currentBondVault) == address(0) || currentBondVault == gameImpl.bondVault(),
             "ActivateProofSystem: must reuse current WLD vault"
@@ -177,4 +176,14 @@ contract ActivateProofSystem is Script {
         }
     }
 
+    function _currentBondVault(IDisputeGameFactory factory) internal view returns (IWLDStakingVault bondVault) {
+        IDisputeGame currentImplementation = factory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE);
+        if (address(currentImplementation) == address(0)) return IWLDStakingVault(address(0));
+
+        try IMultiProofGame(address(currentImplementation)).bondVault() returns (IWLDStakingVault currentBondVault) {
+            bondVault = currentBondVault;
+        } catch {
+            // The first WLD migration may replace a legacy implementation without this getter.
+        }
+    }
 }
