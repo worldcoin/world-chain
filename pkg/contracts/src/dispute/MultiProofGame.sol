@@ -682,6 +682,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     function _settlementCredits() internal view returns (IWLDStakingVault.Payout[] memory payouts) {
+        // At most one proposer, challenger, and protocol recipient, plus one recipient per proof lane.
         address[] memory candidates = new address[](3 + LibProof.PROOF_LANE_COUNT);
         uint256 candidateCount;
         candidates[candidateCount++] = bondProposer;
