@@ -410,8 +410,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         initialized = true;
 
         bondProposer = bondVault.consumeProposal();
-        refundModeCredit[bondProposer] = proposerBond;
-        totalBonds = proposerBond;
+        _depositBond(bondProposer, proposerBond);
 
         // Set the game's starting timestamp.
         createdAt = Timestamp.wrap(uint64(block.timestamp));
@@ -434,6 +433,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             return address(anchorStateRegistry.anchorGame()) == address(0);
         }
         return _isValidGame(IDisputeGame(parentRef_));
+    }
+
+    function _depositBond(address refundRecipient, uint256 amount) internal {
+        refundModeCredit[refundRecipient] += amount;
+        totalBonds += amount;
     }
 
     ////////////////////////////////////////////////////////////////
@@ -462,8 +466,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         claimData.deadline = proofDeadline();
 
         bondVault.reserveChallenge();
-        refundModeCredit[msg.sender] += challengerBond;
-        totalBonds += challengerBond;
+        _depositBond(msg.sender, challengerBond);
 
         emit Challenged(msg.sender, claimData.deadline.raw());
 
