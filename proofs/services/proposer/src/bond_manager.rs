@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use tracing::{info, warn};
 
 use crate::{BondManagerClient, BondManagerConfig, ProposerError};
 
-/// Discovers proposer-owned games, resolves abandoned games, and recovers bond credits.
+/// Discovers proposer-owned games, resolves abandoned games, and settles their bond pots.
 #[derive(Debug)]
 pub struct BondManager<E> {
     config: BondManagerConfig,
@@ -37,7 +37,7 @@ impl<E> BondManager<E> {
         self.next_game_index
     }
 
-    /// Returns whether a game is currently awaiting resolution or withdrawal.
+    /// Returns whether a game is currently awaiting resolution or settlement.
     #[must_use]
     pub fn tracks_game(&self, game: Address) -> bool {
         self.proposed_games.contains(&game)
@@ -82,18 +82,20 @@ where
         Ok(())
     }
 
-    /// Resolves abandoned games, advances bond claims, and prunes fully settled games.
-    ///
-    /// `MultiProofGame.claimCredit` first unlocks the credit in `DelayedWETH` and only
-    /// transfers it on a second call after the WETH delay, so a game stays tracked until its
-    /// pending withdrawal is drained. Dropping it after the unlock would strand the bond.
+    /// Resolves abandoned games, settles finalized games, and prunes settled games.
     pub async fn settle_games(&mut self) -> Result<(), ProposerError> {
         let proposed_games: Vec<_> = self.proposed_games.iter().copied().collect();
-        let now = self.execution_provider.latest_l1_timestamp().await?;
         let active_domain_hash = self.execution_provider.active_domain_hash();
 
         for game in proposed_games {
             let result: Result<bool, ProposerError> = async {
+                if self.execution_provider.is_game_settled(game).await? {
+                    world_chain_proof_metrics::increment_games_closed(
+                        "proposer",
+                        "already_settled",
+                    );
+                    return Ok(true);
+                }
                 let resolution_status = self.execution_provider.resolution_status(game).await?;
                 if !resolution_status.is_resolved() {
                     // Resolve games abandoned by retries or domain upgrades; active-domain direct
@@ -117,40 +119,16 @@ where
                     }
                     return Ok(false);
                 }
-                // `claimCredit` calls `closeGame`, which reverts until the registry's finality
-                // airgap has elapsed.
                 if !self.execution_provider.is_game_finalized(game).await? {
                     return Ok(false);
                 }
 
-                let credit = self.execution_provider.credit(game).await?;
-                if credit > U256::ZERO {
-                    let submission = self.execution_provider.claim_credit(game).await?;
-                    info!(
-                        tx_hash = ?submission.tx_hash,
-                        amount = ?submission.amount,
-                        game_address = %game,
-                        "unlocked proposer bond credits in DelayedWETH"
-                    );
-                    // Keep tracking: the unlocked amount still needs the second claim.
-                    return Ok(false);
-                }
-
-                let pending = self.execution_provider.pending_withdrawal(game).await?;
-                if pending.amount.is_zero() {
-                    // Nothing owed on this game; stop tracking it.
-                    return Ok(true);
-                }
-                if now < pending.unlock_at {
-                    return Ok(false);
-                }
-
-                let submission = self.execution_provider.claim_credit(game).await?;
+                let submission = self.execution_provider.close_game(game).await?;
+                world_chain_proof_metrics::increment_games_closed("proposer", "submitted");
                 info!(
                     tx_hash = ?submission.tx_hash,
-                    amount = ?submission.amount,
                     game_address = %game,
-                    "withdrew proposer bond credits"
+                    "settled proposer-owned game into reusable vault balances"
                 );
                 Ok(true)
             }
@@ -165,7 +143,7 @@ where
                     warn!(
                         %error,
                         game_address = %game,
-                        "failed to process proposer credits"
+                        "failed to process proposer bond settlement"
                     );
                 }
             }

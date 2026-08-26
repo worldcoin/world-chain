@@ -63,6 +63,7 @@ sol! {
         function protocolFeeRecipient() external view returns (address);
         function disputeGameFactory() external view returns (address);
         function anchorStateRegistry() external view returns (address);
+        function bondVault() external view returns (address);
         function weth() external view returns (address);
 
         // Proposal context.
@@ -102,7 +103,7 @@ sol! {
             returns (bool resolvable, uint8 outcome, uint8 reason);
 
         // Mutating entry points.
-        function challenge() external payable returns (uint8 proposalStatus);
+        function challenge() external returns (uint8 proposalStatus);
         /// `proof` is the compact payload built by `encode_compact_proof`.
         function submitProofLane(bytes calldata proof) external returns (uint8 proposalStatus);
         function resolve() external returns (uint8 status);
@@ -115,6 +116,18 @@ sol! {
         function normalModeCredit(address recipient) external view returns (uint256);
         function refundModeCredit(address recipient) external view returns (uint256);
         function credit(address recipient) external view returns (uint256);
+    }
+
+    /// Singleton WLD vault that locks and settles WIP-1006 proposal and challenge bonds.
+    #[sol(rpc)]
+    interface IWLDStakingVault {
+        event ProposerBondLocked(address indexed game, address indexed proposer, uint256 amount);
+        function disputeGameFactory() external view returns (address);
+        function availableBalance(address account) external view returns (uint256 amount);
+        function gameBonds(address game)
+            external
+            view
+            returns (uint256 proposerBond, uint256 challengerBond, bool settled);
     }
 
     /// Stock OP Stack `AnchorStateRegistry`.
@@ -134,7 +147,7 @@ sol! {
         function paused() external view returns (bool);
     }
 
-    /// Stock OP Stack `DelayedWETH`, the bond custody contract behind every game.
+    /// Legacy E2E-only binding retained until the stacked devnet migration removes WETH flows.
     #[sol(rpc)]
     interface IDelayedWETH {
         function delay() external view returns (uint256);

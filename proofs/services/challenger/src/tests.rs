@@ -1,8 +1,8 @@
 use crate::{
     BondManager, BondManagerClient, BondManagerConfig, ChallengeSubmission, ChallengerClient,
-    ChallengerConfig, ChallengerError, ClaimSubmission, GameMetadata, OwnedGames,
-    PendingWithdrawal, ResolutionManager, ResolutionManagerClient, ResolutionManagerConfig,
-    ResolveSubmission, challenger::WorldChainChallenger,
+    ChallengerConfig, ChallengerError, CloseGameSubmission, GameMetadata, OwnedGames,
+    ResolutionManager, ResolutionManagerClient, ResolutionManagerConfig, ResolveSubmission,
+    challenger::WorldChainChallenger,
 };
 use alloy_primitives::{Address, B256, BlockNumber, U256, address};
 use async_trait::async_trait;
@@ -37,8 +37,7 @@ struct MockGame {
     resolvable: bool,
     resolution_outcome: GameStatus,
     resolution_reason: u8,
-    credit: U256,
-    pending: PendingWithdrawal,
+    settled: bool,
     /// Whether the registry's finality airgap has elapsed for this game.
     finalized: bool,
 }
@@ -57,11 +56,7 @@ impl MockGame {
             resolvable: false,
             resolution_outcome: GameStatus::InProgress,
             resolution_reason: REASON_NONE,
-            credit: U256::ZERO,
-            pending: PendingWithdrawal {
-                amount: U256::ZERO,
-                unlock_at: 0,
-            },
+            settled: false,
             finalized: true,
         }
     }
@@ -74,10 +69,8 @@ struct MockState {
     requested_indices: Vec<u64>,
     challenges: Vec<Address>,
     resolutions: Vec<Address>,
-    unlocks: Vec<Address>,
-    withdrawals: Vec<Address>,
-    fail_claim_once: HashSet<Address>,
-    latest_l1_timestamp: u64,
+    closes: Vec<Address>,
+    fail_close_once: HashSet<Address>,
     /// Factory indices holding a game of a different type.
     foreign_indices: HashSet<u64>,
 }
@@ -111,8 +104,8 @@ impl MockClient {
         self.state.lock().expect("not poisoned").resolutions.clone()
     }
 
-    fn withdrawals(&self) -> Vec<Address> {
-        self.state.lock().expect("not poisoned").withdrawals.clone()
+    fn closes(&self) -> Vec<Address> {
+        self.state.lock().expect("not poisoned").closes.clone()
     }
 }
 
@@ -253,67 +246,29 @@ impl BondManagerClient for MockClient {
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
-    async fn credit(&self, game: Address) -> Result<U256, ChallengerError> {
+    async fn is_game_settled(&self, game: Address) -> Result<bool, ChallengerError> {
         self.state
             .lock()
             .expect("not poisoned")
             .games
             .get(&game)
-            .map(|game| game.credit)
+            .map(|game| game.settled)
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
-    async fn pending_withdrawal(
-        &self,
-        game: Address,
-    ) -> Result<PendingWithdrawal, ChallengerError> {
-        self.state
-            .lock()
-            .expect("not poisoned")
-            .games
-            .get(&game)
-            .map(|game| game.pending)
-            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
-    }
-
-    async fn latest_l1_timestamp(&self) -> Result<u64, ChallengerError> {
-        Ok(self.state.lock().expect("not poisoned").latest_l1_timestamp)
-    }
-
-    /// Mirrors `MultiProofGame.claimCredit`: the first call unlocks credit into a pending
-    /// `DelayedWETH` withdrawal, the second drains it.
-    async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ChallengerError> {
+    async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ChallengerError> {
         let mut state = self.state.lock().expect("not poisoned");
-        if state.fail_claim_once.remove(&game) {
-            return Err(ChallengerError::message("injected claim failure"));
+        if state.fail_close_once.remove(&game) {
+            return Err(ChallengerError::message("injected close failure"));
         }
         let record = state
             .games
             .get_mut(&game)
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
-
-        if record.credit > U256::ZERO {
-            let amount = record.credit;
-            record.credit = U256::ZERO;
-            record.pending = PendingWithdrawal {
-                amount,
-                unlock_at: 0,
-            };
-            state.unlocks.push(game);
-            return Ok(ClaimSubmission {
-                tx_hash: B256::with_last_byte(state.unlocks.len() as u8),
-                amount,
-                withdrawn: false,
-            });
-        }
-
-        let amount = record.pending.amount;
-        record.pending = PendingWithdrawal::default();
-        state.withdrawals.push(game);
-        Ok(ClaimSubmission {
-            tx_hash: B256::with_last_byte(state.withdrawals.len() as u8),
-            amount,
-            withdrawn: true,
+        record.settled = true;
+        state.closes.push(game);
+        Ok(CloseGameSubmission {
+            tx_hash: B256::with_last_byte(state.closes.len() as u8),
         })
     }
 }
@@ -591,22 +546,21 @@ async fn bond_manager_scans_games_appended_after_recovery() {
 }
 
 #[tokio::test]
-async fn bond_manager_completes_two_phase_claim_and_prunes_terminal_games() {
-    let mut claimable = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
-    claimable.proposal_status = ProposalStatus::Resolved;
-    claimable.resolution_outcome = GameStatus::ChallengerWins;
-    claimable.resolution_reason = REASON_PROOF_TIMEOUT;
-    claimable.credit = U256::from(10);
-    let mut zero_credit = MockGame::proposed(GAME_2, B256::ZERO, L2_BLOCK);
-    zero_credit.proposal_status = ProposalStatus::Resolved;
-    zero_credit.resolution_outcome = GameStatus::DefenderWins;
+async fn bond_manager_settles_finalized_games_and_prunes_terminal_games() {
+    let mut closable = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
+    closable.proposal_status = ProposalStatus::Resolved;
+    closable.resolution_outcome = GameStatus::ChallengerWins;
+    closable.resolution_reason = REASON_PROOF_TIMEOUT;
+    let mut already_settled = MockGame::proposed(GAME_2, B256::ZERO, L2_BLOCK);
+    already_settled.proposal_status = ProposalStatus::Resolved;
+    already_settled.resolution_outcome = GameStatus::DefenderWins;
+    already_settled.settled = true;
     // Resolved but still inside the registry's finality airgap: `closeGame` would revert.
     let mut awaiting_airgap = MockGame::proposed(GAME_3, B256::ZERO, L2_BLOCK);
     awaiting_airgap.proposal_status = ProposalStatus::Resolved;
     awaiting_airgap.resolution_outcome = GameStatus::DefenderWins;
-    awaiting_airgap.credit = U256::from(5);
     awaiting_airgap.finalized = false;
-    let client = MockClient::new(vec![claimable, zero_credit, awaiting_airgap]);
+    let client = MockClient::new(vec![closable, already_settled, awaiting_airgap]);
     let owned_games = OwnedGames::default();
     owned_games.insert(GAME_1);
     owned_games.insert(GAME_2);
@@ -617,40 +571,29 @@ async fn bond_manager_completes_two_phase_claim_and_prunes_terminal_games() {
         owned_games.clone(),
     );
 
-    // Pass 1 unlocks the credit in DelayedWETH; the bond is not paid out yet.
-    manager.withdraw_credits().await.unwrap();
+    manager.settle_games().await.unwrap();
 
-    assert!(client.withdrawals().is_empty());
-    assert!(
-        owned_games.contains(GAME_1),
-        "an unlocked bond must stay owned until it is withdrawn"
-    );
+    assert_eq!(client.closes(), vec![GAME_1]);
+    assert!(!owned_games.contains(GAME_1));
     assert!(!owned_games.contains(GAME_2));
     assert!(
         owned_games.contains(GAME_3),
         "a game inside the finality airgap must stay owned"
     );
-
-    // Pass 2 drains the pending withdrawal and drops the game.
-    manager.withdraw_credits().await.unwrap();
-
-    assert_eq!(client.withdrawals(), vec![GAME_1]);
-    assert!(!owned_games.contains(GAME_1));
 }
 
 #[tokio::test]
-async fn bond_manager_retries_failed_claim() {
+async fn bond_manager_retries_failed_close() {
     let mut game = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
     game.proposal_status = ProposalStatus::Resolved;
     game.resolution_outcome = GameStatus::ChallengerWins;
     game.resolution_reason = REASON_PROOF_TIMEOUT;
-    game.credit = U256::from(10);
     let client = MockClient::new(vec![game]);
     client
         .state
         .lock()
         .expect("not poisoned")
-        .fail_claim_once
+        .fail_close_once
         .insert(GAME_1);
     let owned_games = OwnedGames::default();
     owned_games.insert(GAME_1);
@@ -660,32 +603,21 @@ async fn bond_manager_retries_failed_claim() {
         owned_games.clone(),
     );
 
-    // Injected failure on the unlock, then unlock, then withdraw.
-    for _ in 0..2 {
-        manager.withdraw_credits().await.unwrap();
-        assert!(owned_games.contains(GAME_1));
-    }
+    manager.settle_games().await.unwrap();
+    assert!(owned_games.contains(GAME_1));
 
-    manager.withdraw_credits().await.unwrap();
+    manager.settle_games().await.unwrap();
     assert!(!owned_games.contains(GAME_1));
-    assert_eq!(client.withdrawals(), vec![GAME_1]);
+    assert_eq!(client.closes(), vec![GAME_1]);
 }
 
 #[tokio::test]
-async fn bond_manager_uses_l1_timestamp_for_delayed_withdrawal() {
+async fn bond_manager_prunes_already_settled_game_without_closing_again() {
     let mut game = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
     game.proposal_status = ProposalStatus::Resolved;
     game.resolution_outcome = GameStatus::DefenderWins;
-    game.pending = PendingWithdrawal {
-        amount: U256::from(10),
-        unlock_at: 100,
-    };
+    game.settled = true;
     let client = MockClient::new(vec![game]);
-    client
-        .state
-        .lock()
-        .expect("not poisoned")
-        .latest_l1_timestamp = 99;
     let owned_games = OwnedGames::default();
     owned_games.insert(GAME_1);
     let manager = BondManager::new(
@@ -694,18 +626,9 @@ async fn bond_manager_uses_l1_timestamp_for_delayed_withdrawal() {
         owned_games.clone(),
     );
 
-    manager.withdraw_credits().await.unwrap();
-    assert!(owned_games.contains(GAME_1));
-    assert!(client.withdrawals().is_empty());
-
-    client
-        .state
-        .lock()
-        .expect("not poisoned")
-        .latest_l1_timestamp = 100;
-    manager.withdraw_credits().await.unwrap();
+    manager.settle_games().await.unwrap();
     assert!(!owned_games.contains(GAME_1));
-    assert_eq!(client.withdrawals(), vec![GAME_1]);
+    assert!(client.closes().is_empty());
 }
 
 #[tokio::test]

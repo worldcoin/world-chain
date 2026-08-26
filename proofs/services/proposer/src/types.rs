@@ -1,14 +1,5 @@
-use alloy_primitives::{Address, B256, TxHash, U256};
+use alloy_primitives::{Address, B256, TxHash};
 use world_chain_proof_protocol::{InvalidationReason, ProposalCommitment, SelectedLineage};
-
-/// A pending `DelayedWETH` withdrawal opened by the first `claimCredit` call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct PendingWithdrawal {
-    /// Amount unlocked in `DelayedWETH` and awaiting the withdrawal delay.
-    pub amount: U256,
-    /// Unix timestamp at which the unlocked amount becomes withdrawable.
-    pub unlock_at: u64,
-}
 
 /// The selected lineage discovered by the proposer and the action available at its tip.
 #[derive(Debug)]
@@ -120,18 +111,4 @@ pub struct ResolveSubmission {
 pub struct CloseGameSubmission {
     /// Transaction hash for the closeGame submission.
     pub tx_hash: TxHash,
-}
-
-/// Result of a `claimCredit` transaction.
-///
-/// Bond payout is two-phase: the first call unlocks the credit in `DelayedWETH`, the second
-/// (after the WETH delay) withdraws and transfers it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ClaimSubmission {
-    /// Transaction hash for the claim.
-    pub tx_hash: TxHash,
-    /// Amount moved by this phase.
-    pub amount: U256,
-    /// Whether this call finalized the withdrawal and transferred funds.
-    pub withdrawn: bool,
 }

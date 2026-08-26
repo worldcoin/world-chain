@@ -1,20 +1,19 @@
-use alloy_consensus::BlockHeader;
-use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
+use tracing::warn;
 use world_chain_proof_protocol::{
-    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
+    IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, IWLDStakingVault, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, MULTI_PROOF_GAME_TYPE,
     RegisteredLineageConfig, ResolutionStatus, read_game_for_transition, read_lineage_anchor,
-    read_lineage_resolution_status, read_registered_lineage_config,
+    read_lineage_resolution_status, read_registered_bond_vault, read_registered_lineage_config,
 };
 
 use crate::{
     BondManagerClient, Proposal, ProposalSubmission, ProposerClient, ProposerError,
-    types::{ClaimSubmission, CloseGameSubmission, PendingWithdrawal, ResolveSubmission},
+    types::{CloseGameSubmission, ResolveSubmission},
 };
 
 /// Alloy-backed implementation of the proposer contract clients.
@@ -26,6 +25,7 @@ use crate::{
 pub struct AlloyProofSystemClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
+    vault: IWLDStakingVault::IWLDStakingVaultInstance<P>,
     registered: RegisteredLineageConfig,
     /// Number of confirmations to require after sending a tx onchain.
     confirmations: u64,
@@ -54,6 +54,20 @@ where
             provider.clone(),
         );
         let registered = read_registered_lineage_config(&provider, &factory).await?;
+        let bond_vault = read_registered_bond_vault(&provider, &factory).await?;
+        let init_bond = factory.initBonds(MULTI_PROOF_GAME_TYPE).call().await?;
+        if !init_bond.is_zero() {
+            return Err(ProposerError::NonZeroFactoryBond(init_bond));
+        }
+        let vault = IWLDStakingVault::IWLDStakingVaultInstance::new(bond_vault, provider.clone());
+        let configured_factory = vault.disputeGameFactory().call().await?;
+        if configured_factory != factory_address {
+            return Err(ProposerError::VaultFactoryMismatch {
+                vault: bond_vault,
+                expected: factory_address,
+                actual: configured_factory,
+            });
+        }
         let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
             registered.anchor_registry,
             provider.clone(),
@@ -63,6 +77,7 @@ where
         Ok(Self {
             factory,
             anchor,
+            vault,
             registered,
             confirmations,
             receipt_timeout,
@@ -75,6 +90,33 @@ where
     #[must_use]
     pub const fn registered_lineage_config(&self) -> RegisteredLineageConfig {
         self.registered
+    }
+
+    /// Returns the singleton WLD vault discovered from the active implementation.
+    #[must_use]
+    pub fn bond_vault_address(&self) -> Address {
+        *self.vault.address()
+    }
+
+    /// Refreshes the managed proposer's reusable WLD balance metric.
+    pub async fn refresh_vault_balance(&self)
+    where
+        P: WalletProvider,
+    {
+        self.refresh_vault_balance_for(self.provider.default_signer_address())
+            .await;
+    }
+
+    async fn refresh_vault_balance_for(&self, account: Address) {
+        match self.vault.availableBalance(account).call().await {
+            Ok(balance) => world_chain_proof_metrics::record_vault_balance(
+                self.bond_vault_address(),
+                account,
+                "proposer",
+                balance,
+            ),
+            Err(error) => warn!(%error, %account, "failed to fetch proposer WLD vault balance"),
+        }
     }
 
     fn game(&self, address: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
@@ -131,63 +173,9 @@ where
         Ok(ResolveSubmission { tx_hash })
     }
 
-    /// Reads the credit `recipient` can unlock from `game`.
-    async fn read_credit(&self, game: Address, recipient: Address) -> Result<U256, ProposerError> {
-        self.game(game)
-            .credit(recipient)
-            .call()
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Reads `recipient`'s pending `DelayedWETH` withdrawal for `game`.
-    async fn read_pending_withdrawal(
-        &self,
-        game: Address,
-        recipient: Address,
-    ) -> Result<PendingWithdrawal, ProposerError> {
-        let weth_address = self.game(game).weth().call().await?;
-        let weth = IDelayedWETH::IDelayedWETHInstance::new(weth_address, self.provider.clone());
-
-        let (pending, delay) = self
-            .provider
-            .multicall()
-            .add(weth.withdrawals(game, recipient))
-            .add(weth.delay())
-            .aggregate()
-            .await?;
-
-        if pending.amount.is_zero() {
-            return Ok(PendingWithdrawal::default());
-        }
-        let unlock_at = pending
-            .timestamp
-            .checked_add(delay)
-            .ok_or(ProposerError::Overflow)?;
-
-        Ok(PendingWithdrawal {
-            amount: pending.amount,
-            unlock_at: u256_to_u64(unlock_at)?,
-        })
-    }
-
-    /// Sends `claimCredit(recipient)` and reports which phase of the two-phase flow ran.
-    async fn send_claim_credit(
-        &self,
-        game: Address,
-        recipient: Address,
-    ) -> Result<ClaimSubmission, ProposerError> {
+    async fn send_close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
         let _permit = self.semaphore.acquire().await?;
-        // Read both phases up front so the submission can report what the call moved; the
-        // receipt carries no amount of its own.
-        let credit = self.read_credit(game, recipient).await?;
-        let pending = if credit.is_zero() {
-            self.read_pending_withdrawal(game, recipient).await?
-        } else {
-            PendingWithdrawal::default()
-        };
-
-        let pending_tx = self.game(game).claimCredit(recipient).send().await?;
+        let pending_tx = self.game(game).closeGame().send().await?;
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
             .with_required_confirmations(self.confirmations)
@@ -198,21 +186,9 @@ where
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
         }
+        self.refresh_vault_balance_for(receipt.from).await;
 
-        Ok(if credit.is_zero() {
-            world_chain_proof_metrics::record_bond_withdrawn("proposer", pending.amount);
-            ClaimSubmission {
-                tx_hash,
-                amount: pending.amount,
-                withdrawn: true,
-            }
-        } else {
-            ClaimSubmission {
-                tx_hash,
-                amount: credit,
-                withdrawn: false,
-            }
-        })
+        Ok(CloseGameSubmission { tx_hash })
     }
 }
 
@@ -266,25 +242,12 @@ where
         self.read_is_game_finalized(game).await
     }
 
-    async fn credit(&self, game: Address) -> Result<U256, ProposerError> {
-        self.read_credit(game, self.proposer_address()).await
+    async fn is_game_settled(&self, game: Address) -> Result<bool, ProposerError> {
+        Ok(self.vault.gameBonds(game).call().await?.settled)
     }
 
-    async fn pending_withdrawal(&self, game: Address) -> Result<PendingWithdrawal, ProposerError> {
-        self.read_pending_withdrawal(game, self.proposer_address())
-            .await
-    }
-
-    async fn latest_l1_timestamp(&self) -> Result<u64, ProposerError> {
-        self.provider
-            .get_block_by_number(BlockNumberOrTag::Latest)
-            .await?
-            .map(|block| block.header.timestamp())
-            .ok_or(ProposerError::UnavailableLatestL1Block)
-    }
-
-    async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ProposerError> {
-        self.send_claim_credit(game, self.proposer_address()).await
+    async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
+        self.send_close_game(game).await
     }
 }
 
@@ -330,21 +293,7 @@ where
     }
 
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
-        let _permit = self.semaphore.acquire().await?;
-        let pending = self.game(game).closeGame().send().await?;
-
-        let tx_hash = *pending.tx_hash();
-        let receipt = pending
-            .with_required_confirmations(self.confirmations)
-            .with_timeout(Some(self.receipt_timeout))
-            .get_receipt()
-            .await?;
-        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
-        if !receipt.status() {
-            return Err(ProposerError::Revert(tx_hash));
-        }
-
-        Ok(CloseGameSubmission { tx_hash })
+        self.send_close_game(game).await
     }
 
     async fn submit_proposal(
@@ -352,17 +301,12 @@ where
         proposal: &Proposal,
     ) -> Result<ProposalSubmission, ProposerError> {
         let _permit = self.semaphore.acquire().await?;
-        // `DisputeGameFactory.create` reverts unless `msg.value` matches the configured init
-        // bond exactly, so it is read per submission rather than cached in configuration.
-        let init_bond = self.factory.initBonds(MULTI_PROOF_GAME_TYPE).call().await?;
-
         let extra_data = proposal
             .commitment()
             .extra_data(self.registered.domain_hash);
         let pending = self
             .factory
             .create(MULTI_PROOF_GAME_TYPE, proposal.root_claim, extra_data)
-            .value(init_bond)
             .send()
             .await?;
 
@@ -376,7 +320,19 @@ where
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
         }
-        world_chain_proof_metrics::record_bond_posted("proposer", init_bond);
+        let locked = receipt
+            .logs()
+            .iter()
+            .filter(|log| log.address() == *self.vault.address())
+            .find_map(|log| {
+                log.log_decode_validate::<IWLDStakingVault::ProposerBondLocked>()
+                    .ok()
+                    .map(|decoded| decoded.inner.data.amount)
+            })
+            .ok_or(ProposerError::MissingProposerBondLockedEvent(tx_hash))?;
+        world_chain_proof_metrics::record_bond_locked("proposer", locked);
+        self.refresh_vault_balance_for(self.proposer_address())
+            .await;
 
         let game_address = receipt
             .logs()
