@@ -20,7 +20,7 @@ import {IProxyAdmin} from "@optimism-bedrock/interfaces/universal/IProxyAdmin.so
 import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Deploys a candidate World Chain proof-system game for the stock OP Stack dispute
+/// @notice Deploys the World Chain proof-system game implementation for the stock OP Stack dispute
 ///         infrastructure deployed by op-deployer.
 ///
 /// Deploys the WIP-1006 singleton WLD staking-vault proxy, or reuses the existing vault during

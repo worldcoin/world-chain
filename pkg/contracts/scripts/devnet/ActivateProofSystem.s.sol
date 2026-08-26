@@ -16,7 +16,7 @@ import {IProxyAdmin} from "@optimism-bedrock/interfaces/universal/IProxyAdmin.so
 import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Registers and activates a candidate WIP-1006 implementation after verifying that its
+/// @notice Registers and activates a WIP-1006 implementation after verifying that its
 ///         wiring, vault and current ASR anchor allow new games to be created safely.
 /// @dev This script never changes the ASR retirement timestamp. A nonzero anchor must satisfy
 ///      the same parent-validity conditions enforced by `MultiProofGame.initialize()`.
