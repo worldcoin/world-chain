@@ -699,6 +699,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         payouts = new IWLDStakingVault.Payout[](candidateCount);
         uint256 payoutCount;
+        // Credits are aggregated by address, but the same address may occupy multiple roles.
+        // Emit each candidate once so its complete mapped credit is settled exactly once.
         for (uint256 i; i < candidateCount; i++) {
             address candidate = candidates[i];
             bool duplicate;
