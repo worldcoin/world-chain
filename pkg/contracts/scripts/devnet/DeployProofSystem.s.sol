@@ -89,7 +89,8 @@ contract DeployProofSystem is Script {
     uint64 internal constant DEFAULT_CHALLENGE_PERIOD = 1 days;
     uint64 internal constant DEFAULT_PROOF_PERIOD = 7 days;
     uint256 internal constant DEFAULT_BLOCK_INTERVAL = 450;
-    uint256 internal constant DEFAULT_PROPOSER_BOND = 0.01 ether;
+    uint256 internal constant WLD_UNIT = 1e18;
+    uint256 internal constant DEFAULT_PROPOSER_BOND = WLD_UNIT / 100;
     uint256 internal constant DEFAULT_CHALLENGER_BOND = DEFAULT_PROPOSER_BOND;
     uint8 internal constant DEFAULT_PROOF_THRESHOLD = 2;
 
