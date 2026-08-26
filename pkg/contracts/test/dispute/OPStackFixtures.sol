@@ -4,33 +4,35 @@ pragma solidity 0.8.28;
 import {Test} from "@forge-std/Test.sol";
 
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
+import {WLDStakingVault} from "../../src/dispute/WLDStakingVault.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
+import {IWLDStakingVault} from "../../src/dispute/interfaces/IWLDStakingVault.sol";
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 import {LibProof, ProofLane} from "../../src/dispute/lib/LibProof.sol";
 import {IWorldChainProofVerifier} from "../../src/dispute/interfaces/IWorldChainProofVerifier.sol";
 import {MockRootIdVerifier} from "../mocks/MockRootIdVerifier.sol";
 import {MockSystemConfig} from "../mocks/MockSystemConfig.sol";
+import {MockWLD} from "../mocks/MockWLD.sol";
 
 import {Claim, GameStatus, GameType, Hash, Proposal} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
-import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.sol";
 import {IProxyAdmin} from "@optimism-bedrock/interfaces/universal/IProxyAdmin.sol";
 import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 
 /// @dev Test harness deploying the real (pinned) OP `DisputeGameFactory`,
-///      `AnchorStateRegistry`, and `DelayedWETH` from the `opstack/` sub-project artifacts,
+///      `AnchorStateRegistry`, and `Proxy` from the `opstack/` sub-project artifacts,
 ///      wired to a `MultiProofGame` implementation. Run `just build-opstack`
 ///      before `forge test`.
 abstract contract OPStackFixtures is Test {
     GameType internal constant WC_GAME_TYPE = GameTypes.MULTI_PROOF_GAME_TYPE;
     uint256 internal constant FINALITY_DELAY_SECONDS = 3.5 days;
-    uint256 internal constant WETH_DELAY_SECONDS = 7 days;
+    uint256 internal constant WLD_WITHDRAWAL_DELAY_SECONDS = 7 days;
     uint64 internal constant CHALLENGE_PERIOD = 1 days;
     uint64 internal constant PROOF_PERIOD = 7 days;
     uint256 internal constant PROPOSER_BOND = 1 ether;
-    uint256 internal constant CHALLENGER_BOND = 0.1 ether;
+    uint256 internal constant CHALLENGER_BOND = 1 ether;
     uint8 internal constant PROOF_THRESHOLD = 2;
 
     uint256 internal constant CHAIN_ID = 480;
@@ -46,13 +48,15 @@ abstract contract OPStackFixtures is Test {
     address internal guardian = makeAddr("guardian");
     address internal proposer = makeAddr("proposer");
     address internal challengerAccount = makeAddr("challenger");
+    address internal creationKeeper = makeAddr("creation-keeper");
     address internal protocolFeeRecipient = makeAddr("protocol-fee-recipient");
 
     MockSystemConfig internal systemConfig;
     IProxyAdmin internal proxyAdmin;
     IDisputeGameFactory internal dgf;
     IAnchorStateRegistry internal asr;
-    IDelayedWETH internal weth;
+    MockWLD internal wld;
+    IWLDStakingVault internal bondVault;
 
     MockRootIdVerifier internal validityVerifier;
     MockRootIdVerifier internal teeVerifier;
@@ -88,14 +92,14 @@ abstract contract OPStackFixtures is Test {
             )
         );
 
-        // DelayedWETH proxy.
-        weth = IDelayedWETH(
-            payable(_proxied("opstack/out/DelayedWETH.sol/DelayedWETH.json", abi.encode(WETH_DELAY_SECONDS)))
-        );
+        // WIP-1006 WLD staking vault proxy.
+        wld = new MockWLD();
+        WLDStakingVault vaultImpl = new WLDStakingVault(WLD_WITHDRAWAL_DELAY_SECONDS);
+        bondVault = IWLDStakingVault(deployCode("opstack/out/Proxy.sol/Proxy.json", abi.encode(address(proxyAdmin))));
         proxyAdmin.upgradeAndCall(
-            payable(address(weth)),
-            _lastImpl,
-            abi.encodeCall(IDelayedWETH.initialize, (ISystemConfig(address(systemConfig))))
+            payable(address(bondVault)),
+            address(vaultImpl),
+            abi.encodeCall(IWLDStakingVault.initialize, (wld, ISystemConfig(address(systemConfig)), dgf))
         );
 
         // World Chain proof-system periphery + game implementation.
@@ -105,13 +109,13 @@ abstract contract OPStackFixtures is Test {
 
         gameImpl = new MultiProofGame(_gameConfig());
         dgf.setImplementation(WC_GAME_TYPE, IDisputeGame(address(gameImpl)), hex"");
-        dgf.setInitBond(WC_GAME_TYPE, PROPOSER_BOND);
+        dgf.setInitBond(WC_GAME_TYPE, 0);
 
         // The registry retires every game created at or before its initialization timestamp.
         vm.warp(block.timestamp + 1);
 
-        vm.deal(proposer, 100 ether);
-        vm.deal(challengerAccount, 100 ether);
+        _depositWLD(proposer, 100 ether);
+        _depositWLD(challengerAccount, 100 ether);
     }
 
     /// @dev Address of the implementation most recently deployed by `_proxied`.
@@ -141,7 +145,7 @@ abstract contract OPStackFixtures is Test {
             teeVerifier: IWorldChainProofVerifier(address(teeVerifier)),
             securityCouncil: IWorldChainProofVerifier(address(councilVerifier)),
             anchorStateRegistry: asr,
-            weth: weth
+            bondVault: bondVault
         });
     }
 
@@ -174,14 +178,29 @@ abstract contract OPStackFixtures is Test {
         return keccak256(abi.encode("output-root", l2BlockNumber));
     }
 
-    /// @dev Creates a game through the stock factory as `proposer`.
+    function _depositWLD(address account, uint256 amount) internal {
+        wld.mint(account, amount);
+        vm.startPrank(account);
+        wld.approve(address(bondVault), amount);
+        bondVault.deposit(amount);
+        vm.stopPrank();
+    }
+
+    function _reserve(address account, Claim rootClaim, bytes memory extraData) internal {
+        vm.prank(account);
+        bondVault.reserveProposal(rootClaim, extraData);
+    }
+
+    /// @dev Reserves as `proposer`, then creates through the stock factory as a keeper.
     function _propose(uint256 parentIndex, bytes32 rootClaim, uint256 l2BlockNumber, uint256 attempt)
         internal
         returns (MultiProofGame)
     {
         bytes memory extraData = _extraData(l2BlockNumber, parentIndex, attempt);
-        vm.prank(proposer);
-        IDisputeGame proxy = dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), extraData);
+        Claim claim = Claim.wrap(rootClaim);
+        _reserve(proposer, claim, extraData);
+        vm.prank(creationKeeper);
+        IDisputeGame proxy = dgf.create(WC_GAME_TYPE, claim, extraData);
         return MultiProofGame(address(proxy));
     }
 
@@ -192,9 +211,10 @@ abstract contract OPStackFixtures is Test {
         IDisputeGame anchorGame = asr.anchorGame();
         address parent = address(anchorGame) == address(0) ? address(asr) : address(anchorGame);
         bytes memory extraData = _extraDataForParent(target, parent, 0);
-        vm.prank(proposer);
-        IDisputeGame proxy =
-            dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
+        Claim claim = Claim.wrap(_rootClaimFor(target));
+        _reserve(proposer, claim, extraData);
+        vm.prank(creationKeeper);
+        IDisputeGame proxy = dgf.create(WC_GAME_TYPE, claim, extraData);
         return MultiProofGame(address(proxy));
     }
 
@@ -207,7 +227,7 @@ abstract contract OPStackFixtures is Test {
 
     function _challenge(MultiProofGame game) internal {
         vm.prank(challengerAccount);
-        game.challenge{value: CHALLENGER_BOND}();
+        game.challenge();
     }
 
     /// @dev Packs a compact `submitProofLane` payload: lane id, reward recipient, then the proof.
@@ -248,10 +268,15 @@ abstract contract OPStackFixtures is Test {
         vm.warp(game.resolvedAt().raw() + FINALITY_DELAY_SECONDS + 1);
     }
 
-    /// @dev Runs the full two-phase DelayedWETH claim for `recipient`.
+    /// @dev Closes the game, then runs the vault's delayed external WLD withdrawal.
     function _claim(MultiProofGame game, address recipient) internal {
-        game.claimCredit(recipient);
-        vm.warp(block.timestamp + WETH_DELAY_SECONDS);
-        game.claimCredit(recipient);
+        game.closeGame();
+        uint256 available = bondVault.availableBalance(recipient);
+        vm.prank(recipient);
+        bondVault.requestWithdrawal(available);
+        vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS);
+        (uint256 amount,) = bondVault.withdrawals(recipient);
+        vm.prank(recipient);
+        bondVault.withdraw(amount);
     }
 }
