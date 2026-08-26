@@ -1,0 +1,343 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import {GameTypes} from "./lib/GameTypes.sol";
+import {IMultiProofGame} from "./interfaces/IMultiProofGame.sol";
+import {IWLDStakingVault} from "./interfaces/IWLDStakingVault.sol";
+
+import {Claim, GameType, Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
+import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
+import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
+import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
+import {IProxyAdmin} from "@optimism-bedrock/interfaces/universal/IProxyAdmin.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {LibClone} from "@solady/utils/LibClone.sol";
+
+/// @custom:proxied true
+/// @title WLDStakingVault
+/// @notice A one-to-one WLD ledger for WIP-1006 proposal and challenge bonds.
+contract WLDStakingVault is Initializable, IWLDStakingVault {
+    using SafeERC20 for IERC20;
+
+    /// @notice Semantic version.
+    string public constant version = "1.0.0";
+
+    uint256 internal immutable DELAY_SECONDS;
+
+    IERC20 public wld;
+    ISystemConfig public systemConfig;
+    IDisputeGameFactory public disputeGameFactory;
+    uint256 public totalLiabilities;
+
+    mapping(address account => uint256 amount) public availableBalance;
+    mapping(address account => WithdrawalRequest request) public withdrawals;
+    mapping(Hash uuid => ProposalReservation reservation) public proposalReservations;
+    mapping(address game => GameBond bond) public gameBonds;
+
+    constructor(uint256 delaySeconds) {
+        DELAY_SECONDS = delaySeconds;
+        _disableInitializers();
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function initialize(IERC20 wld_, ISystemConfig systemConfig_, IDisputeGameFactory disputeGameFactory_)
+        external
+        initializer
+    {
+        _assertProxyAdminOrOwner();
+        if (
+            address(wld_) == address(0) || address(wld_).code.length == 0 || address(systemConfig_) == address(0)
+                || address(systemConfig_).code.length == 0 || address(disputeGameFactory_) == address(0)
+                || address(disputeGameFactory_).code.length == 0
+        ) {
+            revert InvalidVaultConfiguration();
+        }
+        wld = wld_;
+        systemConfig = systemConfig_;
+        disputeGameFactory = disputeGameFactory_;
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function delay() external view returns (uint256) {
+        return DELAY_SECONDS;
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function proxyAdmin() public view returns (IProxyAdmin admin) {
+        address adminAddress = ERC1967Utils.getAdmin();
+        if (adminAddress == address(0)) revert InvalidVaultConfiguration();
+        return IProxyAdmin(adminAddress);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function proxyAdminOwner() public view returns (address) {
+        return proxyAdmin().owner();
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function isSolvent() external view returns (bool) {
+        return wld.balanceOf(address(this)) >= totalLiabilities;
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function deposit(uint256 amount) external {
+        if (amount == 0) revert InvalidAmount();
+        uint256 balanceBefore = wld.balanceOf(address(this));
+        wld.safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = wld.balanceOf(address(this)) - balanceBefore;
+        if (received != amount) revert ExactTransferRequired(amount, received);
+
+        availableBalance[msg.sender] += amount;
+        totalLiabilities += amount;
+        emit Deposited(msg.sender, amount);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function requestWithdrawal(uint256 amount) external {
+        if (amount == 0) revert InvalidWithdrawal();
+        _debitAvailable(msg.sender, amount);
+
+        WithdrawalRequest storage request = withdrawals[msg.sender];
+        request.amount += amount;
+        request.timestamp = block.timestamp;
+        emit WithdrawalRequested(msg.sender, request.amount, block.timestamp + DELAY_SECONDS);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function withdraw(uint256 amount) external {
+        if (amount == 0) revert InvalidWithdrawal();
+        if (systemConfig.paused()) revert WithdrawalPaused();
+
+        WithdrawalRequest storage request = withdrawals[msg.sender];
+        if (request.amount < amount || request.timestamp == 0) revert InvalidWithdrawal();
+        uint256 availableAt = request.timestamp + DELAY_SECONDS;
+        if (block.timestamp < availableAt) revert WithdrawalDelayNotMet(availableAt);
+
+        request.amount -= amount;
+        if (request.amount == 0) request.timestamp = 0;
+        totalLiabilities -= amount;
+        wld.safeTransfer(msg.sender, amount);
+        emit Withdrawn(msg.sender, amount);
+    }
+
+    // TODO(gas): Consider an optimized precomputed-UUID reservation path once permissionless
+    // keepers can reliably obtain and validate the full creation data.
+    /// @inheritdoc IWLDStakingVault
+    function reserveProposal(Claim rootClaim, bytes calldata extraData) external returns (Hash uuid) {
+        return _reserveProposal(msg.sender, rootClaim, extraData);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function reserveAndCreate(Claim rootClaim, bytes calldata extraData) external returns (IDisputeGame game) {
+        _reserveProposal(msg.sender, rootClaim, extraData);
+        game = disputeGameFactory.create(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim, extraData);
+    }
+
+    function _reserveProposal(address proposer, Claim rootClaim, bytes calldata extraData)
+        internal
+        returns (Hash uuid)
+    {
+        uint256 factoryBond = disputeGameFactory.initBonds(GameTypes.MULTI_PROOF_GAME_TYPE);
+        if (factoryBond != 0) revert FactoryBondMustBeZero(factoryBond);
+
+        IDisputeGame implementation = disputeGameFactory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE);
+        if (address(implementation) == address(0)) revert NoGameImplementation();
+
+        IMultiProofGame gameImplementation_ = IMultiProofGame(address(implementation));
+        if (
+            address(gameImplementation_.bondVault()) != address(this)
+                || address(gameImplementation_.disputeGameFactory()) != address(disputeGameFactory)
+        ) {
+            revert InvalidVaultConfiguration();
+        }
+
+        uuid = disputeGameFactory.getGameUUID(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim, extraData);
+        (IDisputeGame existing,) = disputeGameFactory.games(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim, extraData);
+        if (address(existing) != address(0)) revert GameAlreadyCreated(address(existing));
+        if (proposalReservations[uuid].proposer != address(0)) revert AlreadyReserved(uuid);
+
+        uint256 amount = gameImplementation_.proposerBond();
+        _debitAvailable(proposer, amount);
+        proposalReservations[uuid] =
+            ProposalReservation({proposer: proposer, implementation: address(implementation), amount: amount});
+        emit ProposalReserved(uuid, proposer, address(implementation), rootClaim, extraData, amount);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function cancelProposal(Claim rootClaim, bytes calldata extraData) external {
+        Hash uuid = disputeGameFactory.getGameUUID(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim, extraData);
+        ProposalReservation memory reservation = proposalReservations[uuid];
+        if (reservation.proposer == address(0)) revert InvalidReservation(uuid);
+        if (msg.sender != reservation.proposer) revert NotReservedProposer(msg.sender, reservation.proposer);
+        _releaseUncreatedReservation(uuid, rootClaim, extraData, reservation);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function invalidateStaleProposal(Claim rootClaim, bytes calldata extraData) external {
+        Hash uuid = disputeGameFactory.getGameUUID(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim, extraData);
+        ProposalReservation memory reservation = proposalReservations[uuid];
+        if (reservation.proposer == address(0)) revert InvalidReservation(uuid);
+        if (address(disputeGameFactory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE)) == reservation.implementation) {
+            revert ReservationNotStale(uuid);
+        }
+        _releaseUncreatedReservation(uuid, rootClaim, extraData, reservation);
+    }
+
+    function _releaseUncreatedReservation(
+        Hash uuid,
+        Claim rootClaim,
+        bytes calldata extraData,
+        ProposalReservation memory reservation
+    ) internal {
+        (IDisputeGame existing,) = disputeGameFactory.games(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim, extraData);
+        if (address(existing) != address(0)) revert GameAlreadyCreated(address(existing));
+        delete proposalReservations[uuid];
+        availableBalance[reservation.proposer] += reservation.amount;
+        emit ProposalReservationReleased(uuid, reservation.proposer, reservation.amount);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function consumeProposal() external returns (address proposer) {
+        IMultiProofGame game = IMultiProofGame(msg.sender);
+        if (
+            GameType.unwrap(game.gameType()) != GameType.unwrap(GameTypes.MULTI_PROOF_GAME_TYPE)
+                || address(game.disputeGameFactory()) != address(disputeGameFactory)
+                || address(game.bondVault()) != address(this)
+        ) {
+            revert GameNotRegistered(msg.sender);
+        }
+
+        (GameType gameType_, Claim rootClaim_, bytes memory extraData_) = game.gameData();
+        Hash uuid = disputeGameFactory.getGameUUID(gameType_, rootClaim_, extraData_);
+        ProposalReservation memory reservation = proposalReservations[uuid];
+        if (reservation.proposer == address(0) || reservation.amount != game.proposerBond()) {
+            revert InvalidReservation(uuid);
+        }
+        if (reservation.implementation != address(disputeGameFactory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE))) {
+            revert StaleReservation(uuid);
+        }
+        address expectedGame = LibClone.predictDeterministicAddress(
+            reservation.implementation,
+            abi.encodePacked(game.gameCreator(), rootClaim_, game.l1Head(), extraData_),
+            Hash.unwrap(uuid),
+            address(disputeGameFactory)
+        );
+        if (expectedGame != msg.sender) revert UnexpectedGameAddress(expectedGame, msg.sender);
+        if (gameBonds[msg.sender].proposerBond != 0) revert GameBondAlreadyInitialized(msg.sender);
+
+        delete proposalReservations[uuid];
+        gameBonds[msg.sender] = GameBond({proposerBond: reservation.amount, challengerBond: 0, settled: false});
+        emit ProposalBondAssigned(uuid, msg.sender, reservation.proposer, reservation.amount);
+        return reservation.proposer;
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function reserveChallenge() external {
+        address factoryOwner = disputeGameFactory.owner();
+        address vaultOwner = proxyAdminOwner();
+        if (factoryOwner != vaultOwner) revert OwnerMismatch(factoryOwner, vaultOwner);
+
+        IMultiProofGame game = _registeredGame(msg.sender);
+        GameBond storage bond = gameBonds[msg.sender];
+        if (bond.proposerBond == 0) revert GameNotRegistered(msg.sender);
+        if (bond.challengerBond != 0 || bond.settled) revert ChallengeBondAlreadyReserved(msg.sender);
+
+        address challenger = game.challenger();
+        uint256 amount = game.challengerBond();
+        if (challenger == address(0) || amount == 0) revert InvalidVaultConfiguration();
+        _debitAvailable(challenger, amount);
+        bond.challengerBond = amount;
+        emit ChallengeBondReserved(msg.sender, challenger, amount);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function settle(Payout[] calldata payouts) external {
+        _registeredGame(msg.sender);
+        GameBond storage bond = gameBonds[msg.sender];
+        if (bond.proposerBond == 0) revert GameNotRegistered(msg.sender);
+        if (bond.settled) revert GameAlreadySettled(msg.sender);
+
+        uint256 payoutTotal;
+        for (uint256 i; i < payouts.length; i++) {
+            payoutTotal += payouts[i].amount;
+        }
+
+        uint256 expected = bond.proposerBond + bond.challengerBond;
+        if (payoutTotal != expected) revert InvalidPayoutTotal(expected, payoutTotal);
+
+        bond.settled = true;
+        for (uint256 i; i < payouts.length; i++) {
+            availableBalance[payouts[i].recipient] += payouts[i].amount;
+        }
+        emit GameSettled(msg.sender, payoutTotal);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function hold(address account) external {
+        hold(account, availableBalance[account] + withdrawals[account].amount);
+    }
+
+    // TODO(security): Reassess unrestricted `hold` and `recover` authority before production
+    // deployment. These functions intentionally mirror DelayedWETH's break-glass custody model,
+    // but this singleton also holds participants' uncommitted WLD balances and therefore has a
+    // larger blast radius.
+    /// @inheritdoc IWLDStakingVault
+    function hold(address account, uint256 amount) public {
+        address recipient = _assertProxyAdminOwner();
+        uint256 heldBalance = availableBalance[account] + withdrawals[account].amount;
+        if (heldBalance < amount) revert InsufficientBalance(account, heldBalance, amount);
+        if (account == recipient || amount == 0) return;
+
+        uint256 fromAvailable = amount < availableBalance[account] ? amount : availableBalance[account];
+        availableBalance[account] -= fromAvailable;
+        uint256 fromWithdrawal = amount - fromAvailable;
+        if (fromWithdrawal != 0) {
+            withdrawals[account].amount -= fromWithdrawal;
+            if (withdrawals[account].amount == 0) withdrawals[account].timestamp = 0;
+        }
+        availableBalance[recipient] += amount;
+        emit AccountHeld(account, recipient, amount);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function recover(uint256 amount) external {
+        address recipient = _assertProxyAdminOwner();
+        uint256 balance = wld.balanceOf(address(this));
+        uint256 recovered = amount < balance ? amount : balance;
+        // Liabilities intentionally remain unchanged: recovery may seize backing for pending
+        // reservations or active games without blocking their later internal settlement.
+        wld.safeTransfer(recipient, recovered);
+        emit Recovered(recipient, recovered);
+    }
+
+    function _registeredGame(address gameAddress) internal view returns (IMultiProofGame game) {
+        game = IMultiProofGame(gameAddress);
+        (GameType gameType_, Claim rootClaim_, bytes memory extraData_) = game.gameData();
+        if (GameType.unwrap(gameType_) != GameType.unwrap(GameTypes.MULTI_PROOF_GAME_TYPE)) {
+            revert GameNotRegistered(gameAddress);
+        }
+        (IDisputeGame registered,) = disputeGameFactory.games(gameType_, rootClaim_, extraData_);
+        if (address(registered) != gameAddress || address(game.bondVault()) != address(this)) {
+            revert GameNotRegistered(gameAddress);
+        }
+    }
+
+    function _debitAvailable(address account, uint256 amount) internal {
+        uint256 available = availableBalance[account];
+        if (available < amount) revert InsufficientBalance(account, available, amount);
+        availableBalance[account] = available - amount;
+    }
+
+    function _assertProxyAdminOrOwner() internal view {
+        IProxyAdmin admin = proxyAdmin();
+        if (msg.sender != address(admin) && msg.sender != admin.owner()) revert NotProxyAdminOwner(msg.sender);
+    }
+
+    function _assertProxyAdminOwner() internal view returns (address owner) {
+        owner = proxyAdminOwner();
+        if (msg.sender != owner) revert NotProxyAdminOwner(msg.sender);
+    }
+}

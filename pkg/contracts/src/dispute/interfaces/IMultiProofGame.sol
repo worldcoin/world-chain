@@ -3,12 +3,12 @@ pragma solidity 0.8.28;
 
 import {LibProof, InvalidationReason, Bitmap, ProofLane} from "../lib/LibProof.sol";
 import {IWorldChainProofVerifier} from "./IWorldChainProofVerifier.sol";
+import {IWLDStakingVault} from "./IWLDStakingVault.sol";
 
 import {BondDistributionMode, Duration, GameStatus, Hash, Timestamp} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
-import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.sol";
 
 /// @title IMultiProofGame
 /// @author World Contributors
@@ -64,7 +64,7 @@ interface IMultiProofGame is IDisputeGame {
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
         IAnchorStateRegistry anchorStateRegistry;
-        IDelayedWETH weth;
+        IWLDStakingVault bondVault;
     }
 
     ////////////////////////////////////////////////////////////////
@@ -159,8 +159,8 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Registry providing the anchor root, blacklist, and finality airgap.
     function anchorStateRegistry() external view returns (IAnchorStateRegistry);
 
-    /// @notice Bond custody contract.
-    function weth() external view returns (IDelayedWETH);
+    /// @notice WLD bond custody and settlement contract.
+    function bondVault() external view returns (IWLDStakingVault);
 
     ////////////////////////////////////////////////////////////////
     //                      Proposal context                      //
@@ -190,6 +190,9 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice L1 block number of `l1Head`.
     function l1OriginNumber() external view returns (uint256);
+
+    /// @notice Account that reserved and funded the proposer bond.
+    function bondProposer() external view returns (address);
 
     ////////////////////////////////////////////////////////////////
     //                       Game progress                        //
@@ -237,8 +240,8 @@ interface IMultiProofGame is IDisputeGame {
     //                    Challenge and proofs                    //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Disputes a proven proposal during the open challenge window for exactly `challengerBond`.
-    function challenge() external payable returns (ProposalStatus);
+    /// @notice Disputes a proposal and reserves `challengerBond` WLD from the caller's vault balance.
+    function challenge() external returns (ProposalStatus);
 
     /// @notice Submits a compact proof payload. Before a challenge, any accepted lane satisfies
     ///         the initial proof requirement; after a challenge, distinct lanes count toward the
@@ -256,7 +259,7 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Distribution mode locked in by `closeGame`.
     function bondDistributionMode() external view returns (BondDistributionMode);
 
-    /// @notice Total bonds custodied by this game.
+    /// @notice Total WLD bonds assigned to this game's vault pot.
     function totalBonds() external view returns (uint256);
 
     /// @notice Credit owed to `recipient` when the game closes in `NORMAL` mode.
@@ -264,11 +267,4 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Credit owed to `recipient` when the game closes in `REFUND` mode.
     function refundModeCredit(address recipient) external view returns (uint256 amount);
-
-    /// @notice Returns the credit `recipient` can claim from this game.
-    function credit(address recipient) external view returns (uint256);
-
-    /// @notice Permissionlessly claims `recipient`'s credit via the two-phase DelayedWETH flow;
-    ///         the caller cannot redirect funds away from `recipient`.
-    function claimCredit(address recipient) external;
 }
