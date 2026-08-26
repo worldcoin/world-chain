@@ -1,6 +1,6 @@
 [package]
 name = "world-chain-prover-sp1"
-version.workspace = true
+version = "1.0.0-rc.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -26,3 +26,7 @@ world-chain-proof-core.workspace = true
 world-chain-proof-sp1-host = { workspace = true, features = ["sp1"] }
 world-chain-proof-sp1-elfs.workspace = true
 world-chain-proof-sp1-types.workspace = true
+
+# Proofs release train: cargo-release bumps every shared-version member in lockstep.
+[package.metadata.release]
+shared-version = "proofs"

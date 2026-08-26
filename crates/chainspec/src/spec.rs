@@ -28,6 +28,12 @@ pub const JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA: u64 = 1_777_161_600;
 /// World Chain Jovian activation timestamp on mainnet.
 pub const JOVIAN_UPGRADE_TIMESTAMP_MAINNET: u64 = 1_777_593_600;
 
+/// World Chain Karst activation timestamp on Sepolia.
+pub const KARST_UPGRADE_TIMESTAMP_SEPOLIA: u64 = 1_788_868_800;
+
+/// World Chain Karst activation timestamp on mainnet.
+pub const KARST_UPGRADE_TIMESTAMP_MAINNET: u64 = 1_789_992_000;
+
 /// World Chain spec type.
 ///
 /// This wraps reth's generic [`ChainSpec`] the same way the OP stack spec does, while using World
@@ -78,25 +84,43 @@ impl WorldChainSpec {
     }
 
     /// Applies World Chain defaults that are not yet represented in the upstream OP stack chain
-    /// specs. Only fills in forks that have no explicit activation; an operator-supplied
-    /// timestamp (e.g. `jovianTime` in genesis) is preserved.
+    /// specs. Only fills in forks that have no explicit activation; operator-supplied timestamps
+    /// (e.g. `jovianTime` and `karstTime` in genesis) are preserved.
     pub fn apply_world_chain_defaults(&mut self) {
-        if !matches!(
-            self.inner.fork(WorldChainHardfork::Jovian),
-            ForkCondition::Never
-        ) {
-            return;
-        }
         match self.chain().named() {
-            Some(NamedChain::World) => self.set_fork(
-                WorldChainHardfork::Jovian,
-                ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_MAINNET),
-            ),
-            Some(NamedChain::WorldSepolia) => self.set_fork(
-                WorldChainHardfork::Jovian,
-                ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA),
-            ),
+            Some(NamedChain::World) => {
+                self.set_missing_world_fork(
+                    WorldChainHardfork::Jovian,
+                    JOVIAN_UPGRADE_TIMESTAMP_MAINNET,
+                );
+                self.set_missing_karst_forks(KARST_UPGRADE_TIMESTAMP_MAINNET);
+            }
+            Some(NamedChain::WorldSepolia) => {
+                self.set_missing_world_fork(
+                    WorldChainHardfork::Jovian,
+                    JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA,
+                );
+                self.set_missing_karst_forks(KARST_UPGRADE_TIMESTAMP_SEPOLIA);
+            }
             _ => {}
+        }
+    }
+
+    fn set_missing_world_fork(&mut self, fork: WorldChainHardfork, timestamp: u64) {
+        if matches!(self.inner.fork(fork), ForkCondition::Never) {
+            self.set_fork(fork, ForkCondition::Timestamp(timestamp));
+        }
+    }
+
+    fn set_missing_karst_forks(&mut self, default_timestamp: u64) {
+        self.set_missing_world_fork(WorldChainHardfork::Karst, default_timestamp);
+
+        if matches!(
+            self.inner.fork(EthereumHardfork::Osaka),
+            ForkCondition::Never
+        ) && let Some(timestamp) = self.inner.fork(WorldChainHardfork::Karst).as_timestamp()
+        {
+            self.set_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(timestamp));
         }
     }
 }
@@ -562,13 +586,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn world_mainnet_defaults_to_jovian() {
+    fn world_mainnet_defaults_to_jovian_and_karst() {
         let spec = WorldChainSpec::mainnet();
         assert_eq!(
             spec.fork(WorldChainHardfork::Jovian),
             ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_MAINNET)
         );
-        assert_eq!(spec.fork(WorldChainHardfork::Karst), ForkCondition::Never);
+        assert_eq!(
+            spec.fork(WorldChainHardfork::Karst),
+            ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_MAINNET)
+        );
+        assert_eq!(
+            spec.fork(EthereumHardfork::Osaka),
+            ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_MAINNET)
+        );
+    }
+
+    #[test]
+    fn world_sepolia_defaults_to_jovian_and_karst() {
+        let spec = WorldChainSpec::sepolia();
+        assert_eq!(
+            spec.fork(WorldChainHardfork::Jovian),
+            ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA)
+        );
+        assert_eq!(
+            spec.fork(WorldChainHardfork::Karst),
+            ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_SEPOLIA)
+        );
+        assert_eq!(
+            spec.fork(EthereumHardfork::Osaka),
+            ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_SEPOLIA)
+        );
     }
 
     #[test]

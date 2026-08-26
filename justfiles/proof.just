@@ -56,24 +56,46 @@ prove *args='':
 proof-vkeys *args='':
     cargo run --release -p world-chain-prover-sp1 -- vkeys $@
 
-# Recompute vkeys from the embedded ELFs and update proofs/backends/sp1/elfs/vkeys.json.
+# Recompute vkeys from the embedded ELFs and update the `.sp1` half of
+# proofs/measurements.json. The `.nitro` half is left alone: it is measured by
+# scripts/build-eif.sh on Linux x86_64 and nothing here can recompute it.
 # Requires Docker and the SP1 toolchain (sp1up v6.3.1) for reproducible ELF builds.
-[doc("Recompute vkeys from the embedded ELFs and update vkeys.json.")]
+[doc("Recompute vkeys from the embedded ELFs and update measurements.json.")]
 [group('proof')]
 update-proof-vkeys:
     cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-update.json
-    jq -S . /tmp/vkeys-update.json > proofs/backends/sp1/elfs/vkeys.json
+    jq -S --slurpfile sp1 /tmp/vkeys-update.json '.sp1 = $sp1[0]' proofs/measurements.json > /tmp/measurements-update.json
+    mv /tmp/measurements-update.json proofs/measurements.json
 
-# Verify that the committed vkeys.json matches what the current source produces.
-# Uses jq -S to normalize key ordering before comparing, so the diff is not
-# sensitive to JSON insertion order. Used by CI. Fails if they differ.
-[doc("Assert the committed vkeys.json matches what the source produces. Used by CI.")]
+# Recomputes both halves: `.sp1` via the recipe above, then `.nitro` via
+# scripts/build-eif.sh, whose output already carries the fresh `.sp1` forward.
+# Needs Linux x86_64 with Nix (EIF), plus Docker and sp1up (vkeys).
+[doc("Recompute all of proofs/measurements.json: sp1 vkeys and nitro PCRs.")]
+[group('proof')]
+update-measurements: update-proof-vkeys
+    scripts/build-eif.sh target/eif
+    cp target/eif/measurements.json proofs/measurements.json
+
+# Verify that the `.sp1` half of proofs/measurements.json matches what the current
+# source produces. Uses jq -S to normalize key ordering before comparing, so the diff
+# is not sensitive to JSON insertion order. Used by CI. Fails if they differ.
+[doc("Assert the sp1 half of measurements.json matches what the source produces. Used by CI.")]
 [group('proof')]
 verify-proof-vkeys:
     cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-actual.json
-    jq -S . proofs/backends/sp1/elfs/vkeys.json > /tmp/vkeys-committed.json
+    jq -S .sp1 proofs/measurements.json > /tmp/vkeys-committed.json
     jq -S . /tmp/vkeys-actual.json > /tmp/vkeys-actual-normalized.json
-    diff /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
+    diff /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || (echo "ERROR: the sp1 half of proofs/measurements.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
+
+# Everything in the measured workspace's lockfile is compiled into the EIF, so a
+# compromised crate there ships inside the attested TCB. cargo-deny rejects known-bad
+# crates (advisories, unknown sources, duplicate versions); cargo-vet fails when the
+# lockfile gains a crate version with neither an imported audit nor an exemption.
+[doc("Audit the measured enclave dependency tree with cargo-deny and cargo-vet. Used by CI.")]
+[group('proof')]
+audit-enclave-deps:
+    cd proofs/measured/nitro-enclave && cargo deny check advisories bans sources
+    cd proofs/measured/nitro-enclave && cargo vet --locked
 
 # Phase 0a – Compute and print the rollup config hash.
 # Sources (checked in priority order):

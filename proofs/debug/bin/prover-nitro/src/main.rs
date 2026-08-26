@@ -220,9 +220,9 @@ async fn nitro_prove(_args: NitroArgs) -> Result<()> {
 
 #[cfg(target_os = "linux")]
 async fn register(args: RegisterArgs) -> Result<()> {
-    use world_chain_proof_nitro_enclave::{
-        ExpectedPcrs,
-        register::{RegisterParams, RegistrationOutcome, SignerType, register_enclave_key},
+    use world_chain_proof_nitro_enclave::ExpectedPcrs;
+    use world_chain_proof_nitro_register::{
+        RegisterParams, RegistrationOutcome, SignerType, register_enclave_key,
     };
 
     // Initialise logging so the registration flow's progress logs are visible. `info` by

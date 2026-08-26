@@ -12,7 +12,7 @@
 //!
 //! ```sh
 //! cargo build --release --bin world-chain-proof-nitro-enclave \
-//!     -p world-chain-proof-nitro-enclave --features enclave
+//!     --manifest-path proofs/measured/nitro-enclave/Cargo.toml --features enclave
 //! ```
 
 #![cfg(feature = "enclave")]

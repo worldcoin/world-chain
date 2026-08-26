@@ -1,0 +1,19 @@
+{
+  "nitro": {
+    "pcr0": "0x1047a9abb6fdfc70f1e4df56faf857fba33b7c2643833e0845060d21133a1812d31c113af3ff4582dfcb5ee5af3a5477",
+    "pcr1": "0xab92a79f22cbca162b415c97f3406327ab858f9a73ffd4f7720710529eee87f085d21c3dd2819ef63263b0dad0b4a9d6",
+    "pcr2": "0x94bc876bd0dfc0f5c8d8f1c34cbdbc0c4e6f2521428805901b660c85391afca77b435b1b1cace64aba01313ae91d2c3b"
+  },
+  "sp1": {
+    "aggregation_vkey": "0x00e9ee2c9771b4a3596809af947148b803be6c9989bc98dded1c185ebffe18c9",
+    "elfs": {
+      "world-chain-aggregation": {
+        "sha256": "0147dc683e64a75b9ecb869042bb3db3c946a258be3b8f66fa9f5ae497210c0c"
+      },
+      "world-chain-range-ethereum": {
+        "sha256": "ca68d1f513e81bff7b0977f5425152f445b6e0c14733acec1b03ecceeef4ddb0"
+      }
+    },
+    "range_vkey_commitment": "0x729e953b5968b34c75ab76a94e819fdb4000c24422f695181a1e29e522d13fa0"
+  }
+}

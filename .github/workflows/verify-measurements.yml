@@ -1,0 +1,185 @@
+# Verifies proofs/measurements.json against what the source actually measures to.
+# Two halves, verified independently and only when a file that can move them changed:
+#   .sp1   — guest vkeys, derived by rebuilding the ELFs through the pinned Docker toolchain
+#   .nitro — enclave PCRs, derived by rebuilding the EIF with Nix via scripts/build-eif.sh
+# Both jobs surface the fresh values on mismatch but never commit them: rotating a
+# measurement stays a human act (see release-proof.yml for the release-time PR flow).
+name: verify-measurements
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - 'proofs/measured/**'
+      - 'proofs/backends/sp1/elfs/**'
+      - 'proofs/protocol/**'
+      - 'proofs/measurements.json'
+      - 'Cargo.lock'
+      - 'Justfile'
+      - 'justfiles/proof.just'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'rust-toolchain.toml'
+      - 'scripts/build-eif.sh'
+      - '.github/actions/install-nix/**'
+      - '.github/workflows/verify-measurements.yml'
+
+jobs:
+  changes:
+    name: detect measurement-affecting changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      sp1: ${{ steps.filter.outputs.sp1 }}
+      nitro: ${{ steps.filter.outputs.nitro }}
+    steps:
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        with:
+          filters: |
+            sp1:
+              - 'proofs/measured/sp1-programs/**'
+              - 'proofs/measured/core/**'
+              - 'proofs/measured/kona-client/**'
+              - 'proofs/backends/sp1/elfs/**'
+              - 'proofs/protocol/**'
+              - 'proofs/measurements.json'
+              - 'Cargo.lock'
+              - 'Justfile'
+              - 'justfiles/proof.just'
+              - '.github/workflows/verify-measurements.yml'
+            nitro:
+              - 'proofs/measured/nitro-enclave/**'
+              - 'proofs/measured/core/**'
+              - 'proofs/measured/kona-client/**'
+              - 'proofs/measurements.json'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'rust-toolchain.toml'
+              - 'scripts/build-eif.sh'
+              - '.github/actions/install-nix/**'
+              - '.github/workflows/verify-measurements.yml'
+
+  verify-vkeys:
+    name: verify vkeys match source
+    needs: changes
+    if: needs.changes.outputs.sp1 == 'true'
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # sp1up fetched at the toolchain's own tag and hash-checked, instead of the
+      # https://sp1.succinct.xyz bootstrap script, which fetches sp1up from `main` unpinned.
+      - name: Install SP1 toolchain
+        env:
+          SP1_VERSION: "v6.3.1"
+          SP1UP_SHA256: 55d4f6ef8e79e04a7ccd064f75c6a6b44a1694b21cd41aa8e7d0d53eb880a71d
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.sp1/bin
+          curl --proto '=https' --tlsv1.2 -sSf -L \
+            --retry 3 --retry-all-errors --connect-timeout 10 --max-time 120 \
+            "https://raw.githubusercontent.com/succinctlabs/sp1/${SP1_VERSION}/sp1up/sp1up" \
+            -o ~/.sp1/bin/sp1up
+          echo "$SP1UP_SHA256  $HOME/.sp1/bin/sp1up" | sha256sum -c
+          chmod +x ~/.sp1/bin/sp1up
+          ~/.sp1/bin/sp1up --version "$SP1_VERSION"
+          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
+
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Verify vkeys
+        env:
+          SP1_BUILD_DOCKER: "true"
+        run: just verify-proof-vkeys
+
+      # Surface, never commit: rotating a measurement stays a human act. On a mismatch,
+      # publish the freshly derived `.sp1` half so the author can paste it into
+      # proofs/measurements.json without a local SP1 toolchain.
+      - name: Report fresh vkeys
+        if: failure()
+        run: |
+          set -euo pipefail
+          if [ ! -f /tmp/vkeys-actual-normalized.json ]; then
+            echo "verify-proof-vkeys failed before vkeys were derived — see the step above." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "## Committed \`.sp1\` measurements are stale"
+            echo '```diff'
+            diff -u /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || true
+            echo '```'
+            echo "Fresh \`.sp1\` half — paste into \`proofs/measurements.json\`, or run \`just update-proof-vkeys\` locally:"
+            echo '```json'
+            cat /tmp/vkeys-actual-normalized.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload fresh vkeys
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fresh-sp1-vkeys
+          path: /tmp/vkeys-actual-normalized.json
+          if-no-files-found: ignore
+
+  verify-pcrs:
+    name: verify PCRs match source
+    needs: changes
+    if: needs.changes.outputs.nitro == 'true'
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # Sandbox-less, hand-rolled single-user install; the composite documents why the
+      # marketplace installers cannot run on these pods.
+      - name: Install Nix
+        uses: ./.github/actions/install-nix
+
+      - name: Build EIF and measure
+        run: scripts/build-eif.sh target/eif
+
+      - name: Verify PCRs
+        run: |
+          set -euo pipefail
+          if diff <(jq -S .nitro proofs/measurements.json) <(jq -S .nitro target/eif/measurements.json) > /tmp/nitro-measurements.diff; then
+            echo "PCRs match the committed proofs/measurements.json." >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Committed \`.nitro\` measurements are stale"
+              echo '```diff'
+              cat /tmp/nitro-measurements.diff
+              echo '```'
+              echo "Fresh \`.nitro\` half — paste into \`proofs/measurements.json\`:"
+              echo '```json'
+              jq -S .nitro target/eif/measurements.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "ERROR: the .nitro half of proofs/measurements.json is out of date." >&2
+            exit 1
+          fi
+
+      - name: Upload fresh measurements
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fresh-nitro-measurements
+          path: target/eif/measurements.json
+          if-no-files-found: ignore

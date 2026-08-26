@@ -13,8 +13,8 @@ use world_chain_proof_kona_host::online::{build_online_config, hardfork_config_f
 use world_chain_proof_nitro_enclave::{
     ExpectedPcrs,
     host::{EnclaveEndpoint, NitroProver},
-    register::{RegisterParams, RegistrationOutcome, register_enclave_key},
 };
+use world_chain_proof_nitro_register::{RegisterParams, RegistrationOutcome, register_enclave_key};
 use world_chain_proof_nitro_worker::{NitroBackend, NitroBackendConfig};
 use world_chain_proof_protocol::AlloyProofGameProvider;
 use world_chain_proof_worker::{

@@ -1,6 +1,6 @@
 [package]
 name = "world-chain-prover-nitro"
-version.workspace = true
+version = "1.0.0-rc.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -22,4 +22,9 @@ world-chain-prover.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 world-chain-proof-nitro-enclave = { workspace = true, features = ["enclave"] }
+world-chain-proof-nitro-register.workspace = true
 tracing-subscriber.workspace = true
+
+# Proofs release train: cargo-release bumps every shared-version member in lockstep.
+[package.metadata.release]
+shared-version = "proofs"

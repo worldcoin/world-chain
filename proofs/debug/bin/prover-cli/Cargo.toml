@@ -1,6 +1,6 @@
 [package]
 name = "world-chain-prover-cli"
-version.workspace = true
+version = "1.0.0-rc.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -33,3 +33,7 @@ reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+# Proofs release train: cargo-release bumps every shared-version member in lockstep.
+[package.metadata.release]
+shared-version = "proofs"

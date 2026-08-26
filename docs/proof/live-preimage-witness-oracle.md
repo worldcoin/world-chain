@@ -20,7 +20,7 @@ derivation data still hits the network.
 wrapping the oracle in a `PreimageWitnessCollector`
 (`proofs/kona-host/src/witness_generation/preimage_witness_collector.rs:12`) that records every
 preimage the guest pulls into a `PreimageStore`
-(`proofs/core/src/witness/preimage_store.rs:15`).
+(`proofs/measured/core/src/witness/preimage_store.rs:15`).
 
 For a range of `N` L2 blocks the Kona host hint handler issues, **sequentially**:
 

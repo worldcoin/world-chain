@@ -97,7 +97,7 @@ impl LineageProvider for MockContracts {
 
 #[async_trait]
 impl ProposerClient for MockContracts {
-    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
+    async fn is_game_claim_valid(&self, game: Address) -> Result<bool, ProposerError> {
         Ok(!self
             .unfinalized_games
             .lock()
@@ -700,7 +700,7 @@ async fn scan_selected_lineage_stops_at_finalized_l2_block() {
 }
 
 #[tokio::test]
-async fn resolve_games_caps_submissions_and_keeps_scanning_finalized_games() {
+async fn resolve_games_caps_submissions_and_keeps_scanning_resolved_games() {
     let game_2 = game_address(2);
     let game_3 = game_address(3);
     let resolutions = Arc::default();
@@ -743,22 +743,79 @@ async fn resolve_games_caps_submissions_and_keeps_scanning_finalized_games() {
         selected_game(game_3, 30),
     ];
 
-    let highest_finalized_game = proposer.resolve_games(&games).await.unwrap();
+    let resolved_games = proposer.resolve_games(&games).await.unwrap();
     assert_eq!(
         *resolutions.lock().expect("not poisoned"),
         vec![GAME_1, game_2]
     );
-    assert_eq!(highest_finalized_game, Some(selected_game(game_3, 30)));
+    assert_eq!(resolved_games, games.to_vec());
 
-    proposer
-        .advance_anchor(highest_finalized_game)
-        .await
-        .unwrap();
+    proposer.advance_anchor(&resolved_games).await.unwrap();
     assert_eq!(*closures.lock().expect("not poisoned"), vec![game_3]);
 }
 
 #[tokio::test]
-async fn finalized_games_do_not_consume_resolution_budget() {
+async fn advance_anchor_skips_newer_game_that_is_not_yet_valid() {
+    let game_2 = game_address(2);
+    let game_3 = game_address(3);
+    let closures = Arc::default();
+    let contracts = MockContracts {
+        anchor: anchor_at(0),
+        games: Arc::new(Mutex::new(HashMap::new())),
+        submissions: Arc::default(),
+        resolution_statuses: Arc::new(Mutex::new(HashMap::from([
+            (
+                GAME_1,
+                ResolutionStatus {
+                    resolvable: false,
+                    outcome: GameStatus::DefenderWins,
+                    invalidation_reason: InvalidationReason::None,
+                },
+            ),
+            (
+                game_2,
+                ResolutionStatus {
+                    resolvable: false,
+                    outcome: GameStatus::DefenderWins,
+                    invalidation_reason: InvalidationReason::None,
+                },
+            ),
+            (
+                game_3,
+                ResolutionStatus {
+                    resolvable: false,
+                    outcome: GameStatus::DefenderWins,
+                    invalidation_reason: InvalidationReason::None,
+                },
+            ),
+        ]))),
+        resolutions: Arc::default(),
+        closures: Arc::clone(&closures),
+        submission_failures: Arc::default(),
+        unfinalized_games: Arc::new(Mutex::new(HashSet::from([game_3]))),
+    };
+    let proposer = WorldChainProposer::new(
+        config(),
+        contracts,
+        MockOutputRoots {
+            roots: HashMap::new(),
+            finalized_l2_block: 0,
+        },
+    );
+    let games = [
+        selected_game(GAME_1, 10),
+        selected_game(game_2, 20),
+        selected_game(game_3, 30),
+    ];
+
+    let resolved_games = proposer.resolve_games(&games).await.unwrap();
+    proposer.advance_anchor(&resolved_games).await.unwrap();
+
+    assert_eq!(*closures.lock().expect("not poisoned"), vec![game_2]);
+}
+
+#[tokio::test]
+async fn resolved_games_do_not_consume_resolution_budget() {
     let game_2 = game_address(2);
     let game_3 = game_address(3);
     let resolutions = Arc::default();
@@ -797,10 +854,13 @@ async fn finalized_games_do_not_consume_resolution_budget() {
         selected_game(game_3, 30),
     ];
 
-    let highest_finalized_game = proposer.resolve_games(&games).await.unwrap();
+    let resolved_games = proposer.resolve_games(&games).await.unwrap();
 
     assert_eq!(*resolutions.lock().expect("not poisoned"), vec![game_2]);
-    assert_eq!(highest_finalized_game, Some(selected_game(game_2, 20)));
+    assert_eq!(
+        resolved_games,
+        vec![selected_game(GAME_1, 10), selected_game(game_2, 20)]
+    );
 }
 
 #[tokio::test]
