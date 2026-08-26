@@ -13,8 +13,10 @@
 //! ```
 
 pub mod backend;
+pub mod planner;
 
 pub use backend::{Sp1Backend, Sp1BackendConfig};
+pub use planner::{PlannedRange, RangePlan, RangePlanConfig};
 
 // Re-exported so binaries and tests can build a worker without depending on
 // `world-chain-proof-worker` directly.

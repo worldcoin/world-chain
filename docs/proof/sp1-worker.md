@@ -72,7 +72,24 @@ These are execution safety ceilings, not the final auction charge. The gas limit
 request's worst-case authorization and balance check because the network multiplies it by the
 maximum price per PGU. To execute each guest locally and let the SP1 SDK estimate both limits
 instead, set `SP1_ESTIMATE_LIMITS=true` or pass `--sp1-estimate-limits`. Local estimation conflicts
-with explicitly configured limit flags.
+with explicitly configured limit flags. The aggregation limits are per range proof; requests
+aggregating N ranges submit N times the configured aggregation ceilings.
+
+### Range planning
+
+Proof intervals are split into one or more range proofs by cumulative L2 gas. The per-range gas
+target is derived, not configured: `SP1_RANGE_CYCLE_LIMIT / SP1_CYCLES_PER_GAS / 2`, so planned
+ranges stay under the cycle ceiling with 2x headroom. A range the network still reports
+unexecutable is bisected at its block midpoint and re-proved.
+
+| Variable | Flag | Default |
+|---|---|---:|
+| `SP1_CYCLES_PER_GAS` | `--sp1-cycles-per-gas` | `25` (assumed worst case, unmeasured) |
+| `SP1_MAX_BLOCKS_PER_RANGE` | `--sp1-max-blocks-per-range` | `1000` |
+| `SP1_MAX_RANGE_SPLITS` | `--sp1-max-range-splits` | `2` |
+
+`SP1_MAX_BLOCKS_PER_RANGE` bounds per-block costs gas does not measure (witness size and build
+time, guest memory); `SP1_MAX_RANGE_SPLITS` caps bisections per range before the job fails.
 
 `SP1_MAX_PRICE_PER_PGU` caps the auction price encoded in each range and aggregation request. The
 value uses PROVE base units (18 decimals) per PGU. For example, `50000000` is `0.05 PROVE/bPGU`.

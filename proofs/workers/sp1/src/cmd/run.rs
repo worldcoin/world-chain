@@ -20,7 +20,8 @@ use world_chain_proof_sp1_host::{
     vkeys::embedded_vkey_manifest,
 };
 use world_chain_proof_sp1_worker::{
-    ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
+    ProofWorker, ProofWorkerConfig, RangePlanConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
+    planner::target_gas_per_range,
 };
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;
@@ -38,10 +39,17 @@ const DEFAULT_WORKER_HEARTBEAT_INTERVAL_SEC: u64 = 30;
 const DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES: u32 = 5;
 const SP1_NETWORK_BALANCE_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const DEFAULT_SP1_NETWORK_MINIMUM_BALANCE: &str = "10";
-const DEFAULT_SP1_RANGE_CYCLE_LIMIT: u64 = 1_500_000_000_000;
+const DEFAULT_SP1_RANGE_CYCLE_LIMIT: u64 =
+    world_chain_proof_sp1_worker::planner::DEFAULT_RANGE_CYCLE_LIMIT;
 const DEFAULT_SP1_RANGE_GAS_LIMIT: u64 = 1_300_000_000_000;
 const DEFAULT_SP1_AGGREGATION_CYCLE_LIMIT: u64 = 7_000_000;
 const DEFAULT_SP1_AGGREGATION_GAS_LIMIT: u64 = 6_500_000;
+const DEFAULT_SP1_CYCLES_PER_GAS: u64 =
+    world_chain_proof_sp1_worker::planner::DEFAULT_CYCLES_PER_GAS;
+const DEFAULT_SP1_MAX_BLOCKS_PER_RANGE: u64 =
+    world_chain_proof_sp1_worker::planner::DEFAULT_MAX_BLOCKS_PER_RANGE;
+const DEFAULT_SP1_MAX_RANGE_SPLITS: u32 =
+    world_chain_proof_sp1_worker::planner::DEFAULT_MAX_RANGE_SPLITS;
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Network {
@@ -215,6 +223,35 @@ pub struct WorkerArgs {
         value_parser = clap::value_parser!(u64).range(1..)
     )]
     sp1_aggregation_gas_limit: u64,
+
+    /// Assumed worst-case zkVM cycles per L2 gas. The per-range gas target is derived as
+    /// `sp1_range_cycle_limit / sp1_cycles_per_gas / 2`, so ranges cannot be planned past the
+    /// configured cycle ceiling.
+    #[arg(
+        long,
+        env = "SP1_CYCLES_PER_GAS",
+        default_value_t = DEFAULT_SP1_CYCLES_PER_GAS,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    sp1_cycles_per_gas: u64,
+
+    /// Maximum L2 blocks per SP1 range proof.
+    #[arg(
+        long,
+        env = "SP1_MAX_BLOCKS_PER_RANGE",
+        default_value_t = DEFAULT_SP1_MAX_BLOCKS_PER_RANGE,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    sp1_max_blocks_per_range: u64,
+
+    /// Maximum times one range proof may be bisected after the SP1 Network reports it
+    /// unexecutable.
+    #[arg(
+        long,
+        env = "SP1_MAX_RANGE_SPLITS",
+        default_value_t = DEFAULT_SP1_MAX_RANGE_SPLITS
+    )]
+    sp1_max_range_splits: u32,
 
     /// Maximum auction price in PROVE base units per PGU. Uses the SP1 Network default if omitted.
     #[arg(
@@ -572,6 +609,14 @@ where
             allow_unfinalized: cli.allow_unfinalized,
             aggregation_vkey: embedded_vkeys.aggregation_vkey,
             range_vkey_commitment: embedded_vkeys.range_vkey_commitment,
+            range_plan: RangePlanConfig {
+                target_gas_per_range: target_gas_per_range(
+                    cli.sp1_range_cycle_limit,
+                    cli.sp1_cycles_per_gas,
+                ),
+                max_blocks_per_range: cli.sp1_max_blocks_per_range,
+                max_range_splits: cli.sp1_max_range_splits,
+            },
         },
     );
 
@@ -609,6 +654,11 @@ where
         sp1_range_gas_limit = cli.sp1_range_gas_limit,
         sp1_aggregation_cycle_limit = cli.sp1_aggregation_cycle_limit,
         sp1_aggregation_gas_limit = cli.sp1_aggregation_gas_limit,
+        sp1_cycles_per_gas = cli.sp1_cycles_per_gas,
+        sp1_target_gas_per_range =
+            target_gas_per_range(cli.sp1_range_cycle_limit, cli.sp1_cycles_per_gas),
+        sp1_max_blocks_per_range = cli.sp1_max_blocks_per_range,
+        sp1_max_range_splits = cli.sp1_max_range_splits,
         sp1_max_price_per_pgu = ?cli.sp1_max_price_per_pgu,
         sp1_auction_timeout_seconds = ?cli.sp1_auction_timeout_seconds,
         sp1_proof_timeout_seconds = ?cli.sp1_proof_timeout_seconds,
@@ -674,6 +724,36 @@ mod tests {
         assert_eq!(cli.sp1_max_price_per_pgu, None);
         assert_eq!(cli.sp1_auction_timeout_seconds, None);
         assert_eq!(cli.sp1_proof_timeout_seconds, None);
+    }
+
+    #[test]
+    fn uses_conservative_range_plan_defaults() {
+        let cli = WorkerArgs::parse_from(base_args());
+
+        assert_eq!(cli.sp1_cycles_per_gas, DEFAULT_SP1_CYCLES_PER_GAS);
+        assert_eq!(
+            cli.sp1_max_blocks_per_range,
+            DEFAULT_SP1_MAX_BLOCKS_PER_RANGE
+        );
+        assert_eq!(cli.sp1_max_range_splits, DEFAULT_SP1_MAX_RANGE_SPLITS);
+        // The derived gas target tracks the configured cycle ceiling.
+        assert_eq!(
+            target_gas_per_range(cli.sp1_range_cycle_limit, cli.sp1_cycles_per_gas),
+            30_000_000_000
+        );
+    }
+
+    #[test]
+    fn rejects_zero_range_plan_limits() {
+        for argument in ["--sp1-cycles-per-gas", "--sp1-max-blocks-per-range"] {
+            let mut args = base_args();
+            args.extend([argument, "0"]);
+
+            let error = WorkerArgs::try_parse_from(args)
+                .expect_err("zero range plan limits should be rejected");
+
+            assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+        }
     }
 
     #[test]

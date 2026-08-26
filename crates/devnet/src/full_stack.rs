@@ -3235,6 +3235,7 @@ where
             allow_unfinalized: false,
             aggregation_vkey: DEVNET_AGGREGATION_VKEY,
             range_vkey_commitment: DEVNET_RANGE_VKEY_COMMITMENT,
+            range_plan: Default::default(),
         },
     );
 
