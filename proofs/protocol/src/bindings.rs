@@ -64,7 +64,6 @@ sol! {
         function disputeGameFactory() external view returns (address);
         function anchorStateRegistry() external view returns (address);
         function bondVault() external view returns (address);
-        function weth() external view returns (address);
 
         // Proposal context.
         function rootId() external view returns (bytes32);
@@ -108,14 +107,12 @@ sol! {
         function submitProofLane(bytes calldata proof) external returns (uint8 proposalStatus);
         function resolve() external returns (uint8 status);
         function closeGame() external;
-        function claimCredit(address recipient) external;
 
         // Bond settlement.
         function bondDistributionMode() external view returns (uint8);
         function totalBonds() external view returns (uint256);
         function normalModeCredit(address recipient) external view returns (uint256);
         function refundModeCredit(address recipient) external view returns (uint256);
-        function credit(address recipient) external view returns (uint256);
     }
 
     /// Singleton WLD vault that locks and settles WIP-1006 proposal and challenge bonds.
@@ -123,11 +120,13 @@ sol! {
     interface IWLDStakingVault {
         event ProposerBondLocked(address indexed game, address indexed proposer, uint256 amount);
         function disputeGameFactory() external view returns (address);
+        function wld() external view returns (address);
         function availableBalance(address account) external view returns (uint256 amount);
         function gameBonds(address game)
             external
             view
             returns (uint256 proposerBond, uint256 challengerBond, bool settled);
+        function deposit(uint256 amount) external;
     }
 
     /// Stock OP Stack `AnchorStateRegistry`.
@@ -147,13 +146,4 @@ sol! {
         function paused() external view returns (bool);
     }
 
-    /// Legacy E2E-only binding retained until the stacked devnet migration removes WETH flows.
-    #[sol(rpc)]
-    interface IDelayedWETH {
-        function delay() external view returns (uint256);
-        function withdrawals(address owner, address recipient)
-            external
-            view
-            returns (uint256 amount, uint256 timestamp);
-    }
 }

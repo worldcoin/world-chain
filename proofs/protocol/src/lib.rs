@@ -14,9 +14,7 @@ mod proof_game;
 mod types;
 
 // re-exports
-pub use bindings::{
-    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, IWLDStakingVault,
-};
+pub use bindings::{IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, IWLDStakingVault};
 pub use consensus_provider::{
     ConsensusError, ConsensusProvider, OptimismConsensusClient, VerifyingConsensusProvider,
 };

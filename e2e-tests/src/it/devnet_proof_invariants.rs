@@ -37,7 +37,7 @@ async fn unproven_proposal_times_out_to_challenger_wins() -> eyre::Result<()> {
     let l1_rpc = l1_rpc_url(&devnet)?;
     let factory_address = l1_contract(devnet.dispute_game_factory(), "DisputeGameFactory")?;
 
-    let (_, provider) = funded_throwaway_provider(l1_rpc).await?;
+    let (_, provider) = funded_throwaway_provider(l1_rpc, factory_address).await?;
     let contracts = proof_system_client(provider.clone(), factory_address).await?;
 
     let anchor = contracts.lineage_anchor().await?;
@@ -98,7 +98,7 @@ async fn invalid_parent_cascades_to_challenger_wins() -> eyre::Result<()> {
     let l1_rpc = l1_rpc_url(&devnet)?;
     let factory_address = l1_contract(devnet.dispute_game_factory(), "DisputeGameFactory")?;
 
-    let (_, provider) = funded_throwaway_provider(l1_rpc).await?;
+    let (_, provider) = funded_throwaway_provider(l1_rpc, factory_address).await?;
     let contracts = proof_system_client(provider.clone(), factory_address).await?;
 
     let anchor = contracts.lineage_anchor().await?;
@@ -183,19 +183,13 @@ async fn valid_proposal_survives_adversarial_challenge() -> eyre::Result<()> {
     let factory_address = l1_contract(devnet.dispute_game_factory(), "DisputeGameFactory")?;
 
     // An adversary griefs the honest proposer's perfectly valid claim.
-    let (adversary_address, adversary_provider) = funded_throwaway_provider(l1_rpc).await?;
+    let (adversary_address, adversary_provider) =
+        funded_throwaway_provider(l1_rpc, factory_address).await?;
     let (_, honest_game_address, _) =
         wait_for_multi_proof_game(adversary_provider.clone(), factory_address, 0).await?;
     let game = game_at(honest_game_address, adversary_provider.clone());
 
-    let challenger_bond = game.challengerBond().call().await?;
-    let receipt = game
-        .challenge()
-        .value(challenger_bond)
-        .send()
-        .await?
-        .get_receipt()
-        .await?;
+    let receipt = game.challenge().send().await?.get_receipt().await?;
     ensure!(
         receipt.status(),
         "adversarial challenge() transaction reverted"

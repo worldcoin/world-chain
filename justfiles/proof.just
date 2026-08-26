@@ -173,7 +173,7 @@ proof-deploy-mocks env="alphanet":
     else
         export PROOF_MOCKS_DEPLOYMENT_OUT="deployments/{{env}}-proof-mocks.dryrun.json"
     fi
-    echo "WARNING: deploying MOCK proof verifiers (accept any proof) for '{{env}}'." >&2
+    echo "WARNING: deploying MOCK proof-system dependencies (accept-any verifiers and mintable WLD) for '{{env}}'." >&2
     echo "Deploying proof mocks (deployment → $PROOF_MOCKS_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofMocks.s.sol:DeployProofMocks \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow

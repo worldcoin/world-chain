@@ -10,9 +10,9 @@ use world_chain_proof_protocol::MULTI_PROOF_GAME_TYPE;
 
 use crate::it::utils::devnet::{
     GAME_DEFENDER_WINS, advance_to_timestamp, anchor_at, game_at, l1_contract, l1_rpc_url,
-    latest_timestamp, signing_provider, try_build_ha_devnet, wait_for_anchor_at_or_beyond,
-    wait_for_bond_unlock, wait_for_bond_withdrawal, wait_for_game_finality,
-    wait_for_multi_proof_game, wait_for_proof_lane, wait_for_status, weth_at,
+    latest_timestamp, signing_provider, try_build_ha_devnet, vault_at,
+    wait_for_anchor_at_or_beyond, wait_for_game_finality, wait_for_game_settlement,
+    wait_for_multi_proof_game, wait_for_proof_lane, wait_for_status,
 };
 
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("4200000000000000000000000000000000000016");
@@ -75,7 +75,7 @@ struct InitiatedWithdrawal {
 
 #[ignore = "requires Docker, Foundry, and the full local OP Stack"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<()> {
+async fn op_native_wip_1006_portal_withdrawal_and_bond_settlement() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let Some(devnet) = try_build_ha_devnet("Portal withdrawal E2E").await? else {
@@ -125,6 +125,10 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
         anchor.isGameProper(game_address).call().await?,
         "covering WIP-1006 game is not proper"
     );
+    let proposer = game.gameCreator().call().await?;
+    let vault = vault_at(game.bondVault().call().await?, l1_provider.clone());
+    let available_while_locked = vault.availableBalance(proposer).call().await?;
+    let proposer_bond = game.proposerBond().call().await?;
     wait_for_proof_lane(&game).await?;
 
     let (output_root_proof, withdrawal_proof) =
@@ -195,11 +199,18 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
     );
     wait_for_anchor_at_or_beyond(&anchor, game_l2_block).await?;
 
-    let proposer = game.gameCreator().call().await?;
-    let weth = weth_at(game.weth().call().await?, l1_provider.clone());
-    let unlock_at = wait_for_bond_unlock(&weth, game_address, proposer).await?;
-    advance_to_timestamp(&l1_provider, unlock_at).await?;
-    wait_for_bond_withdrawal(&weth, game_address, proposer).await?;
+    wait_for_game_settlement(&vault, game_address).await?;
+    ensure!(
+        game.normalModeCredit(proposer).call().await? == proposer_bond,
+        "the unchallenged defender win did not return the complete proposer bond"
+    );
+    let expected_available = available_while_locked
+        .checked_add(proposer_bond)
+        .ok_or_eyre("settled proposer balance overflow")?;
+    ensure!(
+        vault.availableBalance(proposer).call().await? >= expected_available,
+        "settlement did not restore the proposer bond to reusable vault balance"
+    );
 
     Ok(())
 }

@@ -112,7 +112,8 @@ impl WorldContractsDeploymentConfig {
         if self.proof_system {
             contracts.extend([
                 "MultiProofGame(WIP_1006)",
-                "DelayedWETH(WIP_1006)",
+                "WLDStakingVault(WIP_1006)",
+                "MockWLD(devnet)",
                 "MockRootIdVerifier(VALIDITY_PROOF)",
                 "MockRootIdVerifier(TEE_ATTESTATION)",
                 "MockRootIdVerifier(SECURITY_COUNCIL)",
