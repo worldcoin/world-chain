@@ -760,8 +760,8 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(game.normalModeCredit(laneRewardRecipient(1)), 0);
     }
 
-    /// @dev A proposer who proves every lane themselves collects the whole forfeited bond.
-    function test_LaneReward_ProposerProvingEveryLaneTakesAll() public {
+    /// @dev A proposer who proves every lane is settled once despite occupying multiple payout roles.
+    function test_Settlement_DeduplicatesProposerAcrossProofLanes() public {
         MultiProofGame game = _proposeAtAnchor();
         bytes memory proof = abi.encodePacked(game.rootId());
 
