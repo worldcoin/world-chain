@@ -1,10 +1,8 @@
 use crate::{
     ChallengerError,
-    types::{
-        ChallengeSubmission, ClaimSubmission, GameMetadata, PendingWithdrawal, ResolveSubmission,
-    },
+    types::{ChallengeSubmission, CloseGameSubmission, GameMetadata, ResolveSubmission},
 };
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use async_trait::async_trait;
 use world_chain_proof_protocol::{ProposalStatus, ResolutionStatus};
 
@@ -52,16 +50,9 @@ pub trait BondManagerClient: ResolutionManagerClient {
     /// Returns the challenger recorded by the provided game.
     async fn game_challenger(&self, game: Address) -> Result<Address, ChallengerError>;
     /// Returns whether the registry's finality airgap has elapsed for the provided game.
-    ///
-    /// `claimCredit` calls `closeGame`, which reverts until this holds.
     async fn is_game_finalized(&self, game: Address) -> Result<bool, ChallengerError>;
-    /// Returns the credit the managed challenger can unlock from the provided game.
-    async fn credit(&self, game: Address) -> Result<U256, ChallengerError>;
-    /// Returns the managed challenger's pending `DelayedWETH` withdrawal for the game.
-    async fn pending_withdrawal(&self, game: Address)
-    -> Result<PendingWithdrawal, ChallengerError>;
-    /// Returns the latest L1 block timestamp used by `DelayedWETH`.
-    async fn latest_l1_timestamp(&self) -> Result<u64, ChallengerError>;
-    /// Advances the managed challenger's two-phase bond claim on the provided game.
-    async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ChallengerError>;
+    /// Returns whether the game's complete bond pot has already been settled.
+    async fn is_game_settled(&self, game: Address) -> Result<bool, ChallengerError>;
+    /// Settles the game's complete bond pot into reusable vault balances.
+    async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ChallengerError>;
 }

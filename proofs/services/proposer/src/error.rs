@@ -1,4 +1,4 @@
-use alloy_primitives::TxHash;
+use alloy_primitives::{Address, TxHash, U256};
 use alloy_provider::{MulticallError, PendingTransactionError, transport::RpcError};
 use alloy_transport::TransportErrorKind;
 use thiserror::Error;
@@ -11,6 +11,14 @@ pub enum ProposerError {
     /// Invalid proposer configuration.
     #[error("invalid proposer config: {0}")]
     InvalidConfig(&'static str),
+    #[error("WIP-1006 factory init bond must be zero, got {0}")]
+    NonZeroFactoryBond(U256),
+    #[error("vault {vault} is wired to factory {actual}, expected {expected}")]
+    VaultFactoryMismatch {
+        vault: Address,
+        expected: Address,
+        actual: Address,
+    },
     /// Contract call or transaction failure.
     #[error(transparent)]
     Contract(#[from] alloy_contract::Error),
@@ -29,10 +37,10 @@ pub enum ProposerError {
     Revert(TxHash),
     #[error("Overflow error.")]
     Overflow,
-    #[error("Latest L1 block is unavailable.")]
-    UnavailableLatestL1Block,
     #[error("DisputeGameCreated event missing from proposal transaction {0}")]
     MissingProposalEvent(TxHash),
+    #[error("ProposerBondLocked event missing from proposal transaction {0}")]
+    MissingProposerBondLockedEvent(TxHash),
     #[error(transparent)]
     Permit(#[from] AcquireError),
 }

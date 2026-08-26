@@ -2901,7 +2901,9 @@ async fn start_world_chain_challenger(
         factory_address,
         DEFAULT_L1_TX_CONFIRMATIONS,
         Duration::from_secs(world_chain_proof_protocol::DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS),
-    );
+    )
+    .await
+    .wrap_err("failed to bind the World Chain proof system")?;
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let config = ChallengerConfig {
         poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,

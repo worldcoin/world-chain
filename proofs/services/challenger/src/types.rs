@@ -18,7 +18,7 @@ pub struct GameMetadata {
 pub struct ChallengeSubmission {
     /// Transaction hash for the challenge submission.
     pub tx_hash: TxHash,
-    /// Bond posted with the challenge, read from the game itself.
+    /// WLD bond locked by the challenge, read from the game itself.
     pub bond: U256,
 }
 
@@ -29,27 +29,11 @@ pub struct ResolveSubmission {
     pub tx_hash: TxHash,
 }
 
-/// Result of a `claimCredit` transaction.
-///
-/// Bond payout is two-phase: the first call unlocks the credit in `DelayedWETH`, the second
-/// (after the WETH delay) withdraws and transfers it.
+/// Result of a closeGame transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ClaimSubmission {
-    /// Transaction hash for the claim.
+pub struct CloseGameSubmission {
+    /// Transaction hash for the closeGame submission.
     pub tx_hash: TxHash,
-    /// Amount moved by this phase.
-    pub amount: U256,
-    /// Whether this call finalized the withdrawal and transferred funds.
-    pub withdrawn: bool,
-}
-
-/// A pending `DelayedWETH` withdrawal opened by the first `claimCredit` call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct PendingWithdrawal {
-    /// Amount unlocked in `DelayedWETH` and awaiting the withdrawal delay.
-    pub amount: U256,
-    /// Unix timestamp at which the unlocked amount becomes withdrawable.
-    pub unlock_at: u64,
 }
 
 /// Challenger-owned games shared by scanning, resolution, and bond-management loops.

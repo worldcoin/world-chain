@@ -6,13 +6,16 @@ use std::{
 };
 
 use alloy_json_rpc::{RequestPacket, ResponsePacket};
-use alloy_primitives::{Address, utils::format_ether};
+use alloy_primitives::{
+    Address,
+    utils::{format_ether, format_units},
+};
 use alloy_provider::Provider;
 use alloy_rpc_client::{ClientBuilder, RpcClient};
 use alloy_transport::{BoxFuture, TransportError};
 use telemetry_batteries::reexports::metrics;
 use tower::{Layer, Service};
-use tracing::warn;
+use tracing::{info, warn};
 use url::Url;
 
 /// Ethereum L1 execution RPC target label.
@@ -28,10 +31,12 @@ pub const METRICS_L2_FINALIZED_BLOCK_NUMBER: &str = "l2.finalized_block_number";
 pub const METRICS_RPC_CLIENT_REQUESTS: &str = "rpc.client.requests";
 /// Confirmed challenge transactions.
 pub const METRICS_CHALLENGES_SUBMITTED: &str = "challenges.submitted";
-/// ETH bonded by proposer and challenger transactions.
-pub const METRICS_BONDS_POSTED_ETH: &str = "bonds.posted_eth";
-/// ETH transferred back to proposer and challenger wallets after bond settlement.
-pub const METRICS_BONDS_WITHDRAWN_ETH: &str = "bonds.withdrawn_eth";
+/// WLD locked by proposer and challenger transactions.
+pub const METRICS_BONDS_LOCKED_WLD: &str = "bonds.locked_wld";
+/// WLD immediately reusable by a proof-system participant.
+pub const METRICS_VAULT_AVAILABLE_BALANCE_WLD: &str = "vault.available_balance_wld";
+/// Games processed by a bond settlement manager.
+pub const METRICS_GAMES_CLOSED: &str = "games.closed";
 /// Confirmed on-chain proof-lane submissions.
 pub const METRICS_PROOF_LANES_SUBMITTED: &str = "proof_lanes.submitted";
 /// Newly created durable proof requests.
@@ -76,14 +81,19 @@ pub fn describe_metrics() {
         "Number of challenge transactions successfully confirmed on L1."
     );
     metrics::describe_histogram!(
-        METRICS_BONDS_POSTED_ETH,
+        METRICS_BONDS_LOCKED_WLD,
         metrics::Unit::Count,
-        "ETH bonded by successfully confirmed proposer and challenger transactions."
+        "WLD locked by successfully confirmed proposer and challenger transactions."
     );
-    metrics::describe_histogram!(
-        METRICS_BONDS_WITHDRAWN_ETH,
+    metrics::describe_gauge!(
+        METRICS_VAULT_AVAILABLE_BALANCE_WLD,
         metrics::Unit::Count,
-        "ETH transferred after successfully confirmed proposer and challenger bond withdrawals."
+        "WLD immediately reusable by the participant in the proof-system staking vault."
+    );
+    metrics::describe_counter!(
+        METRICS_GAMES_CLOSED,
+        metrics::Unit::Count,
+        "Games submitted for settlement or observed as already settled."
     );
     metrics::describe_counter!(
         METRICS_PROOF_LANES_SUBMITTED,
@@ -178,20 +188,47 @@ pub fn increment_challenges_submitted() {
     metrics::counter!(METRICS_CHALLENGES_SUBMITTED).increment(1);
 }
 
-/// Records ETH posted by a successfully confirmed bond transaction.
-pub fn record_bond_posted(role: &'static str, amount: alloy_primitives::U256) {
-    record_bond_amount(METRICS_BONDS_POSTED_ETH, role, amount);
+/// Records WLD locked by a successfully confirmed bond transaction.
+pub fn record_bond_locked(role: &'static str, amount: alloy_primitives::U256) {
+    match format_units(amount, 18) {
+        Ok(formatted) => match formatted.parse::<f64>() {
+            Ok(amount_wld) => {
+                metrics::histogram!(METRICS_BONDS_LOCKED_WLD, "role" => role).record(amount_wld);
+            }
+            Err(error) => warn!(%error, %role, ?amount, "failed to convert bond amount to WLD"),
+        },
+        Err(error) => warn!(%error, %role, ?amount, "failed to format bond amount as WLD"),
+    }
 }
 
-/// Records ETH transferred by a successfully confirmed bond withdrawal.
-pub fn record_bond_withdrawn(role: &'static str, amount: alloy_primitives::U256) {
-    record_bond_amount(METRICS_BONDS_WITHDRAWN_ETH, role, amount);
+/// Records a game handled by a bond settlement manager.
+pub fn increment_games_closed(role: &'static str, result: &'static str) {
+    metrics::counter!(METRICS_GAMES_CLOSED, "role" => role, "result" => result).increment(1);
 }
 
-fn record_bond_amount(metric: &'static str, role: &'static str, amount: alloy_primitives::U256) {
-    match format_ether(amount).parse::<f64>() {
-        Ok(amount_eth) => metrics::histogram!(metric, "role" => role).record(amount_eth),
-        Err(error) => warn!(%error, %role, ?amount, "failed to convert bond amount to ETH"),
+/// Records and logs an account's immediately reusable WLD vault balance.
+pub fn record_vault_balance(
+    vault_address: Address,
+    account: Address,
+    role: &'static str,
+    balance: alloy_primitives::U256,
+) {
+    let gauge = metrics::gauge!(
+        METRICS_VAULT_AVAILABLE_BALANCE_WLD,
+        "role" => role,
+        "address" => account.to_string(),
+    );
+    match format_units(balance, 18) {
+        Ok(formatted) => match formatted.parse::<f64>() {
+            Ok(balance_wld) => {
+                gauge.set(balance_wld);
+                info!(%role, %account, %vault_address, %balance, balance_wld, "refreshed available WLD vault balance");
+            }
+            Err(error) => {
+                warn!(%account, %error, ?balance, "failed to convert vault balance to WLD")
+            }
+        },
+        Err(error) => warn!(%account, %error, ?balance, "failed to format vault balance as WLD"),
     }
 }
 

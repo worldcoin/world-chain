@@ -23,8 +23,8 @@ pub use error::ProposerError;
 pub use proposer::WorldChainProposer;
 pub use traits::{BondManagerClient, ProposerClient};
 pub use types::{
-    ClaimSubmission, CloseGameSubmission, NextProposalAction, PendingWithdrawal, Proposal,
-    ProposalSubmission, ProposerScan, ResolveSubmission,
+    CloseGameSubmission, NextProposalAction, Proposal, ProposalSubmission, ProposerScan,
+    ResolveSubmission,
 };
 
 #[cfg(test)]

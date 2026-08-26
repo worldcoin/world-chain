@@ -48,7 +48,7 @@ claim is valid according to the registry, allowing it to skip a newer game still
 The automated services assume proof-timeout retries are exceptional. The proposer creates the next
 attempt and the defender follows that replacement. Games descending from the abandoned attempt
 become resolvable as `INVALID_PARENT`; the bond manager keeps proposer-owned games tracked, resolves
-those descendants as their parents settle, and claims the refunded bonds. Retry creation remains
+those descendants as their parents settle, and closes them to release their bonds. Retry creation remains
 logged at warn level for operator visibility.
 
 ### `root_claim`
@@ -61,11 +61,11 @@ logged at warn level for operator visibility.
 
 ## Bond settlement
 
-Bonds are custodied in `DelayedWETH` and paid out in two phases. The first `claimCredit(recipient)`
-call unlocks the credit; the second, after the WETH delay, withdraws and transfers it. Both are
-gated on `AnchorStateRegistry.isGameFinalized`, since `claimCredit` calls `closeGame`, which reverts
-until the registry's finality airgap has elapsed. The bond manager keeps every discovered
-proposer-owned game tracked until it is resolved and its pending withdrawal is drained. For games
+Bonds are locked from the proposer's available balance in the singleton WLD staking vault.
+After a game resolves and passes the registry's finality airgap, its permissionless `closeGame()`
+call settles the complete bond pot into immediately reusable vault balances. The service never
+requests an external WLD withdrawal. The bond manager keeps every discovered proposer-owned game
+tracked until it is resolved and settled. For games
 whose embedded proposal domain differs from the currently registered domain, it also submits any
 available positive or negative resolution because those games are no longer visible to the selected
 lineage proposer. Same-domain outcomes remain with the proposer to avoid racing retry creation.
