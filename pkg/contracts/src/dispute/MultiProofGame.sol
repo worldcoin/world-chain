@@ -681,28 +681,24 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         emit GameClosed(bondDistributionMode);
     }
 
-    function _settlementCredits() internal view returns (IWLDStakingVault.Payout[] memory payouts) {
+    function _settlementCandidates() internal view returns (address[] memory candidates) {
         // Possible recipients are the proposer, challenger, protocol, and one recipient per proof lane.
-        // Candidates with no credit for the selected distribution mode are filtered below.
-        address[] memory candidates = new address[](3 + LibProof.PROOF_LANE_COUNT);
-        uint256 candidateCount;
-        candidates[candidateCount++] = bondProposer;
-        if (claimData.challenger != address(0)) candidates[candidateCount++] = claimData.challenger;
-
-        if (bondDistributionMode == BondDistributionMode.NORMAL) {
-            candidates[candidateCount++] = protocolFeeRecipient;
-            for (uint8 laneId; laneId < LibProof.PROOF_LANE_COUNT; laneId++) {
-                if (claimData.proofBitmap.has(ProofLane(laneId))) {
-                    candidates[candidateCount++] = laneRecipient[laneId];
-                }
-            }
+        candidates = new address[](3 + LibProof.PROOF_LANE_COUNT);
+        candidates[0] = bondProposer;
+        candidates[1] = claimData.challenger;
+        candidates[2] = protocolFeeRecipient;
+        for (uint8 laneId; laneId < LibProof.PROOF_LANE_COUNT; laneId++) {
+            candidates[3 + laneId] = laneRecipient[laneId];
         }
+    }
 
-        payouts = new IWLDStakingVault.Payout[](candidateCount);
+    function _settlementCredits() internal view returns (IWLDStakingVault.Payout[] memory payouts) {
+        address[] memory candidates = _settlementCandidates();
+        payouts = new IWLDStakingVault.Payout[](candidates.length);
         uint256 payoutCount;
         // Credits are aggregated by address, but the same address may occupy multiple roles.
-        // Emit each candidate once so its complete mapped credit is settled exactly once.
-        for (uint256 i; i < candidateCount; i++) {
+        // Emit each credited candidate once so its complete mapped credit is settled exactly once.
+        for (uint256 i; i < candidates.length; i++) {
             address candidate = candidates[i];
             bool duplicate;
             for (uint256 j; j < payoutCount; j++) {
