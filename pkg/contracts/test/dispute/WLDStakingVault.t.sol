@@ -3,15 +3,36 @@ pragma solidity 0.8.28;
 
 import {OPStackFixtures} from "./OPStackFixtures.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
+import {WLDStakingVault} from "../../src/dispute/WLDStakingVault.sol";
 import {IWLDStakingVault} from "../../src/dispute/interfaces/IWLDStakingVault.sol";
+import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 
-import {Claim, Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
+import {Claim, GameType, Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
+import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
+
+contract UnregisteredGameHarness {
+    function gameData() external pure returns (GameType, Claim, bytes memory) {
+        return (GameTypes.MULTI_PROOF_GAME_TYPE, Claim.wrap(bytes32(uint256(1))), hex"");
+    }
+}
 
 contract WLDStakingVaultAccountingTest is OPStackFixtures {
     function test_ProxyAdminIntrospectionMatchesOPProxy() public view {
         assertEq(address(bondVault.proxyAdmin()), address(proxyAdmin));
         assertEq(bondVault.proxyAdminOwner(), address(this));
+    }
+
+    function test_Initialize_RejectsUnauthorizedCaller() public {
+        WLDStakingVault implementation = new WLDStakingVault(WLD_WITHDRAWAL_DELAY_SECONDS);
+        IWLDStakingVault vault =
+            IWLDStakingVault(deployCode("opstack/out/Proxy.sol/Proxy.json", abi.encode(address(proxyAdmin))));
+        proxyAdmin.upgrade(payable(address(vault)), address(implementation));
+
+        address unauthorized = makeAddr("unauthorized");
+        vm.prank(unauthorized);
+        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.NotProxyAdminOwner.selector, unauthorized));
+        vault.initialize(wld, ISystemConfig(address(systemConfig)), dgf);
     }
 
     function test_DepositAndDelayedWithdrawalKeepExactLiabilities() public {
@@ -157,6 +178,18 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
     }
 
+    function test_BreakGlassHoldAndRecoverRejectUnauthorizedCaller() public {
+        address unauthorized = makeAddr("unauthorized");
+
+        vm.prank(unauthorized);
+        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.NotProxyAdminOwner.selector, unauthorized));
+        bondVault.hold(proposer, WLD_UNIT);
+
+        vm.prank(unauthorized);
+        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.NotProxyAdminOwner.selector, unauthorized));
+        bondVault.recover(WLD_UNIT);
+    }
+
     function test_DirectDonationCreatesSurplusWithoutChangingLiabilities() public {
         wld.mint(address(bondVault), 5 * WLD_UNIT);
 
@@ -198,5 +231,39 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
         assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
+    }
+
+    function test_Settle_RejectsUnregisteredGame() public {
+        UnregisteredGameHarness game = new UnregisteredGameHarness();
+        IWLDStakingVault.Payout[] memory payouts = new IWLDStakingVault.Payout[](0);
+
+        vm.prank(address(game));
+        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.GameNotRegistered.selector, address(game)));
+        bondVault.settle(payouts);
+    }
+
+    function test_Settle_RejectsInvalidPayoutTotal() public {
+        MultiProofGame game = _proposeAtAnchor();
+        IWLDStakingVault.Payout[] memory payouts = new IWLDStakingVault.Payout[](1);
+        payouts[0] = IWLDStakingVault.Payout({recipient: proposer, amount: PROPOSER_BOND - 1});
+
+        vm.prank(address(game));
+        vm.expectRevert(
+            abi.encodeWithSelector(IWLDStakingVault.InvalidPayoutTotal.selector, PROPOSER_BOND, PROPOSER_BOND - 1)
+        );
+        bondVault.settle(payouts);
+    }
+
+    function test_Settle_RejectsSecondSettlement() public {
+        MultiProofGame game = _proposeAtAnchor();
+        IWLDStakingVault.Payout[] memory payouts = new IWLDStakingVault.Payout[](1);
+        payouts[0] = IWLDStakingVault.Payout({recipient: proposer, amount: PROPOSER_BOND});
+
+        vm.prank(address(game));
+        bondVault.settle(payouts);
+
+        vm.prank(address(game));
+        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.GameAlreadySettled.selector, address(game)));
+        bondVault.settle(payouts);
     }
 }
