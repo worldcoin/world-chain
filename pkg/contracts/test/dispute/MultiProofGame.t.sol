@@ -34,8 +34,7 @@ contract MultiProofGameTest is OPStackFixtures {
         MultiProofGame game = _proposeAtAnchor();
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
 
-        assertEq(game.gameCreator(), creationKeeper);
-        assertEq(game.bondProposer(), proposer);
+        assertEq(game.gameCreator(), proposer);
         assertEq(Claim.unwrap(game.rootClaim()), _rootClaimFor(target));
         assertEq(game.l2SequenceNumber(), target);
         assertEq(game.parentRef(), address(asr));
@@ -61,15 +60,13 @@ contract MultiProofGameTest is OPStackFixtures {
         Claim claim = Claim.wrap(_rootClaimFor(target));
         bytes memory shortExtraData = abi.encode(target, address(asr));
 
-        _reserve(proposer, claim, shortExtraData);
-        vm.prank(creationKeeper);
+        vm.prank(proposer);
         vm.expectRevert(BadExtraData.selector);
         dgf.create(WC_GAME_TYPE, claim, shortExtraData);
 
         uint256 malformedParent = uint256(uint160(address(asr))) | (uint256(1) << 160);
         bytes memory extraData = abi.encode(_domainHash(), target, malformedParent, uint256(0));
-        _reserve(proposer, claim, extraData);
-        vm.prank(creationKeeper);
+        vm.prank(proposer);
         vm.expectRevert(BadExtraData.selector);
         dgf.create(WC_GAME_TYPE, claim, extraData);
     }
@@ -80,8 +77,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         Claim claim = Claim.wrap(_rootClaimFor(target));
         bytes memory wrongDomainExtraData = abi.encode(wrongDomain, target, address(asr), uint256(0));
-        _reserve(proposer, claim, wrongDomainExtraData);
-        vm.prank(creationKeeper);
+        vm.prank(proposer);
         vm.expectRevert(
             abi.encodeWithSelector(IMultiProofGame.InvalidDomainHash.selector, gameImpl.domainHash(), wrongDomain)
         );
@@ -92,8 +88,7 @@ contract MultiProofGameTest is OPStackFixtures {
         for (uint256 i = 0; i < wrongTargets.length; i++) {
             Claim wrongClaim = Claim.wrap(_rootClaimFor(wrongTargets[i]));
             bytes memory wrongExtraData = _extraData(wrongTargets[i], type(uint256).max, 0);
-            _reserve(proposer, wrongClaim, wrongExtraData);
-            vm.prank(creationKeeper);
+            vm.prank(proposer);
             vm.expectRevert(
                 abi.encodeWithSelector(IMultiProofGame.InvalidL2BlockNumber.selector, target, wrongTargets[i])
             );
@@ -105,8 +100,7 @@ contract MultiProofGameTest is OPStackFixtures {
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         Claim claim = Claim.wrap(_rootClaimFor(target));
         bytes memory unknownParentExtraData = _extraDataForParent(target, makeAddr("unknown-parent"), 0);
-        _reserve(proposer, claim, unknownParentExtraData);
-        vm.prank(creationKeeper);
+        vm.prank(proposer);
         vm.expectRevert();
         dgf.create(WC_GAME_TYPE, claim, unknownParentExtraData);
 
@@ -117,8 +111,7 @@ contract MultiProofGameTest is OPStackFixtures {
         uint256 childTarget = parent.l2SequenceNumber() + BLOCK_INTERVAL;
         bytes memory childExtraData = _extraData(childTarget, 0, 0);
         Claim childClaim = Claim.wrap(_rootClaimFor(childTarget));
-        _reserve(proposer, childClaim, childExtraData);
-        vm.prank(creationKeeper);
+        vm.prank(proposer);
         vm.expectRevert(InvalidParentGame.selector);
         dgf.create(WC_GAME_TYPE, childClaim, childExtraData);
     }
@@ -132,8 +125,7 @@ contract MultiProofGameTest is OPStackFixtures {
         uint256 target = parent.l2SequenceNumber() + BLOCK_INTERVAL;
         bytes memory previousAnchorParentExtraData = _extraData(target, 0, 0);
         Claim claim = Claim.wrap(_rootClaimFor(target));
-        _reserve(proposer, claim, previousAnchorParentExtraData);
-        vm.prank(creationKeeper);
+        vm.prank(proposer);
         MultiProofGame previousAnchorChild =
             MultiProofGame(address(dgf.create(WC_GAME_TYPE, claim, previousAnchorParentExtraData)));
         assertEq(previousAnchorChild.parentRef(), address(parent));
@@ -151,8 +143,7 @@ contract MultiProofGameTest is OPStackFixtures {
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         Claim claim = Claim.wrap(keccak256("late-bootstrap-root"));
         bytes memory extraData = _extraData(target, type(uint256).max, 0);
-        _reserve(proposer, claim, extraData);
-        vm.prank(creationKeeper);
+        vm.prank(proposer);
         vm.expectRevert(InvalidParentGame.selector);
         dgf.create(WC_GAME_TYPE, claim, extraData);
     }
@@ -194,6 +185,11 @@ contract MultiProofGameTest is OPStackFixtures {
         new MultiProofGame(config);
 
         config = _gameConfig();
+        config.proposerBond = type(uint256).max / gameImpl.CHALLENGER_REWARD_BPS() + 1;
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
         config.aggregationVKey = bytes32(0);
         vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
@@ -214,6 +210,21 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.expectRevert(IMultiProofGame.InconsistentSystemConfiguration.selector);
         new MultiProofGame(config);
         vm.clearMockedCalls();
+    }
+
+    function test_Create_RejectsTimestampBeyondUint64() public {
+        (, uint256 anchorBlock) = asr.getAnchorRoot();
+        uint256 target = anchorBlock + BLOCK_INTERVAL;
+        bytes memory extraData = _extraDataForParent(target, address(asr), 0);
+
+        vm.warp(type(uint64).max);
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMultiProofGame.TimestampOutOfBounds.selector, uint256(type(uint64).max) + uint256(CHALLENGE_PERIOD)
+            )
+        );
+        dgf.create(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
     }
 
     function test_Constructor_AllowsIndependentBondAmounts() public {
@@ -346,14 +357,11 @@ contract MultiProofGameTest is OPStackFixtures {
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         Claim claim = Claim.wrap(_rootClaimFor(target));
         bytes memory extraData = _extraData(target, type(uint256).max, 0);
-        _reserve(proposer, claim, extraData);
-        vm.prank(creationKeeper);
+        vm.prank(proposer);
         vm.expectRevert(GamePaused.selector);
         dgf.create(WC_GAME_TYPE, claim, extraData);
 
         systemConfig.setPaused(false);
-        vm.prank(proposer);
-        bondVault.cancelProposal(claim, extraData);
         MultiProofGame game = _proposeAtAnchor();
         _resolveUnchallenged(game);
         _passAirgap(game);
@@ -572,8 +580,7 @@ contract MultiProofGameTest is OPStackFixtures {
         Claim claim = first.rootClaim();
         uint256 l2BlockNumber = first.l2SequenceNumber();
         bytes memory retryExtraData = _extraData(l2BlockNumber, type(uint256).max, 1);
-        _reserve(proposer, claim, retryExtraData);
-        vm.prank(creationKeeper);
+        vm.prank(proposer);
         vm.expectRevert();
         dgf.create(WC_GAME_TYPE, claim, retryExtraData);
     }
@@ -712,7 +719,7 @@ contract MultiProofGameTest is OPStackFixtures {
     /// @dev A proposer cannot recover a forfeited bond by challenging from a second address.
     function test_SelfChallenge_IsAlwaysLossMaking() public {
         address sybil = makeAddr("proposer-sybil");
-        _depositWLD(sybil, 10 * WLD_UNIT);
+        _fundWLD(sybil, 10 * WLD_UNIT);
 
         // Challenging a proofless proposal still burns part of the proposer's bond.
         MultiProofGame proofless = _proposeAtAnchor();

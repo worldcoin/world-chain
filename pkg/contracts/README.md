@@ -10,11 +10,11 @@ This repository contains smart contracts for World Chain, including PBH (Priorit
 
 ## Proof System Bond Claims
 
-WIP-1006 proposal and challenge bonds use WLD held one-to-one in the upgradeable `WLDStakingVault`. The stock `DisputeGameFactory` remains unchanged and its type-1006 ETH initialization bond is zero. A proposer first reserves WLD for the deterministic factory UUID; the proposer or any keeper may then call the stock factory, and the game records the reserving account as `bondProposer` independently of `gameCreator`.
+WIP-1006 proposal and challenge bonds use WLD held one-to-one in the upgradeable `WLDStakingVault`. Participants deposit WLD once, without leaving a standing allowance. The stock `DisputeGameFactory` remains unchanged and its type-1006 ETH initialization bond is zero. A proposer calls the stock factory directly; during `initialize` the vault authenticates the clone against the factory's deterministic deployment address and locks the bond from `gameCreator`'s available balance.
 
 `MultiProofGame.resolve()` records the outcome and payout credits without moving funds. After ASR finality, `closeGame()` selects normal or refund mode and atomically credits the complete game pot to recipients' reusable vault balances. Each account may later request a WLD withdrawal and transfer it after the vault delay; new requests reset the delay for the full pending amount.
 
-The vault is WIP-1006-only, keeps exact liabilities, supports old registered game implementations after upgrades, and permits stale uncreated reservations to be invalidated and refunded. Its ProxyAdmin owner has DelayedWETH-equivalent break-glass `hold` and `recover` authority; `recover` can intentionally make the vault insolvent and therefore remains a production trust assumption. The DisputeGameFactory owner and vault ProxyAdmin owner must remain the same governance authority; challenge reservation fails closed if they diverge.
+The vault is WIP-1006-only, keeps exact liabilities, and supports old registered game implementations after upgrades. Its ProxyAdmin owner has DelayedWETH-equivalent break-glass `hold` and `recover` authority; `recover` can intentionally make the vault insolvent and therefore remains a production trust assumption. The DisputeGameFactory owner and vault ProxyAdmin owner must remain the same governance authority; new bond locks fail closed if they diverge.
 
 ## OP Stack Withdrawal Boundary
 
