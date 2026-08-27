@@ -406,9 +406,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // Set the game as initialized.
         initialized = true;
 
-        // Pull the proposer bond from the creator's WLD allowance; the vault authenticates this
+        // Lock the proposer bond from the creator's vault balance; the vault authenticates this
         // clone against the factory's deterministic deployment address.
-        bondVault.pullProposerBond();
+        bondVault.lockProposerBond();
         _depositBond(gameCreator(), proposerBond);
 
         // Set the game's starting timestamp.
@@ -464,7 +464,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // at the challenge, so late challenges cannot extend the game.
         claimData.deadline = proofDeadline();
 
-        bondVault.pullChallengerBond();
+        bondVault.lockChallengerBond();
         _depositBond(msg.sender, challengerBond);
 
         emit Challenged(msg.sender, claimData.deadline.raw());

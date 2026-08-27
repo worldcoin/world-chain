@@ -178,15 +178,17 @@ abstract contract OPStackFixtures is Test {
         return keccak256(abi.encode("output-root", l2BlockNumber));
     }
 
-    /// @dev Mints WLD to `account` and approves the vault to pull bonds from it.
+    /// @dev Mints WLD to `account` and deposits it into the vault with no remaining allowance.
     function _fundWLD(address account, uint256 amount) internal {
         wld.mint(account, amount);
         vm.prank(account);
-        wld.approve(address(bondVault), type(uint256).max);
+        wld.approve(address(bondVault), amount);
+        vm.prank(account);
+        bondVault.deposit(amount);
     }
 
-    /// @dev Creates through the stock factory as `proposer`; the vault pulls the bond from
-    ///      the creator's allowance during `initialize`.
+    /// @dev Creates through the stock factory as `proposer`; the vault locks the bond from
+    ///      the creator's available balance during `initialize`.
     function _propose(uint256 parentIndex, bytes32 rootClaim, uint256 l2BlockNumber, uint256 attempt)
         internal
         returns (MultiProofGame)

@@ -25,13 +25,15 @@ interface IWLDStakingVault {
         uint256 amount;
     }
 
-    error ChallengerBondAlreadyPulled(address game);
+    error ChallengerBondAlreadyLocked(address game);
     error ExactTransferRequired(uint256 expected, uint256 actual);
     error GameAlreadySettled(address game);
     error GameBondAlreadyInitialized(address game);
     error GameNotRegistered(address game);
     error InsufficientBalance(address account, uint256 available, uint256 required);
     error InvalidPayoutTotal(uint256 expected, uint256 actual);
+    error InvalidAccount();
+    error InvalidAmount();
     error InvalidVaultConfiguration();
     error InvalidWithdrawal();
     error NotProxyAdminOwner(address caller);
@@ -40,8 +42,9 @@ interface IWLDStakingVault {
     error WithdrawalDelayNotMet(uint256 availableAt);
     error WithdrawalPaused();
 
-    event ProposerBondPulled(address indexed game, address indexed proposer, uint256 amount);
-    event ChallengerBondPulled(address indexed game, address indexed challenger, uint256 amount);
+    event Deposited(address indexed depositor, address indexed account, uint256 amount);
+    event ProposerBondLocked(address indexed game, address indexed proposer, uint256 amount);
+    event ChallengerBondLocked(address indexed game, address indexed challenger, uint256 amount);
     event GameSettled(address indexed game, uint256 amount);
     event WithdrawalRequested(address indexed account, uint256 amount, uint256 availableAt);
     event Withdrawn(address indexed account, uint256 amount);
@@ -66,7 +69,7 @@ interface IWLDStakingVault {
     /// @notice Total WLD owed across available, pending, and active-game balances.
     function totalLiabilities() external view returns (uint256);
 
-    /// @notice Settled WLD credit available to request for withdrawal.
+    /// @notice Deposited or settled WLD available to fund bonds or request for withdrawal.
     function availableBalance(address account) external view returns (uint256);
 
     /// @notice Pending external withdrawal amount and the timestamp of its latest request.
@@ -84,20 +87,26 @@ interface IWLDStakingVault {
     /// @notice Owner of the vault's ProxyAdmin and break-glass custody authority.
     function proxyAdminOwner() external view returns (address);
 
+    /// @notice Deposits WLD into the caller's available balance.
+    function deposit(uint256 amount) external;
+
+    /// @notice Deposits the caller's WLD into another account's available balance.
+    function depositFor(address account, uint256 amount) external;
+
     /// @notice Moves available WLD into a pending withdrawal and resets its full delay.
     function requestWithdrawal(uint256 amount) external;
 
     /// @notice Transfers matured pending WLD to the caller while the system is unpaused.
     function withdraw(uint256 amount) external;
 
-    /// @notice Pulls the calling game's proposer bond from its creator's WLD allowance.
+    /// @notice Locks the calling game's proposer bond from its creator's available balance.
     /// @dev Called during `initialize`, before the factory registers the game, so the caller is
     ///      authenticated as the deterministic clone the factory deploys for its creation data.
-    function pullProposerBond() external;
+    function lockProposerBond() external;
 
-    /// @notice Pulls the calling registered game's single challenger bond from the challenger's
-    ///         WLD allowance.
-    function pullChallengerBond() external;
+    /// @notice Locks the calling registered game's single challenger bond from the challenger's
+    ///         available balance.
+    function lockChallengerBond() external;
 
     /// @notice Credits a registered game's complete finalized pot exactly once.
     function settle(Payout[] calldata payouts) external;

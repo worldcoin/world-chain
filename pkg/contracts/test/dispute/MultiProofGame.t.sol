@@ -321,14 +321,14 @@ contract MultiProofGameTest is OPStackFixtures {
         address keeper = makeAddr("keeper");
         vm.prank(keeper);
         game.closeGame();
-        assertEq(bondVault.availableBalance(proposer), PROPOSER_BOND);
+        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
 
         (Hash anchorRoot, uint256 anchorBlock) = asr.getAnchorRoot();
         assertEq(Hash.unwrap(anchorRoot), Claim.unwrap(game.rootClaim()));
         assertEq(anchorBlock, game.l2SequenceNumber());
         assertEq(uint8(game.bondDistributionMode()), uint8(BondDistributionMode.NORMAL));
 
-        assertEq(wld.balanceOf(proposer), 100 * WLD_UNIT - PROPOSER_BOND);
+        assertEq(wld.balanceOf(proposer), 0);
         assertEq(wld.balanceOf(keeper), 0);
     }
 
@@ -380,7 +380,7 @@ contract MultiProofGameTest is OPStackFixtures {
         game.challenge();
 
         assertEq(game.challenger(), address(0));
-        assertEq(wld.balanceOf(challengerAccount), 100 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(challengerAccount), 100 * WLD_UNIT);
     }
 
     function test_Challenge_DoesNotExtendProofDeadline() public {
@@ -763,7 +763,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         _passAirgap(game);
         game.closeGame();
-        assertEq(bondVault.availableBalance(proposer), PROPOSER_BOND + CHALLENGER_BOND);
+        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT + CHALLENGER_BOND);
     }
 
     /// @dev Each lane recipient is independently credited in the shared vault.

@@ -237,8 +237,7 @@ interface IMultiProofGame is IDisputeGame {
     //                    Challenge and proofs                    //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Disputes a proposal, pulling `challengerBond` WLD from the caller's allowance to
-    ///         the bond vault.
+    /// @notice Disputes a proposal, locking `challengerBond` from the caller's available vault balance.
     function challenge() external returns (ProposalStatus);
 
     /// @notice Submits a compact proof payload. Before a challenge, any accepted lane satisfies

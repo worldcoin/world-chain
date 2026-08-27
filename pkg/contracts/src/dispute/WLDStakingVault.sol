@@ -82,6 +82,16 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     }
 
     /// @inheritdoc IWLDStakingVault
+    function deposit(uint256 amount) external {
+        _depositFor(msg.sender, amount);
+    }
+
+    /// @inheritdoc IWLDStakingVault
+    function depositFor(address account, uint256 amount) external {
+        _depositFor(account, amount);
+    }
+
+    /// @inheritdoc IWLDStakingVault
     function requestWithdrawal(uint256 amount) external {
         if (amount == 0) revert InvalidWithdrawal();
         uint256 available = availableBalance[msg.sender];
@@ -112,7 +122,7 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     }
 
     /// @inheritdoc IWLDStakingVault
-    function pullProposerBond() external {
+    function lockProposerBond() external {
         _assertAlignedOwners();
 
         IMultiProofGame game = IMultiProofGame(msg.sender);
@@ -143,26 +153,26 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         address proposer = game.gameCreator();
         uint256 amount = game.proposerBond();
         if (amount == 0) revert InvalidVaultConfiguration();
-        _pullExact(proposer, amount);
+        _debitAvailable(proposer, amount);
         gameBonds[msg.sender] = GameBond({proposerBond: amount, challengerBond: 0, settled: false});
-        emit ProposerBondPulled(msg.sender, proposer, amount);
+        emit ProposerBondLocked(msg.sender, proposer, amount);
     }
 
     /// @inheritdoc IWLDStakingVault
-    function pullChallengerBond() external {
+    function lockChallengerBond() external {
         _assertAlignedOwners();
 
         IMultiProofGame game = _registeredGame(msg.sender);
         GameBond storage bond = gameBonds[msg.sender];
         if (bond.proposerBond == 0) revert GameNotRegistered(msg.sender);
-        if (bond.challengerBond != 0 || bond.settled) revert ChallengerBondAlreadyPulled(msg.sender);
+        if (bond.challengerBond != 0 || bond.settled) revert ChallengerBondAlreadyLocked(msg.sender);
 
         address challenger = game.challenger();
         uint256 amount = game.challengerBond();
         if (challenger == address(0) || amount == 0) revert InvalidVaultConfiguration();
-        _pullExact(challenger, amount);
+        _debitAvailable(challenger, amount);
         bond.challengerBond = amount;
-        emit ChallengerBondPulled(msg.sender, challenger, amount);
+        emit ChallengerBondLocked(msg.sender, challenger, amount);
     }
 
     /// @inheritdoc IWLDStakingVault
@@ -225,12 +235,18 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         emit Recovered(recipient, recovered);
     }
 
-    function _pullExact(address from, uint256 amount) internal {
+    function _depositFor(address account, uint256 amount) internal {
+        if (account == address(0)) revert InvalidAccount();
+        if (amount == 0) revert InvalidAmount();
+
         uint256 balanceBefore = wld.balanceOf(address(this));
-        wld.safeTransferFrom(from, address(this), amount);
+        wld.safeTransferFrom(msg.sender, address(this), amount);
         uint256 received = wld.balanceOf(address(this)) - balanceBefore;
         if (received != amount) revert ExactTransferRequired(amount, received);
+
+        availableBalance[account] += amount;
         totalLiabilities += amount;
+        emit Deposited(msg.sender, account, amount);
     }
 
     function _registeredGame(address gameAddress) internal view returns (IMultiProofGame game) {
@@ -245,8 +261,8 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         }
     }
 
-    // Bond pulls spend participant allowances on the word of factory-registered game code, so
-    // the factory owner must be the same governance authority that controls this vault.
+    // Bond locking lets factory-selected game code allocate participant balances, so the factory
+    // owner must be the same governance authority that controls this vault.
     function _assertAlignedOwners() internal view {
         address factoryOwner = disputeGameFactory.owner();
         address vaultOwner = proxyAdminOwner();
@@ -256,6 +272,12 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     function _assertProxyAdminOrOwner() internal view {
         IProxyAdmin admin = proxyAdmin();
         if (msg.sender != address(admin) && msg.sender != admin.owner()) revert NotProxyAdminOwner(msg.sender);
+    }
+
+    function _debitAvailable(address account, uint256 amount) internal {
+        uint256 available = availableBalance[account];
+        if (available < amount) revert InsufficientBalance(account, available, amount);
+        availableBalance[account] = available - amount;
     }
 
     function _assertProxyAdminOwner() internal view returns (address owner) {
