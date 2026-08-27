@@ -108,7 +108,7 @@ fn rejected_transaction_does_not_pollute_flashblock_access_list() -> TestResult<
     .to_signed_tx(0);
 
     let (previous_outcome, _, previous_bundle) =
-        execute_serial_with_provider(state_provider.as_ref(), None, &[transaction.clone()])?;
+        execute_serial_with_provider(state_provider.as_ref(), None, std::slice::from_ref(&transaction))?;
     let previous = (previous_outcome, previous_bundle);
 
     let (clean_outcome, clean_bal) =
