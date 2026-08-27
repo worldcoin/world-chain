@@ -9,46 +9,79 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @title IWLDStakingVault
 /// @notice Custodies WLD used by WIP-1006 proposers, challengers, and reward recipients.
 interface IWLDStakingVault {
+    /// @notice The bonds a registered game custodies and whether its pot has been distributed.
+    /// @param proposerBond The proposer bond locked when the game was created; non-zero marks the
+    ///        game as registered.
+    /// @param challengerBond The challenger bond, non-zero once a challenge has been locked.
+    /// @param settled Whether the game's full pot has already been settled.
     struct GameBond {
         uint256 proposerBond;
         uint256 challengerBond;
         bool settled;
     }
 
+    /// @notice An account's pending external withdrawal.
+    /// @param amount The total WLD queued for withdrawal.
+    /// @param timestamp The latest request time; the delay is measured from here, so a new
+    ///        request restarts the wait for the whole pending amount.
     struct WithdrawalRequest {
         uint256 amount;
         uint256 timestamp;
     }
 
+    /// @notice A single credit within a game settlement.
+    /// @param recipient The account whose available balance is credited.
+    /// @param amount The WLD credited to the recipient.
     struct Payout {
         address recipient;
         uint256 amount;
     }
 
-    error ChallengerBondAlreadyLocked(address game);
-    error ExactTransferRequired(uint256 expected, uint256 actual);
-    error GameAlreadySettled(address game);
-    error GameBondAlreadyInitialized(address game);
-    error GameNotRegistered(address game);
-    error InsufficientBalance(address account, uint256 available, uint256 required);
-    error InvalidPayoutTotal(uint256 expected, uint256 actual);
-    error InvalidAccount();
-    error InvalidAmount();
-    error InvalidVaultConfiguration();
-    error InvalidWithdrawal();
-    error NotProxyAdminOwner(address caller);
-    error OwnerMismatch(address disputeGameFactoryOwner, address proxyAdminOwner);
-    error UnexpectedGameAddress(address expected, address actual);
-    error WithdrawalDelayNotMet(uint256 availableAt);
-    error WithdrawalPaused();
-
+    /// @notice Emitted when WLD is deposited into an account's available balance.
+    /// @param depositor The account that supplied the WLD.
+    /// @param account The account credited with the balance.
+    /// @param amount The deposited WLD.
     event Deposited(address indexed depositor, address indexed account, uint256 amount);
+
+    /// @notice Emitted when a game's proposer bond is locked from its creator's balance.
+    /// @param game The game the bond is held against.
+    /// @param proposer The account whose balance backed the bond.
+    /// @param amount The locked proposer bond.
     event ProposerBondLocked(address indexed game, address indexed proposer, uint256 amount);
+
+    /// @notice Emitted when a game's challenger bond is locked from the challenger's balance.
+    /// @param game The game the bond is held against.
+    /// @param challenger The account whose balance backed the bond.
+    /// @param amount The locked challenger bond.
     event ChallengerBondLocked(address indexed game, address indexed challenger, uint256 amount);
+
+    /// @notice Emitted when a game's pot is settled and distributed to payout recipients.
+    /// @param game The settled game.
+    /// @param amount The total pot distributed.
     event GameSettled(address indexed game, uint256 amount);
+
+    /// @notice Emitted when an account moves available WLD into a pending withdrawal.
+    /// @param account The requesting account.
+    /// @param amount The total pending withdrawal after the request.
+    /// @param availableAt The timestamp at which the pending amount becomes claimable.
     event WithdrawalRequested(address indexed account, uint256 amount, uint256 availableAt);
+
+    /// @notice Emitted when an account claims a matured withdrawal.
+    /// @param account The withdrawing account.
+    /// @param amount The WLD transferred out.
     event Withdrawn(address indexed account, uint256 amount);
+
+    /// @notice Emitted when an account's balances are seized to the ProxyAdmin owner via the
+    ///         break-glass `hold` path.
+    /// @param account The account whose balances were seized.
+    /// @param recipient The ProxyAdmin owner credited with the seized balances.
+    /// @param amount The seized WLD.
     event AccountHeld(address indexed account, address indexed recipient, uint256 amount);
+
+    /// @notice Emitted when backing WLD is recovered to the ProxyAdmin owner without reducing
+    ///         recorded liabilities.
+    /// @param recipient The ProxyAdmin owner the WLD was transferred to.
+    /// @param amount The recovered WLD.
     event Recovered(address indexed recipient, uint256 amount);
 
     /// @notice Initializes the proxy with its fixed external dependencies.

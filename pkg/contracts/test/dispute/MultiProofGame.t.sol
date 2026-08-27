@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {OPStackFixtures} from "./OPStackFixtures.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
-import {IWLDStakingVault} from "../../src/dispute/interfaces/IWLDStakingVault.sol";
+import {OwnerMismatch} from "../../src/dispute/lib/Errors.sol";
 import {LibProof, InvalidationReason, ProofLane, TransitionPublicValues} from "../../src/dispute/lib/LibProof.sol";
 
 import {
@@ -396,7 +396,7 @@ contract MultiProofGameTest is OPStackFixtures {
         dgf.transferOwnership(newFactoryOwner);
 
         vm.prank(challengerAccount);
-        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.OwnerMismatch.selector, newFactoryOwner, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(OwnerMismatch.selector, newFactoryOwner, address(this)));
         game.challenge();
 
         assertEq(game.challenger(), address(0));
