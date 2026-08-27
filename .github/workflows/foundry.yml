@@ -45,8 +45,6 @@ jobs:
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1
-        with:
-          version: v1.8.0
 
       - name: Show Forge version
         run: forge --version
@@ -64,5 +62,5 @@ jobs:
       - name: Run Forge tests
         run: forge test
         env:
-          WORLDCHAIN_PROVIDER: "https://worldchain-mainnet.gateway.tenderly.co"
-          ETHEREUM_PROVIDER: "https://ethereum-rpc.publicnode.com"
+          WORLDCHAIN_PROVIDER: "${{ secrets.WORLDCHAIN_PROVIDER }}"
+          ETHEREUM_PROVIDER: "${{ secrets.ETHEREUM_PROVIDER }}"
