@@ -280,7 +280,8 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
                 // We now generate the signal hash from the sender, nonce, and calldata
                 uint256 signalHash = abi.encodePacked(
                         sender, opsPerAggregator[i].userOps[j].nonce, opsPerAggregator[i].userOps[j].callData
-                    ).hashToField();
+                    )
+                    .hashToField();
 
                 _verifyPbh(signalHash, pbhPayloads[j]);
                 bytes32 userOpHash = getUserOpHash(opsPerAggregator[i].userOps[j]);
