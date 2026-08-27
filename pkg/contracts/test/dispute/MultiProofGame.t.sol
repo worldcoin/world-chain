@@ -185,6 +185,11 @@ contract MultiProofGameTest is OPStackFixtures {
         new MultiProofGame(config);
 
         config = _gameConfig();
+        config.proposerBond = type(uint256).max / gameImpl.CHALLENGER_REWARD_BPS() + 1;
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
         config.aggregationVKey = bytes32(0);
         vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
@@ -205,6 +210,21 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.expectRevert(IMultiProofGame.InconsistentSystemConfiguration.selector);
         new MultiProofGame(config);
         vm.clearMockedCalls();
+    }
+
+    function test_Create_RejectsTimestampBeyondUint64() public {
+        (, uint256 anchorBlock) = asr.getAnchorRoot();
+        uint256 target = anchorBlock + BLOCK_INTERVAL;
+        bytes memory extraData = _extraDataForParent(target, address(asr), 0);
+
+        vm.warp(type(uint64).max);
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMultiProofGame.TimestampOutOfBounds.selector, uint256(type(uint64).max) + uint256(CHALLENGE_PERIOD)
+            )
+        );
+        dgf.create(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
     }
 
     function test_Constructor_AllowsIndependentBondAmounts() public {

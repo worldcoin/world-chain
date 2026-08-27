@@ -79,6 +79,7 @@ interface IMultiProofGame is IDisputeGame {
     error InvalidProof(ProofLane lane, bytes32 rootId);
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
     error InconsistentSystemConfiguration();
+    error TimestampOutOfBounds(uint256 value);
 
     /// @notice Thrown when a lane that already counts toward the threshold is resubmitted.
     error DuplicateProofLane(ProofLane lane, bytes32 rootId, Bitmap proofBitmap);
