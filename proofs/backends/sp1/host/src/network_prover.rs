@@ -248,9 +248,12 @@ impl NetworkSuccinctProver {
 
         let mut proof_request = self.client.prove(&self.agg_pk, stdin).mode(self.agg_mode);
         if let Some(limits) = self.limits {
+            // Aggregation cost grows roughly linearly with the number of range proofs it
+            // verifies, so the configured single-range limits scale with the range count.
+            let ranges = request.range_proofs.len().max(1) as u64;
             proof_request = proof_request
-                .cycle_limit(limits.aggregation.cycle_limit)
-                .gas_limit(limits.aggregation.gas_limit)
+                .cycle_limit(limits.aggregation.cycle_limit.saturating_mul(ranges))
+                .gas_limit(limits.aggregation.gas_limit.saturating_mul(ranges))
                 .skip_simulation(true);
         }
         if let Some(max_price_per_pgu) = self.max_price_per_pgu {

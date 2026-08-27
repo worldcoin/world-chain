@@ -46,6 +46,8 @@ pub const METRICS_PROOF_JOB_DURATION_SECONDS: &str = "proof_job.duration_seconds
 pub const METRICS_ENCLAVE_KEY_REGISTERED: &str = "enclave_key.registered";
 /// Enclave key registration attempts, by outcome.
 pub const METRICS_ENCLAVE_REGISTRATION_ATTEMPTS: &str = "enclave_key.registration_attempts";
+/// SP1 range proofs bisected after the network reported them unexecutable.
+pub const METRICS_SP1_RANGE_BISECTIONS: &str = "sp1_range_bisections";
 /// Current SP1 Network credit balance in human-readable PROVE.
 pub const METRICS_SP1_NETWORK_PROVE_BALANCE: &str = "sp1_network_prove_balance";
 /// Whether the SP1 Network credit balance meets the worker's startup threshold.
@@ -130,6 +132,16 @@ pub fn describe_metrics() {
         metrics::Unit::Count,
         "1 when SP1 Network credits meet the worker threshold, 0 otherwise."
     );
+    metrics::describe_counter!(
+        METRICS_SP1_RANGE_BISECTIONS,
+        metrics::Unit::Count,
+        "SP1 range proofs bisected after the network reported them unexecutable."
+    );
+}
+
+/// Records one bisection of an unexecutable SP1 range proof.
+pub fn increment_sp1_range_bisections() {
+    metrics::counter!(METRICS_SP1_RANGE_BISECTIONS).increment(1);
 }
 
 /// Updates the SP1 Network credit balance and sufficiency gauges.

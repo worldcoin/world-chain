@@ -218,6 +218,7 @@ async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
             allow_unfinalized: false,
             aggregation_vkey: B256::with_last_byte(0xa1),
             range_vkey_commitment: B256::with_last_byte(0xa2),
+            range_plan: Default::default(),
         },
     );
 
