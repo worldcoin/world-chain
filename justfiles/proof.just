@@ -21,6 +21,7 @@
 #   Phase 1   proof-deploy-nitro         – Deploy Nitro attestation contracts
 #   Phase 1b  proof-deploy-mocks         – Deploy proof-lane test doubles (devnet only)
 #   Phase 2   proof-deploy-system        – Deploy proof system implementation and vault
+#   Phase 2b  proof-fund-mock-bonds      – Fund persistent devnet bond accounts (devnet only)
 #   Phase 3a  proof-certmanager-prewarm  – Pre-warm CertManager with CA certs
 #   Phase 3b  proof-approve-pcrs         – Approve a PCR set on the verifier
 #   —         proof-activate-system      – Validate, register, and activate WIP-1006
@@ -243,6 +244,42 @@ proof-deploy-system env="alphanet":
     fi
     echo "Deploying proof system contracts (deployment → $PROOF_SYSTEM_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
+
+# Phase 2b (devnet only) – Mint mock WLD and top up the proposer and challenger vault balances.
+# Uses depositFor so the funding operator never needs either service's signing key. Targets make
+# the operation idempotent and account for WLD already returned by settled games.
+[doc("Phase 2b (devnet only) - Fund proposer and challenger mock-WLD vault balances.")]
+[group('proof')]
+proof-fund-mock-bonds env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    : "${PROPOSER_ADDRESS:?PROPOSER_ADDRESS is required}"
+    : "${CHALLENGER_ADDRESS:?CHALLENGER_ADDRESS is required}"
+    MOCKS_FILE="pkg/contracts/deployments/{{env}}-proof-mocks.json"
+    SYSTEM_FILE="pkg/contracts/deployments/{{env}}-proof-system.json"
+    if [ -z "${WLD_TOKEN:-}" ] && [ -f "$MOCKS_FILE" ]; then
+        WLD_TOKEN=$(jq -r '.wldToken // empty' "$MOCKS_FILE")
+        export WLD_TOKEN
+    fi
+    if [ -z "${WLD_STAKING_VAULT:-}" ] && [ -f "$SYSTEM_FILE" ]; then
+        WLD_STAKING_VAULT=$(jq -r '.wldStakingVault // empty' "$SYSTEM_FILE")
+        export WLD_STAKING_VAULT
+    fi
+    : "${WLD_TOKEN:?WLD_TOKEN is required (or deploy proof mocks first)}"
+    : "${WLD_STAKING_VAULT:?WLD_STAKING_VAULT is required (or deploy the proof system first)}"
+    export PROPOSER_VAULT_TARGET="${PROPOSER_VAULT_TARGET:-100000000000000000000}"
+    export CHALLENGER_VAULT_TARGET="${CHALLENGER_VAULT_TARGET:-100000000000000000000}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    echo "WARNING: minting unrestricted mock WLD for proof-system bond accounts on '{{env}}'." >&2
+    echo "  proposer $PROPOSER_ADDRESS target: $PROPOSER_VAULT_TARGET base units" >&2
+    echo "  challenger $CHALLENGER_ADDRESS target: $CHALLENGER_VAULT_TARGET base units" >&2
+    cd pkg/contracts && forge script scripts/devnet/FundProofBondAccounts.s.sol:FundProofBondAccounts \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Register and activate the WIP-1006 implementation after validating its wiring and current anchor.
