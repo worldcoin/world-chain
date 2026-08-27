@@ -8,9 +8,18 @@ slow-timeout = { period = "120s", terminate-after = 3 }
 [test-groups.devnet-stack]
 max-threads = 1
 
+# Fork-backed RPC tests share one rate-limited archive endpoint in CI. Running them concurrently
+# causes provider-level `-32005 rate limit exceeded` failures before assertions are reached.
+[test-groups.worldchain-rpc-fork]
+max-threads = 1
+
 [[profile.default.overrides]]
 filter = 'package(world-chain-tests)'
 threads-required = 4
+
+[[profile.default.overrides]]
+filter = 'package(world-chain-rpc) & binary(fork_simulate)'
+test-group = "worldchain-rpc-fork"
 
 # The excluded test builds `without_l1()` in-process and needs no Docker.
 [[profile.default.overrides]]
