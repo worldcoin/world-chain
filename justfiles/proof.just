@@ -246,39 +246,32 @@ proof-deploy-system env="alphanet":
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
-# Phase 2b (devnet only) – Mint mock WLD and top up the proposer and challenger vault balances.
+# Phase 2b (devnet only) – Mint mock WLD and top up proof-system bond accounts.
 # Uses depositFor so the funding operator never needs either service's signing key. Targets make
-# the operation idempotent and account for WLD already returned by settled games.
-[doc("Phase 2b (devnet only) - Fund proposer and challenger mock-WLD vault balances.")]
+# the operation idempotent and account for WLD already returned by settled games. Run this after
+# deploying the vault and before starting the proposer or challenger.
+[doc("Phase 2b (devnet only) - Fund mock-WLD vault balances for proof-system bond accounts.")]
 [group('proof')]
 proof-fund-mock-bonds env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
-    : "${PROPOSER_ADDRESS:?PROPOSER_ADDRESS is required}"
-    : "${CHALLENGER_ADDRESS:?CHALLENGER_ADDRESS is required}"
-    MOCKS_FILE="pkg/contracts/deployments/{{env}}-proof-mocks.json"
+    : "${BOND_ACCOUNTS:?BOND_ACCOUNTS is required (comma-separated addresses)}"
     SYSTEM_FILE="pkg/contracts/deployments/{{env}}-proof-system.json"
-    if [ -z "${WLD_TOKEN:-}" ] && [ -f "$MOCKS_FILE" ]; then
-        WLD_TOKEN=$(jq -r '.wldToken // empty' "$MOCKS_FILE")
-        export WLD_TOKEN
-    fi
     if [ -z "${WLD_STAKING_VAULT:-}" ] && [ -f "$SYSTEM_FILE" ]; then
         WLD_STAKING_VAULT=$(jq -r '.wldStakingVault // empty' "$SYSTEM_FILE")
         export WLD_STAKING_VAULT
     fi
-    : "${WLD_TOKEN:?WLD_TOKEN is required (or deploy proof mocks first)}"
     : "${WLD_STAKING_VAULT:?WLD_STAKING_VAULT is required (or deploy the proof system first)}"
-    export PROPOSER_VAULT_TARGET="${PROPOSER_VAULT_TARGET:-100000000000000000000}"
-    export CHALLENGER_VAULT_TARGET="${CHALLENGER_VAULT_TARGET:-100000000000000000000}"
+    export VAULT_BALANCE_TARGET="${VAULT_BALANCE_TARGET:-10000000000000000000000}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
     fi
     echo "WARNING: minting unrestricted mock WLD for proof-system bond accounts on '{{env}}'." >&2
-    echo "  proposer $PROPOSER_ADDRESS target: $PROPOSER_VAULT_TARGET base units" >&2
-    echo "  challenger $CHALLENGER_ADDRESS target: $CHALLENGER_VAULT_TARGET base units" >&2
+    echo "  accounts: $BOND_ACCOUNTS" >&2
+    echo "  available vault balance target: $VAULT_BALANCE_TARGET base units per account" >&2
     cd pkg/contracts && forge script scripts/devnet/FundProofBondAccounts.s.sol:FundProofBondAccounts \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
