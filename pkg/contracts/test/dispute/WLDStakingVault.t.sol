@@ -175,9 +175,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         bytes memory extraData = _extraData(target, type(uint256).max, 0);
 
         vm.prank(unfunded);
-        vm.expectRevert(
-            abi.encodeWithSelector(InsufficientBalance.selector, unfunded, 0, PROPOSER_BOND)
-        );
+        vm.expectRevert(abi.encodeWithSelector(InsufficientBalance.selector, unfunded, 0, PROPOSER_BOND));
         dgf.create(WC_GAME_TYPE, claim, extraData);
     }
 
@@ -263,11 +261,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         (, uint256 resetAt) = bondVault.withdrawals(proposer);
         vm.warp(block.timestamp + 1);
         vm.prank(proposer);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                WithdrawalDelayNotMet.selector, resetAt + WLD_WITHDRAWAL_DELAY_SECONDS
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(WithdrawalDelayNotMet.selector, resetAt + WLD_WITHDRAWAL_DELAY_SECONDS));
         bondVault.withdraw(PROPOSER_BOND / 4);
 
         vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS - 1);
@@ -399,9 +393,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         payouts[0] = IWLDStakingVault.Payout({recipient: proposer, amount: PROPOSER_BOND - 1});
 
         vm.prank(address(game));
-        vm.expectRevert(
-            abi.encodeWithSelector(InvalidPayoutTotal.selector, PROPOSER_BOND, PROPOSER_BOND - 1)
-        );
+        vm.expectRevert(abi.encodeWithSelector(InvalidPayoutTotal.selector, PROPOSER_BOND, PROPOSER_BOND - 1));
         bondVault.settle(payouts);
     }
 
