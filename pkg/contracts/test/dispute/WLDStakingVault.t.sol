@@ -5,6 +5,18 @@ import {OPStackFixtures} from "./OPStackFixtures.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {WLDStakingVault} from "../../src/dispute/WLDStakingVault.sol";
 import {IWLDStakingVault} from "../../src/dispute/interfaces/IWLDStakingVault.sol";
+import {
+    GameAlreadySettled,
+    GameNotRegistered,
+    InsufficientBalance,
+    InvalidAccount,
+    InvalidAmount,
+    InvalidPayoutTotal,
+    NotProxyAdminOwner,
+    OwnerMismatch,
+    WithdrawalDelayNotMet,
+    WithdrawalPaused
+} from "../../src/dispute/lib/Errors.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 
@@ -79,7 +91,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         address unauthorized = makeAddr("unauthorized");
         vm.prank(unauthorized);
-        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.NotProxyAdminOwner.selector, unauthorized));
+        vm.expectRevert(abi.encodeWithSelector(NotProxyAdminOwner.selector, unauthorized));
         vault.initialize(wld, ISystemConfig(address(systemConfig)), dgf);
     }
 
@@ -106,13 +118,13 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
     function test_DepositForRejectsZeroAccount() public {
         vm.prank(proposer);
-        vm.expectRevert(IWLDStakingVault.InvalidAccount.selector);
+        vm.expectRevert(InvalidAccount.selector);
         bondVault.depositFor(address(0), WLD_UNIT);
     }
 
     function test_DepositRejectsZeroAmount() public {
         vm.prank(proposer);
-        vm.expectRevert(IWLDStakingVault.InvalidAmount.selector);
+        vm.expectRevert(InvalidAmount.selector);
         bondVault.deposit(0);
     }
 
@@ -164,7 +176,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         vm.prank(unfunded);
         vm.expectRevert(
-            abi.encodeWithSelector(IWLDStakingVault.InsufficientBalance.selector, unfunded, 0, PROPOSER_BOND)
+            abi.encodeWithSelector(InsufficientBalance.selector, unfunded, 0, PROPOSER_BOND)
         );
         dgf.create(WC_GAME_TYPE, claim, extraData);
     }
@@ -190,7 +202,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         bytes memory extraData = _extraData(target, type(uint256).max, 0);
 
         vm.prank(proposer);
-        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.OwnerMismatch.selector, newFactoryOwner, address(this)));
+        vm.expectRevert(abi.encodeWithSelector(OwnerMismatch.selector, newFactoryOwner, address(this)));
         dgf.create(WC_GAME_TYPE, claim, extraData);
     }
 
@@ -207,7 +219,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         UnregisteredGameHarness game = new UnregisteredGameHarness();
 
         vm.prank(address(game));
-        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.GameNotRegistered.selector, address(game)));
+        vm.expectRevert(abi.encodeWithSelector(GameNotRegistered.selector, address(game)));
         bondVault.lockChallengerBond();
     }
 
@@ -253,7 +265,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         vm.prank(proposer);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IWLDStakingVault.WithdrawalDelayNotMet.selector, resetAt + WLD_WITHDRAWAL_DELAY_SECONDS
+                WithdrawalDelayNotMet.selector, resetAt + WLD_WITHDRAWAL_DELAY_SECONDS
             )
         );
         bondVault.withdraw(PROPOSER_BOND / 4);
@@ -261,7 +273,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS - 1);
         systemConfig.setPaused(true);
         vm.prank(proposer);
-        vm.expectRevert(IWLDStakingVault.WithdrawalPaused.selector);
+        vm.expectRevert(WithdrawalPaused.selector);
         bondVault.withdraw(PROPOSER_BOND / 4);
 
         systemConfig.setPaused(false);
@@ -321,11 +333,11 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         address unauthorized = makeAddr("unauthorized");
 
         vm.prank(unauthorized);
-        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.NotProxyAdminOwner.selector, unauthorized));
+        vm.expectRevert(abi.encodeWithSelector(NotProxyAdminOwner.selector, unauthorized));
         bondVault.hold(proposer, WLD_UNIT);
 
         vm.prank(unauthorized);
-        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.NotProxyAdminOwner.selector, unauthorized));
+        vm.expectRevert(abi.encodeWithSelector(NotProxyAdminOwner.selector, unauthorized));
         bondVault.recover(WLD_UNIT);
     }
 
@@ -377,7 +389,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         IWLDStakingVault.Payout[] memory payouts = new IWLDStakingVault.Payout[](0);
 
         vm.prank(address(game));
-        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.GameNotRegistered.selector, address(game)));
+        vm.expectRevert(abi.encodeWithSelector(GameNotRegistered.selector, address(game)));
         bondVault.settle(payouts);
     }
 
@@ -388,7 +400,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         vm.prank(address(game));
         vm.expectRevert(
-            abi.encodeWithSelector(IWLDStakingVault.InvalidPayoutTotal.selector, PROPOSER_BOND, PROPOSER_BOND - 1)
+            abi.encodeWithSelector(InvalidPayoutTotal.selector, PROPOSER_BOND, PROPOSER_BOND - 1)
         );
         bondVault.settle(payouts);
     }
@@ -402,7 +414,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         bondVault.settle(payouts);
 
         vm.prank(address(game));
-        vm.expectRevert(abi.encodeWithSelector(IWLDStakingVault.GameAlreadySettled.selector, address(game)));
+        vm.expectRevert(abi.encodeWithSelector(GameAlreadySettled.selector, address(game)));
         bondVault.settle(payouts);
     }
 }

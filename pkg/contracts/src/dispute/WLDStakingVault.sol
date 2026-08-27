@@ -2,6 +2,24 @@
 pragma solidity 0.8.28;
 
 import {GameTypes} from "./lib/GameTypes.sol";
+import {
+    ChallengerBondAlreadyLocked,
+    ExactTransferRequired,
+    GameAlreadySettled,
+    GameBondAlreadyInitialized,
+    GameNotRegistered,
+    InsufficientBalance,
+    InvalidAccount,
+    InvalidAmount,
+    InvalidPayoutTotal,
+    InvalidVaultConfiguration,
+    InvalidWithdrawal,
+    NotProxyAdminOwner,
+    OwnerMismatch,
+    UnexpectedGameAddress,
+    WithdrawalDelayNotMet,
+    WithdrawalPaused
+} from "./lib/Errors.sol";
 import {IMultiProofGame} from "./interfaces/IMultiProofGame.sol";
 import {IWLDStakingVault} from "./interfaces/IWLDStakingVault.sol";
 
