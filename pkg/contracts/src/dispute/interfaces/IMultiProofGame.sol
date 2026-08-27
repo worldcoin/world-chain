@@ -79,6 +79,7 @@ interface IMultiProofGame is IDisputeGame {
     error InvalidProof(ProofLane lane, bytes32 rootId);
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
     error InconsistentSystemConfiguration();
+    error TimestampOutOfBounds(uint256 value);
 
     /// @notice Thrown when a lane that already counts toward the threshold is resubmitted.
     error DuplicateProofLane(ProofLane lane, bytes32 rootId, Bitmap proofBitmap);
@@ -191,9 +192,6 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice L1 block number of `l1Head`.
     function l1OriginNumber() external view returns (uint256);
 
-    /// @notice Account that reserved and funded the proposer bond.
-    function bondProposer() external view returns (address);
-
     ////////////////////////////////////////////////////////////////
     //                       Game progress                        //
     ////////////////////////////////////////////////////////////////
@@ -240,7 +238,7 @@ interface IMultiProofGame is IDisputeGame {
     //                    Challenge and proofs                    //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Disputes a proposal and reserves `challengerBond` WLD from the caller's vault balance.
+    /// @notice Disputes a proposal, locking `challengerBond` from the caller's available vault balance.
     function challenge() external returns (ProposalStatus);
 
     /// @notice Submits a compact proof payload. Before a challenge, any accepted lane satisfies

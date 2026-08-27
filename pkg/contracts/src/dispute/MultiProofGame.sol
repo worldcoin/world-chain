@@ -177,9 +177,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice The total bonds deposited into the game.
     uint256 public totalBonds;
 
-    /// @notice Account that reserved and funded the proposer bond.
-    address public bondProposer;
-
     /// @notice Reward recipient recorded for each accepted proof lane, indexed by `ProofLane`.
     mapping(uint8 laneId => address recipient) public laneRecipient;
 
@@ -190,7 +187,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     constructor(GameConfig memory config) {
         if (
             config.blockInterval == 0 || config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod
-                || config.proposerBond == 0 || config.challengerBond == 0 || config.proofThreshold < 2
+                || config.proposerBond == 0 || config.proposerBond > type(uint256).max / CHALLENGER_REWARD_BPS
+                || config.challengerBond == 0 || config.proofThreshold < 2
                 || config.proofThreshold > LibProof.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
                 || config.aggregationVKey == bytes32(0) || config.rangeVKeyCommitment == bytes32(0)
                 || config.teeImageId == bytes32(0) || address(config.anchorStateRegistry) == address(0)
@@ -401,7 +399,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         claimData = ClaimData({
             status: ProposalStatus.Unchallenged,
             challenger: address(0),
-            deadline: Timestamp.wrap(uint64(block.timestamp + challengePeriod.raw())),
+            deadline: _toTimestamp(block.timestamp + challengePeriod.raw()),
             proofBitmap: Bitmap.wrap(0),
             invalidationReason: InvalidationReason.NONE
         });
@@ -409,11 +407,13 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // Set the game as initialized.
         initialized = true;
 
-        bondProposer = bondVault.consumeProposal();
-        _depositBond(bondProposer, proposerBond);
+        // Lock the proposer bond from the creator's vault balance; the vault authenticates this
+        // clone against the factory's deterministic deployment address.
+        bondVault.lockProposerBond();
+        _depositBond(gameCreator(), proposerBond);
 
         // Set the game's starting timestamp.
-        createdAt = Timestamp.wrap(uint64(block.timestamp));
+        createdAt = _toTimestamp(block.timestamp);
 
         // Set whether the game type was respected when the game was created.
         wasRespectedGameTypeWhenCreated =
@@ -465,7 +465,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // at the challenge, so late challenges cannot extend the game.
         claimData.deadline = proofDeadline();
 
-        bondVault.reserveChallenge();
+        bondVault.lockChallengerBond();
         _depositBond(msg.sender, challengerBond);
 
         emit Challenged(msg.sender, claimData.deadline.raw());
@@ -557,7 +557,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             // An invalid parent invalidates this game regardless of its own proof state.
             status = GameStatus.CHALLENGER_WINS;
             claimData.invalidationReason = InvalidationReason.INVALID_PARENT;
-            normalModeCredit[bondProposer] += proposerBond;
+            normalModeCredit[gameCreator()] += proposerBond;
             if (claimData.challenger != address(0)) {
                 normalModeCredit[claimData.challenger] += challengerBond;
             }
@@ -598,7 +598,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         // Mark the game as resolved.
         claimData.status = ProposalStatus.Resolved;
-        resolvedAt = Timestamp.wrap(uint64(block.timestamp));
+        resolvedAt = _toTimestamp(block.timestamp);
 
         emit Resolved(status);
 
@@ -621,7 +621,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             }
         }
 
-        normalModeCredit[bondProposer] += totalBonds - distributed;
+        normalModeCredit[gameCreator()] += totalBonds - distributed;
     }
 
     /// @inheritdoc IMultiProofGame
@@ -684,7 +684,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     function _settlementCandidates() internal view returns (address[] memory candidates) {
         // Possible recipients are the proposer, challenger, protocol, and one recipient per proof lane.
         candidates = new address[](3 + LibProof.PROOF_LANE_COUNT);
-        candidates[0] = bondProposer;
+        candidates[0] = gameCreator();
         candidates[1] = claimData.challenger;
         candidates[2] = protocolFeeRecipient;
         for (uint8 laneId; laneId < LibProof.PROOF_LANE_COUNT; laneId++) {
@@ -726,8 +726,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Determines if the game is finished.
     /// @return gameOver_ True if the active deadline has passed or the threshold is reached.
     function gameOver() public view returns (bool gameOver_) {
-        gameOver_ =
-            claimData.deadline.raw() <= uint64(block.timestamp) || claimData.proofBitmap.hasThreshold(PROOF_THRESHOLD);
+        gameOver_ = claimData.deadline.raw() <= block.timestamp || claimData.proofBitmap.hasThreshold(PROOF_THRESHOLD);
     }
 
     /// @inheritdoc IMultiProofGame
@@ -786,12 +785,19 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     /// @inheritdoc IMultiProofGame
     function challengeDeadline() public view returns (Timestamp) {
-        return Timestamp.wrap(createdAt.raw() + challengePeriod.raw());
+        return _toTimestamp(uint256(createdAt.raw()) + challengePeriod.raw());
     }
 
     /// @inheritdoc IMultiProofGame
     function proofDeadline() public view returns (Timestamp) {
-        return Timestamp.wrap(createdAt.raw() + proofPeriod.raw());
+        return _toTimestamp(uint256(createdAt.raw()) + proofPeriod.raw());
+    }
+
+    function _toTimestamp(uint256 value) internal pure returns (Timestamp) {
+        if (value > type(uint64).max) revert TimestampOutOfBounds(value);
+        // The bound above proves this narrowing conversion is lossless.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return Timestamp.wrap(uint64(value));
     }
 
     /// @dev Selects the verifier and game-pinned statement for `lane`. The generic public-values

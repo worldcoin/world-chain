@@ -49,7 +49,6 @@ abstract contract OPStackFixtures is Test {
     address internal guardian = makeAddr("guardian");
     address internal proposer = makeAddr("proposer");
     address internal challengerAccount = makeAddr("challenger");
-    address internal creationKeeper = makeAddr("creation-keeper");
     address internal protocolFeeRecipient = makeAddr("protocol-fee-recipient");
 
     MockSystemConfig internal systemConfig;
@@ -115,8 +114,8 @@ abstract contract OPStackFixtures is Test {
         // The registry retires every game created at or before its initialization timestamp.
         vm.warp(block.timestamp + 1);
 
-        _depositWLD(proposer, 100 * WLD_UNIT);
-        _depositWLD(challengerAccount, 100 * WLD_UNIT);
+        _fundWLD(proposer, 100 * WLD_UNIT);
+        _fundWLD(challengerAccount, 100 * WLD_UNIT);
     }
 
     /// @dev Address of the implementation most recently deployed by `_proxied`.
@@ -179,29 +178,24 @@ abstract contract OPStackFixtures is Test {
         return keccak256(abi.encode("output-root", l2BlockNumber));
     }
 
-    function _depositWLD(address account, uint256 amount) internal {
+    /// @dev Mints WLD to `account` and deposits it into the vault with no remaining allowance.
+    function _fundWLD(address account, uint256 amount) internal {
         wld.mint(account, amount);
-        vm.startPrank(account);
-        wld.approve(address(bondVault), amount);
-        bondVault.deposit(amount);
-        vm.stopPrank();
-    }
-
-    function _reserve(address account, Claim rootClaim, bytes memory extraData) internal {
         vm.prank(account);
-        bondVault.reserveProposal(rootClaim, extraData);
+        wld.approve(address(bondVault), amount);
+        vm.prank(account);
+        bondVault.deposit(amount);
     }
 
-    /// @dev Reserves as `proposer`, then creates through the stock factory as a keeper.
+    /// @dev Creates through the stock factory as `proposer`; the vault locks the bond from
+    ///      the creator's available balance during `initialize`.
     function _propose(uint256 parentIndex, bytes32 rootClaim, uint256 l2BlockNumber, uint256 attempt)
         internal
         returns (MultiProofGame)
     {
         bytes memory extraData = _extraData(l2BlockNumber, parentIndex, attempt);
-        Claim claim = Claim.wrap(rootClaim);
-        _reserve(proposer, claim, extraData);
-        vm.prank(creationKeeper);
-        IDisputeGame proxy = dgf.create(WC_GAME_TYPE, claim, extraData);
+        vm.prank(proposer);
+        IDisputeGame proxy = dgf.create(WC_GAME_TYPE, Claim.wrap(rootClaim), extraData);
         return MultiProofGame(address(proxy));
     }
 
@@ -212,10 +206,8 @@ abstract contract OPStackFixtures is Test {
         IDisputeGame anchorGame = asr.anchorGame();
         address parent = address(anchorGame) == address(0) ? address(asr) : address(anchorGame);
         bytes memory extraData = _extraDataForParent(target, parent, 0);
-        Claim claim = Claim.wrap(_rootClaimFor(target));
-        _reserve(proposer, claim, extraData);
-        vm.prank(creationKeeper);
-        IDisputeGame proxy = dgf.create(WC_GAME_TYPE, claim, extraData);
+        vm.prank(proposer);
+        IDisputeGame proxy = dgf.create(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
         return MultiProofGame(address(proxy));
     }
 
