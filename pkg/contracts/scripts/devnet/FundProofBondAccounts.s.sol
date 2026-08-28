@@ -62,7 +62,7 @@ contract FundProofBondAccounts is Script {
         uint256 amount = target - available;
         wld.mint(funder, amount);
         wld.approve(address(vault), amount);
-        vault.depositFor(account, amount);
+        vault.deposit(account, amount);
 
         require(vault.availableBalance(account) >= target, "FundProofBondAccounts: top-up failed");
         require(wld.allowance(funder, address(vault)) == 0, "FundProofBondAccounts: allowance remains");

@@ -34,7 +34,7 @@ contract FundProofBondAccountsTest is OPStackFixtures {
         uint256 existing = 2_000e18;
         wld.mint(address(this), existing);
         wld.approve(address(bondVault), existing);
-        bondVault.depositFor(first, existing);
+        bondVault.deposit(first, existing);
         _setAccounts(first, second);
         vm.setEnv("PRIVATE_KEY", vm.toString(FUNDING_KEY));
         vm.setEnv("WLD_STAKING_VAULT", vm.toString(address(bondVault)));

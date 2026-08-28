@@ -126,7 +126,7 @@ sol! {
             external
             view
             returns (uint256 proposerBond, uint256 challengerBond, bool settled);
-        function deposit(uint256 amount) external;
+        function deposit(address account, uint256 amount) external;
     }
 
     /// Stock OP Stack `AnchorStateRegistry`.

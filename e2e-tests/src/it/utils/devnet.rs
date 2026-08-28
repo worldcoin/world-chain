@@ -148,7 +148,7 @@ pub(in crate::it) async fn funded_throwaway_provider(
     );
     ensure!(
         vault
-            .deposit(amount)
+            .deposit(address, amount)
             .send()
             .await?
             .get_receipt()

@@ -1469,7 +1469,12 @@ async fn fund_world_proof_bond_account(
     if !approval_receipt.status() {
         bail!("approving mock WLD for the World Chain {role} reverted");
     }
-    let deposit_receipt = vault.deposit(amount).send().await?.get_receipt().await?;
+    let deposit_receipt = vault
+        .deposit(account, amount)
+        .send()
+        .await?
+        .get_receipt()
+        .await?;
     if !deposit_receipt.status() {
         bail!("depositing mock WLD for the World Chain {role} reverted");
     }

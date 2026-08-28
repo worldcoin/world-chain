@@ -247,9 +247,9 @@ proof-deploy-system env="alphanet":
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 2b (devnet only) – Mint mock WLD and top up proof-system bond accounts.
-# Uses depositFor so the funding operator never needs either service's signing key. Targets make
-# the operation idempotent and account for WLD already returned by settled games. Run this after
-# deploying the vault and before starting the proposer or challenger.
+# The vault's deposit API credits selected accounts, so the funding operator does not need service
+# keys. Targets make the operation idempotent and account for WLD already returned by settled games.
+# Run this after deploying the vault and before starting the proposer or challenger.
 [doc("Phase 2b (devnet only) - Fund mock-WLD vault balances for proof-system bond accounts.")]
 [group('proof')]
 proof-fund-mock-bonds env="alphanet":
