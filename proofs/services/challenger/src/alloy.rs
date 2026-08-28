@@ -11,7 +11,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 use tracing::warn;
 use world_chain_proof_protocol::{
-    IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, IWLDStakingVault,
+    IAnchorStateRegistry, IDisputeGameFactory, IERC20StakingVault, IMultiProofGame,
     MULTI_PROOF_GAME_TYPE, ProposalStatus, ResolutionStatus, read_registered_bond_vault,
     read_registered_lineage_config,
 };
@@ -23,7 +23,7 @@ use world_chain_proof_protocol::{
 #[derive(Debug, Clone)]
 pub struct AlloyChallengerClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
-    bond_vault: IWLDStakingVault::IWLDStakingVaultInstance<P>,
+    bond_vault: IERC20StakingVault::IERC20StakingVaultInstance<P>,
     confirmations: u64,
     receipt_timeout: Duration,
     semaphore: Arc<Semaphore>,
@@ -51,7 +51,8 @@ where
         if !init_bond.is_zero() {
             return Err(ChallengerError::NonZeroFactoryBond(init_bond));
         }
-        let vault = IWLDStakingVault::IWLDStakingVaultInstance::new(bond_vault, provider.clone());
+        let vault =
+            IERC20StakingVault::IERC20StakingVaultInstance::new(bond_vault, provider.clone());
         let configured_factory = vault.disputeGameFactory().call().await?;
         if configured_factory != factory_address {
             return Err(ChallengerError::VaultFactoryMismatch {
@@ -75,7 +76,7 @@ where
         IMultiProofGame::IMultiProofGameInstance::new(address, self.provider.clone())
     }
 
-    /// Refreshes the managed challenger's reusable WLD balance metric.
+    /// Refreshes the managed challenger's reusable bond-token balance metric.
     pub async fn refresh_vault_balance(&self)
     where
         P: WalletProvider,
@@ -84,7 +85,7 @@ where
             .await;
     }
 
-    /// Returns the singleton WLD vault discovered from the active implementation.
+    /// Returns the singleton ERC-20 vault discovered from the active implementation.
     #[must_use]
     pub fn bond_vault_address(&self) -> Address {
         *self.bond_vault.address()
@@ -98,7 +99,9 @@ where
                 "challenger",
                 balance,
             ),
-            Err(error) => warn!(%error, %account, "failed to fetch challenger WLD vault balance"),
+            Err(error) => {
+                warn!(%error, %account, "failed to fetch challenger ERC-20 vault balance")
+            }
         }
     }
 

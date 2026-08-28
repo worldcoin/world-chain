@@ -61,11 +61,11 @@ logged at warn level for operator visibility.
 
 ## Bond settlement
 
-Bonds are locked from the proposer's available balance in the singleton WLD staking vault.
+Bonds are locked from the proposer's available balance in the singleton ERC-20 staking vault.
 After a game resolves and passes the registry's finality airgap, its permissionless `closeGame()`
 call settles the complete bond pot into immediately reusable vault balances. The service never
-requests an external WLD withdrawal. The bond manager keeps every discovered proposer-owned game
-tracked until it is resolved and settled. For games
+requests an external bond-token withdrawal. The bond manager keeps every discovered proposer-owned
+game tracked until it is resolved and settled. For games
 whose embedded proposal domain differs from the currently registered domain, it also submits any
 available positive or negative resolution because those games are no longer visible to the selected
 lineage proposer. Same-domain outcomes remain with the proposer to avoid racing retry creation.

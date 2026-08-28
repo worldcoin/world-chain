@@ -115,9 +115,9 @@ sol! {
         function refundModeCredit(address recipient) external view returns (uint256);
     }
 
-    /// Singleton WLD vault that locks and settles WIP-1006 proposal and challenge bonds.
+    /// Singleton ERC-20 vault that locks and settles WIP-1006 proposal and challenge bonds.
     #[sol(rpc)]
-    interface IWLDStakingVault {
+    interface IERC20StakingVault {
         event ProposerBondLocked(address indexed game, address indexed proposer, uint256 amount);
         function disputeGameFactory() external view returns (address);
         function wld() external view returns (address);
