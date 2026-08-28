@@ -43,14 +43,25 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     /// @notice Semantic version.
     string public constant version = "1.0.0";
 
+    /// @notice Delay required between requesting and executing a WLD withdrawal.
     uint256 internal immutable DELAY_SECONDS;
 
+    /// @notice Canonical WLD token backing the vault's internal balances.
     IERC20 public wld;
+
+    /// @notice System configuration supplying the pause state for withdrawals.
     ISystemConfig public systemConfig;
+
+    /// @notice Canonical factory used to authenticate WIP-1006 dispute games.
     IDisputeGameFactory public disputeGameFactory;
 
+    /// @notice Reusable WLD credit available to fund bonds or request a withdrawal.
     mapping(address account => uint256 amount) public availableBalance;
+
+    /// @notice Pending delayed withdrawal request for each account.
     mapping(address account => WithdrawalRequest request) public withdrawals;
+
+    /// @notice Locked bond amounts and settlement state for each authenticated game.
     mapping(address game => GameBond bond) public gameBonds;
 
     constructor(uint256 delaySeconds) {
