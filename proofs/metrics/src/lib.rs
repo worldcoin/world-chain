@@ -6,10 +6,7 @@ use std::{
 };
 
 use alloy_json_rpc::{RequestPacket, ResponsePacket};
-use alloy_primitives::{
-    Address,
-    utils::{format_ether, format_units},
-};
+use alloy_primitives::{Address, utils::format_ether};
 use alloy_provider::Provider;
 use alloy_rpc_client::{ClientBuilder, RpcClient};
 use alloy_transport::{BoxFuture, TransportError};
@@ -31,10 +28,10 @@ pub const METRICS_L2_FINALIZED_BLOCK_NUMBER: &str = "l2.finalized_block_number";
 pub const METRICS_RPC_CLIENT_REQUESTS: &str = "rpc.client.requests";
 /// Confirmed challenge transactions.
 pub const METRICS_CHALLENGES_SUBMITTED: &str = "challenges.submitted";
-/// WLD locked by proposer and challenger transactions.
-pub const METRICS_BONDS_LOCKED_WLD: &str = "bonds.locked_wld";
-/// WLD immediately reusable by a proof-system participant.
-pub const METRICS_VAULT_AVAILABLE_BALANCE_WLD: &str = "vault.available_balance_wld";
+/// Bond-token base units locked by proposer and challenger transactions.
+pub const METRICS_BONDS_LOCKED_BASE_UNITS: &str = "bonds.locked_base_units";
+/// Bond-token base units immediately reusable by a proof-system participant.
+pub const METRICS_VAULT_AVAILABLE_BALANCE_BASE_UNITS: &str = "vault.available_balance_base_units";
 /// Games processed by a bond settlement manager.
 pub const METRICS_GAMES_CLOSED: &str = "games.closed";
 /// Confirmed on-chain proof-lane submissions.
@@ -81,14 +78,14 @@ pub fn describe_metrics() {
         "Number of challenge transactions successfully confirmed on L1."
     );
     metrics::describe_histogram!(
-        METRICS_BONDS_LOCKED_WLD,
+        METRICS_BONDS_LOCKED_BASE_UNITS,
         metrics::Unit::Count,
-        "WLD locked by successfully confirmed proposer and challenger transactions."
+        "Bond-token base units locked by successfully confirmed proposer and challenger transactions."
     );
     metrics::describe_gauge!(
-        METRICS_VAULT_AVAILABLE_BALANCE_WLD,
+        METRICS_VAULT_AVAILABLE_BALANCE_BASE_UNITS,
         metrics::Unit::Count,
-        "WLD immediately reusable by the participant in the proof-system staking vault."
+        "Bond-token base units immediately reusable by the participant in the proof-system staking vault."
     );
     metrics::describe_counter!(
         METRICS_GAMES_CLOSED,
@@ -188,16 +185,14 @@ pub fn increment_challenges_submitted() {
     metrics::counter!(METRICS_CHALLENGES_SUBMITTED).increment(1);
 }
 
-/// Records WLD locked by a successfully confirmed bond transaction.
+/// Records bond-token base units locked by a successfully confirmed bond transaction.
 pub fn record_bond_locked(role: &'static str, amount: alloy_primitives::U256) {
-    match format_units(amount, 18) {
-        Ok(formatted) => match formatted.parse::<f64>() {
-            Ok(amount_wld) => {
-                metrics::histogram!(METRICS_BONDS_LOCKED_WLD, "role" => role).record(amount_wld);
-            }
-            Err(error) => warn!(%error, %role, ?amount, "failed to convert bond amount to WLD"),
-        },
-        Err(error) => warn!(%error, %role, ?amount, "failed to format bond amount as WLD"),
+    match amount.to_string().parse::<f64>() {
+        Ok(amount_base_units) => {
+            metrics::histogram!(METRICS_BONDS_LOCKED_BASE_UNITS, "role" => role)
+                .record(amount_base_units);
+        }
+        Err(error) => warn!(%error, %role, ?amount, "failed to convert bond-token base units"),
     }
 }
 
@@ -206,7 +201,7 @@ pub fn increment_games_closed(role: &'static str, result: &'static str) {
     metrics::counter!(METRICS_GAMES_CLOSED, "role" => role, "result" => result).increment(1);
 }
 
-/// Records and logs an account's immediately reusable WLD vault balance.
+/// Records and logs an account's immediately reusable bond-token balance in base units.
 pub fn record_vault_balance(
     vault_address: Address,
     account: Address,
@@ -214,21 +209,18 @@ pub fn record_vault_balance(
     balance: alloy_primitives::U256,
 ) {
     let gauge = metrics::gauge!(
-        METRICS_VAULT_AVAILABLE_BALANCE_WLD,
+        METRICS_VAULT_AVAILABLE_BALANCE_BASE_UNITS,
         "role" => role,
         "address" => account.to_string(),
     );
-    match format_units(balance, 18) {
-        Ok(formatted) => match formatted.parse::<f64>() {
-            Ok(balance_wld) => {
-                gauge.set(balance_wld);
-                info!(%role, %account, %vault_address, %balance, balance_wld, "refreshed available WLD vault balance");
-            }
-            Err(error) => {
-                warn!(%account, %error, ?balance, "failed to convert vault balance to WLD")
-            }
-        },
-        Err(error) => warn!(%account, %error, ?balance, "failed to format vault balance as WLD"),
+    match balance.to_string().parse::<f64>() {
+        Ok(balance_base_units) => {
+            gauge.set(balance_base_units);
+            info!(%role, %account, %vault_address, %balance, balance_base_units, "refreshed available ERC-20 vault balance");
+        }
+        Err(error) => {
+            warn!(%account, %error, ?balance, "failed to convert vault balance base units")
+        }
     }
 }
 

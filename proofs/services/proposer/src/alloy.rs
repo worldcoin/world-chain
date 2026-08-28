@@ -5,7 +5,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 use tracing::warn;
 use world_chain_proof_protocol::{
-    IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, IWLDStakingVault, LineageAnchor,
+    IAnchorStateRegistry, IDisputeGameFactory, IERC20StakingVault, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, MULTI_PROOF_GAME_TYPE,
     RegisteredLineageConfig, ResolutionStatus, read_game_for_transition, read_lineage_anchor,
     read_lineage_resolution_status, read_registered_bond_vault, read_registered_lineage_config,
@@ -25,7 +25,7 @@ use crate::{
 pub struct AlloyProofSystemClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
-    vault: IWLDStakingVault::IWLDStakingVaultInstance<P>,
+    vault: IERC20StakingVault::IERC20StakingVaultInstance<P>,
     registered: RegisteredLineageConfig,
     /// Number of confirmations to require after sending a tx onchain.
     confirmations: u64,
@@ -59,7 +59,8 @@ where
         if !init_bond.is_zero() {
             return Err(ProposerError::NonZeroFactoryBond(init_bond));
         }
-        let vault = IWLDStakingVault::IWLDStakingVaultInstance::new(bond_vault, provider.clone());
+        let vault =
+            IERC20StakingVault::IERC20StakingVaultInstance::new(bond_vault, provider.clone());
         let configured_factory = vault.disputeGameFactory().call().await?;
         if configured_factory != factory_address {
             return Err(ProposerError::VaultFactoryMismatch {
@@ -92,13 +93,13 @@ where
         self.registered
     }
 
-    /// Returns the singleton WLD vault discovered from the active implementation.
+    /// Returns the singleton ERC-20 vault discovered from the active implementation.
     #[must_use]
     pub fn bond_vault_address(&self) -> Address {
         *self.vault.address()
     }
 
-    /// Refreshes the managed proposer's reusable WLD balance metric.
+    /// Refreshes the managed proposer's reusable bond-token balance metric.
     pub async fn refresh_vault_balance(&self)
     where
         P: WalletProvider,
@@ -115,7 +116,7 @@ where
                 "proposer",
                 balance,
             ),
-            Err(error) => warn!(%error, %account, "failed to fetch proposer WLD vault balance"),
+            Err(error) => warn!(%error, %account, "failed to fetch proposer ERC-20 vault balance"),
         }
     }
 
@@ -325,7 +326,7 @@ where
             .iter()
             .filter(|log| log.address() == *self.vault.address())
             .find_map(|log| {
-                log.log_decode_validate::<IWLDStakingVault::ProposerBondLocked>()
+                log.log_decode_validate::<IERC20StakingVault::ProposerBondLocked>()
                     .ok()
                     .map(|decoded| decoded.inner.data.amount)
             })
