@@ -120,11 +120,8 @@ interface IWLDStakingVault {
     /// @notice Owner of the vault's ProxyAdmin and break-glass custody authority.
     function proxyAdminOwner() external view returns (address);
 
-    /// @notice Deposits WLD into the caller's available balance.
-    function deposit(uint256 amount) external;
-
-    /// @notice Deposits the caller's WLD into another account's available balance.
-    function depositFor(address account, uint256 amount) external;
+    /// @notice Deposits the caller's WLD into an account's available balance.
+    function deposit(address account, uint256 amount) external;
 
     /// @notice Moves available WLD into a pending withdrawal and resets its full delay.
     function requestWithdrawal(uint256 amount) external;
