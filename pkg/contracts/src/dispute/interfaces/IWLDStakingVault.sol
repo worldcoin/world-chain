@@ -71,13 +71,6 @@ interface IWLDStakingVault {
     /// @param amount The WLD transferred out.
     event Withdrawn(address indexed account, uint256 amount);
 
-    /// @notice Emitted when an account's balances are seized to the ProxyAdmin owner via the
-    ///         break-glass `hold` path.
-    /// @param account The account whose balances were seized.
-    /// @param recipient The ProxyAdmin owner credited with the seized balances.
-    /// @param amount The seized WLD.
-    event AccountHeld(address indexed account, address indexed recipient, uint256 amount);
-
     /// @notice Initializes the proxy with its fixed external dependencies.
     function initialize(IERC20 wld, ISystemConfig systemConfig, IDisputeGameFactory disputeGameFactory) external;
 
@@ -105,7 +98,7 @@ interface IWLDStakingVault {
     /// @notice ProxyAdmin stored in the OP Proxy's ERC-1967 admin slot.
     function proxyAdmin() external view returns (IProxyAdmin);
 
-    /// @notice Owner of the vault's ProxyAdmin and break-glass custody authority.
+    /// @notice Owner of the vault's ProxyAdmin.
     function proxyAdminOwner() external view returns (address);
 
     /// @notice Deposits the caller's WLD into an account's available balance.
@@ -128,10 +121,4 @@ interface IWLDStakingVault {
 
     /// @notice Credits a registered game's complete finalized pot exactly once.
     function settle(Payout[] calldata payouts) external;
-
-    /// @notice Moves all of an account's available and pending claims to the ProxyAdmin owner.
-    function hold(address account) external;
-
-    /// @notice Moves an amount of an account's available and pending claims to the ProxyAdmin owner.
-    function hold(address account, uint256 amount) external;
 }

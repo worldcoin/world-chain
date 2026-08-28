@@ -210,32 +210,6 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         emit GameSettled(msg.sender, payoutTotal);
     }
 
-    /// @inheritdoc IWLDStakingVault
-    function hold(address account) external {
-        hold(account, availableBalance[account] + withdrawals[account].amount);
-    }
-
-    // TODO(security): Reassess unrestricted `hold` authority before production deployment. This
-    // intentionally mirrors DelayedWETH's break-glass custody model, but this singleton holds
-    // participants' settled WLD credits and therefore has a larger blast radius.
-    /// @inheritdoc IWLDStakingVault
-    function hold(address account, uint256 amount) public onlyProxyAdminOwner {
-        address recipient = msg.sender;
-        uint256 heldBalance = availableBalance[account] + withdrawals[account].amount;
-        if (heldBalance < amount) revert InsufficientBalance(account, heldBalance, amount);
-        if (account == recipient || amount == 0) return;
-
-        uint256 fromAvailable = amount < availableBalance[account] ? amount : availableBalance[account];
-        availableBalance[account] -= fromAvailable;
-        uint256 fromWithdrawal = amount - fromAvailable;
-        if (fromWithdrawal != 0) {
-            withdrawals[account].amount -= fromWithdrawal;
-            if (withdrawals[account].amount == 0) withdrawals[account].timestamp = 0;
-        }
-        availableBalance[recipient] += amount;
-        emit AccountHeld(account, recipient, amount);
-    }
-
     function _deposit(address account, uint256 amount) internal {
         if (account == address(0)) revert InvalidAccount();
         if (amount == 0) revert InvalidAmount();
@@ -273,11 +247,6 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     modifier onlyProxyAdminOrOwner() {
         IProxyAdmin admin = proxyAdmin();
         if (msg.sender != address(admin) && msg.sender != admin.owner()) revert NotProxyAdminOwner(msg.sender);
-        _;
-    }
-
-    modifier onlyProxyAdminOwner() {
-        if (msg.sender != proxyAdminOwner()) revert NotProxyAdminOwner(msg.sender);
         _;
     }
 
