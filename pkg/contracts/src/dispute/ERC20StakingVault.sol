@@ -21,7 +21,7 @@ import {
     WithdrawalPaused
 } from "./lib/Errors.sol";
 import {IMultiProofGame} from "./interfaces/IMultiProofGame.sol";
-import {IWLDStakingVault} from "./interfaces/IWLDStakingVault.sol";
+import {IERC20StakingVault} from "./interfaces/IERC20StakingVault.sol";
 
 import {Claim, GameType, Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
@@ -35,19 +35,19 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {LibClone} from "@solady/utils/LibClone.sol";
 
 /// @custom:proxied true
-/// @title WLDStakingVault
-/// @notice A one-to-one WLD ledger for WIP-1006 proposal and challenge bonds.
-contract WLDStakingVault is Initializable, IWLDStakingVault {
+/// @title ERC20StakingVault
+/// @notice A one-to-one ERC-20 ledger for WIP-1006 proposal and challenge bonds.
+contract ERC20StakingVault is Initializable, IERC20StakingVault {
     using SafeERC20 for IERC20;
 
     /// @notice Semantic version.
     string public constant version = "1.0.0";
 
-    /// @notice Delay required between requesting and executing a WLD withdrawal.
+    /// @notice Delay required between requesting and executing an ERC-20 withdrawal.
     uint256 internal immutable DELAY_SECONDS;
 
-    /// @notice Canonical WLD token backing the vault's internal balances.
-    IERC20 public wld;
+    /// @notice Canonical ERC-20 token backing the vault's internal balances.
+    IERC20 public token;
 
     /// @notice System configuration supplying the pause state for withdrawals.
     ISystemConfig public systemConfig;
@@ -55,7 +55,7 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     /// @notice Canonical factory used to authenticate WIP-1006 dispute games.
     IDisputeGameFactory public disputeGameFactory;
 
-    /// @notice Reusable WLD credit available to fund bonds or request a withdrawal.
+    /// @notice Reusable token credit available to fund bonds or request a withdrawal.
     mapping(address account => uint256 amount) public availableBalance;
 
     /// @notice Pending delayed withdrawal request for each account.
@@ -69,47 +69,47 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         _disableInitializers();
     }
 
-    /// @inheritdoc IWLDStakingVault
-    function initialize(IERC20 wld_, ISystemConfig systemConfig_, IDisputeGameFactory disputeGameFactory_)
+    /// @inheritdoc IERC20StakingVault
+    function initialize(IERC20 token_, ISystemConfig systemConfig_, IDisputeGameFactory disputeGameFactory_)
         external
         initializer
         onlyProxyAdminOrOwner
     {
         if (
-            address(wld_) == address(0) || address(wld_).code.length == 0 || address(systemConfig_) == address(0)
+            address(token_) == address(0) || address(token_).code.length == 0 || address(systemConfig_) == address(0)
                 || address(systemConfig_).code.length == 0 || address(disputeGameFactory_) == address(0)
                 || address(disputeGameFactory_).code.length == 0
         ) {
             revert InvalidVaultConfiguration();
         }
-        wld = wld_;
+        token = token_;
         systemConfig = systemConfig_;
         disputeGameFactory = disputeGameFactory_;
     }
 
-    /// @inheritdoc IWLDStakingVault
+    /// @inheritdoc IERC20StakingVault
     function delay() external view returns (uint256) {
         return DELAY_SECONDS;
     }
 
-    /// @inheritdoc IWLDStakingVault
+    /// @inheritdoc IERC20StakingVault
     function proxyAdmin() public view returns (IProxyAdmin admin) {
         address adminAddress = ERC1967Utils.getAdmin();
         if (adminAddress == address(0)) revert InvalidVaultConfiguration();
         return IProxyAdmin(adminAddress);
     }
 
-    /// @inheritdoc IWLDStakingVault
+    /// @inheritdoc IERC20StakingVault
     function proxyAdminOwner() public view returns (address) {
         return proxyAdmin().owner();
     }
 
-    /// @inheritdoc IWLDStakingVault
+    /// @inheritdoc IERC20StakingVault
     function deposit(address account, uint256 amount) external {
         _deposit(account, amount);
     }
 
-    /// @inheritdoc IWLDStakingVault
+    /// @inheritdoc IERC20StakingVault
     function requestWithdrawal(uint256 amount) external {
         if (amount == 0) revert InvalidWithdrawal();
         uint256 available = availableBalance[msg.sender];
@@ -122,7 +122,7 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         emit WithdrawalRequested(msg.sender, request.amount, block.timestamp + DELAY_SECONDS);
     }
 
-    /// @inheritdoc IWLDStakingVault
+    /// @inheritdoc IERC20StakingVault
     function withdraw(uint256 amount) external {
         if (amount == 0) revert InvalidWithdrawal();
         if (systemConfig.paused()) revert WithdrawalPaused();
@@ -134,11 +134,11 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
 
         request.amount -= amount;
         if (request.amount == 0) request.timestamp = 0;
-        wld.safeTransfer(msg.sender, amount);
+        token.safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
 
-    /// @inheritdoc IWLDStakingVault
+    /// @inheritdoc IERC20StakingVault
     function lockProposerBond() external ownersAligned {
         IMultiProofGame game = IMultiProofGame(msg.sender);
         if (
@@ -173,7 +173,7 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         emit ProposerBondLocked(msg.sender, proposer, amount);
     }
 
-    /// @inheritdoc IWLDStakingVault
+    /// @inheritdoc IERC20StakingVault
     function lockChallengerBond() external ownersAligned {
         IMultiProofGame game = _registeredGame(msg.sender);
         GameBond storage bond = gameBonds[msg.sender];
@@ -188,7 +188,7 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         emit ChallengerBondLocked(msg.sender, challenger, amount);
     }
 
-    /// @inheritdoc IWLDStakingVault
+    /// @inheritdoc IERC20StakingVault
     function settle(Payout[] calldata payouts) external {
         _registeredGame(msg.sender);
         GameBond storage bond = gameBonds[msg.sender];
@@ -214,9 +214,9 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         if (account == address(0)) revert InvalidAccount();
         if (amount == 0) revert InvalidAmount();
 
-        uint256 balanceBefore = wld.balanceOf(address(this));
-        wld.safeTransferFrom(msg.sender, address(this), amount);
-        uint256 received = wld.balanceOf(address(this)) - balanceBefore;
+        uint256 balanceBefore = token.balanceOf(address(this));
+        token.safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = token.balanceOf(address(this)) - balanceBefore;
         if (received != amount) revert ExactTransferRequired(amount, received);
 
         availableBalance[account] += amount;

@@ -5,7 +5,7 @@ import {Script} from "forge-std/Script.sol";
 
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
-import {IWLDStakingVault} from "../../src/dispute/interfaces/IWLDStakingVault.sol";
+import {IERC20StakingVault} from "../../src/dispute/interfaces/IERC20StakingVault.sol";
 
 import {GameStatus} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
@@ -27,7 +27,7 @@ contract ActivateProofSystem is Script {
         IAnchorStateRegistry anchorStateRegistry;
         ISystemConfig systemConfig;
         IProxyAdmin proxyAdmin;
-        IERC20 wld;
+        IERC20 bondToken;
         IMultiProofGame gameImplementation;
         bool requireFreshAnchor;
     }
@@ -77,7 +77,7 @@ contract ActivateProofSystem is Script {
         config.anchorStateRegistry = IAnchorStateRegistry(vm.envAddress("ANCHOR_STATE_REGISTRY"));
         config.systemConfig = ISystemConfig(vm.envAddress("SYSTEM_CONFIG"));
         config.proxyAdmin = IProxyAdmin(vm.envAddress("OP_CHAIN_PROXY_ADMIN"));
-        config.wld = IERC20(vm.envAddress("WLD_TOKEN"));
+        config.bondToken = IERC20(vm.envAddress("BOND_TOKEN"));
         config.gameImplementation = IMultiProofGame(vm.envAddress("GAME_IMPLEMENTATION"));
         config.requireFreshAnchor = vm.envOr("REQUIRE_FRESH_ANCHOR", false);
     }
@@ -130,7 +130,7 @@ contract ActivateProofSystem is Script {
                 && gameImpl.teeVerifier() != gameImpl.securityCouncil(),
             "ActivateProofSystem: proof lane verifiers must be distinct"
         );
-        require(address(gameImpl.bondVault()).code.length > 0, "ActivateProofSystem: WLD staking vault missing");
+        require(address(gameImpl.bondVault()).code.length > 0, "ActivateProofSystem: ERC-20 staking vault missing");
         require(gameImpl.proposerBond() > 0, "ActivateProofSystem: proposer bond missing");
         require(gameImpl.challengerBond() > 0, "ActivateProofSystem: challenger bond missing");
         require(
@@ -141,16 +141,16 @@ contract ActivateProofSystem is Script {
             address(gameImpl.bondVault().systemConfig()) == address(config.systemConfig),
             "ActivateProofSystem: vault SystemConfig mismatch"
         );
-        require(gameImpl.bondVault().wld() == config.wld, "ActivateProofSystem: vault WLD mismatch");
-        require(address(config.wld).code.length > 0, "ActivateProofSystem: WLD token missing");
+        require(gameImpl.bondVault().token() == config.bondToken, "ActivateProofSystem: vault token mismatch");
+        require(address(config.bondToken).code.length > 0, "ActivateProofSystem: bond token missing");
         require(
             gameImpl.bondVault().proxyAdmin() == config.proxyAdmin, "ActivateProofSystem: vault ProxyAdmin mismatch"
         );
 
-        IWLDStakingVault currentBondVault = _currentBondVault(config.disputeGameFactory);
+        IERC20StakingVault currentBondVault = _currentBondVault(config.disputeGameFactory);
         require(
             address(currentBondVault) == address(0) || currentBondVault == gameImpl.bondVault(),
-            "ActivateProofSystem: must reuse current WLD vault"
+            "ActivateProofSystem: must reuse current ERC-20 vault"
         );
         require(gameImpl.aggregationVKey() != bytes32(0), "ActivateProofSystem: aggregation vkey missing");
         require(gameImpl.rangeVKeyCommitment() != bytes32(0), "ActivateProofSystem: range vkey missing");
@@ -177,14 +177,14 @@ contract ActivateProofSystem is Script {
         }
     }
 
-    function _currentBondVault(IDisputeGameFactory factory) internal view returns (IWLDStakingVault bondVault) {
+    function _currentBondVault(IDisputeGameFactory factory) internal view returns (IERC20StakingVault bondVault) {
         IDisputeGame currentImplementation = factory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE);
-        if (address(currentImplementation) == address(0)) return IWLDStakingVault(address(0));
+        if (address(currentImplementation) == address(0)) return IERC20StakingVault(address(0));
 
-        try IMultiProofGame(address(currentImplementation)).bondVault() returns (IWLDStakingVault currentBondVault) {
+        try IMultiProofGame(address(currentImplementation)).bondVault() returns (IERC20StakingVault currentBondVault) {
             bondVault = currentBondVault;
         } catch {
-            // The first WLD migration may replace a legacy implementation without this getter.
+            // The first ERC-20 bond migration may replace a legacy implementation without this getter.
         }
     }
 }
