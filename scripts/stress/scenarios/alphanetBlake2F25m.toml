@@ -1,0 +1,10 @@
+[[spam]]
+[spam.tx]
+to = "0x56d8b93762b7f90c97e6d3b7cb351fae3438dadb"
+from_pool = "spammers"
+signature = "callPrecompile(string memory method, uint256 iterations)"
+args = [
+    "blake2f_alt",
+    "865"
+]
+gas_limit = 2600000

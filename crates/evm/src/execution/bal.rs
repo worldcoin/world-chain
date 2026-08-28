@@ -250,13 +250,13 @@ where
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, recovered) = tx.into_parts();
-        if !recovered.is_deposit() {
-            record_op_l1_block_bal_reads(self.executor.evm_mut().db_mut())?;
-        }
         if let Some(gas_used) = self
             .executor
             .execute_transaction_with_commit_condition((tx_env, &recovered), f)?
         {
+            if !recovered.is_deposit() {
+                record_op_l1_block_bal_reads(self.executor.evm_mut().db_mut())?;
+            }
             self.transactions.push(recovered);
             // only prepare the database index for the next transaction if this one was committed
             self.prepare_database()?;
