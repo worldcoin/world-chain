@@ -54,12 +54,12 @@ contract FundProofBondAccountsTest is OPStackFixtures {
         address[] memory accounts = _accounts(first, second);
         funding.fund(wld, bondVault, accounts, TARGET);
         uint256 supplyAfterFirstRun = wld.totalSupply();
-        uint256 liabilitiesAfterFirstRun = bondVault.totalLiabilities();
+        uint256 vaultBalanceAfterFirstRun = wld.balanceOf(address(bondVault));
 
         funding.fund(wld, bondVault, accounts, TARGET);
 
         assertEq(wld.totalSupply(), supplyAfterFirstRun);
-        assertEq(bondVault.totalLiabilities(), liabilitiesAfterFirstRun);
+        assertEq(wld.balanceOf(address(bondVault)), vaultBalanceAfterFirstRun);
         assertEq(bondVault.availableBalance(first), TARGET);
         assertEq(bondVault.availableBalance(second), TARGET);
     }
@@ -72,7 +72,7 @@ contract FundProofBondAccountsTest is OPStackFixtures {
         funding.fund(wld, bondVault, accounts, TARGET);
 
         assertEq(bondVault.availableBalance(proposer), TARGET);
-        assertEq(bondVault.totalLiabilities(), TARGET + PROPOSER_BOND + 100 * WLD_UNIT);
+        assertEq(wld.balanceOf(address(bondVault)), TARGET + PROPOSER_BOND + 100 * WLD_UNIT);
     }
 
     function test_fund_ignoresDuplicateAccountsAfterFirstTopUp() public {
