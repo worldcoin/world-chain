@@ -583,10 +583,8 @@ fn order_world_hardforks(
     }
 
     ordered_hardforks.append(&mut configured);
-    // `ChainHardforks::new` requires the list to be ordered by activation, and reth's EIP-2124
-    // fold only dedups *adjacent* equal activations. A stable sort keeps equal-timestamp forks
-    // (Isthmus/Prague, Karst/Osaka) adjacent so they fold once, making the ForkId independent of
-    // which forks were present in genesis vs. added later via `set_fork`.
+    
+    // Do _not_ remove this.
     ordered_hardforks.sort_by_key(|(_, condition)| fork_activation_order(condition));
     ChainHardforks::new(ordered_hardforks)
 }
