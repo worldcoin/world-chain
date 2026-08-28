@@ -12,7 +12,7 @@ import {
 import {GameTypes} from "./lib/GameTypes.sol";
 import {IMultiProofGame} from "./interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
-import {IWLDStakingVault} from "./interfaces/IWLDStakingVault.sol";
+import {IERC20StakingVault} from "./interfaces/IERC20StakingVault.sol";
 
 import {Clone} from "@solady/utils/Clone.sol";
 import {
@@ -142,8 +142,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Registry providing the anchor root, blacklist, and finality airgap.
     IAnchorStateRegistry public immutable anchorStateRegistry;
 
-    /// @notice WLD vault used for bond custody and settlement.
-    IWLDStakingVault public immutable bondVault;
+    /// @notice ERC-20 vault used for bond custody and settlement.
+    IERC20StakingVault public immutable bondVault;
 
     /// @notice The starting timestamp of the game.
     Timestamp public createdAt;
@@ -336,7 +336,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             revert NotDisputeGameFactory(msg.sender);
         }
 
-        // WIP-1006 uses WLD held by the vault; the stock factory bond must remain zero.
+        // WIP-1006 uses ERC-20 tokens held by the vault; the stock factory bond must remain zero.
         if (msg.value != 0) revert IncorrectBondAmount();
 
         // Preserves the former propose-time registry pause gate.
@@ -693,9 +693,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         }
     }
 
-    function _settlementCredits() internal view returns (IWLDStakingVault.Payout[] memory payouts) {
+    function _settlementCredits() internal view returns (IERC20StakingVault.Payout[] memory payouts) {
         address[] memory candidates = _settlementCandidates();
-        payouts = new IWLDStakingVault.Payout[](candidates.length);
+        payouts = new IERC20StakingVault.Payout[](candidates.length);
         uint256 payoutCount;
         // Credits are aggregated by address, but the same address may occupy multiple roles.
         // Emit each credited candidate once so its complete mapped credit is settled exactly once.
@@ -714,7 +714,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                 ? refundModeCredit[candidate]
                 : normalModeCredit[candidate];
             if (amount == 0) continue;
-            payouts[payoutCount++] = IWLDStakingVault.Payout({recipient: candidate, amount: amount});
+            payouts[payoutCount++] = IERC20StakingVault.Payout({recipient: candidate, amount: amount});
         }
 
         // Unused entries remain zero-value payouts, which do not affect vault accounting.

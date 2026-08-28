@@ -341,15 +341,15 @@ contract MultiProofGameTest is OPStackFixtures {
         address keeper = makeAddr("keeper");
         vm.prank(keeper);
         game.closeGame();
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(proposer), 100 * TOKEN_UNIT);
 
         (Hash anchorRoot, uint256 anchorBlock) = asr.getAnchorRoot();
         assertEq(Hash.unwrap(anchorRoot), Claim.unwrap(game.rootClaim()));
         assertEq(anchorBlock, game.l2SequenceNumber());
         assertEq(uint8(game.bondDistributionMode()), uint8(BondDistributionMode.NORMAL));
 
-        assertEq(wld.balanceOf(proposer), 0);
-        assertEq(wld.balanceOf(keeper), 0);
+        assertEq(bondToken.balanceOf(proposer), 0);
+        assertEq(bondToken.balanceOf(keeper), 0);
     }
 
     function test_Pause_BlocksCreationAndSettlement() public {
@@ -400,7 +400,7 @@ contract MultiProofGameTest is OPStackFixtures {
         game.challenge();
 
         assertEq(game.challenger(), address(0));
-        assertEq(bondVault.availableBalance(challengerAccount), 100 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(challengerAccount), 100 * TOKEN_UNIT);
     }
 
     function test_Challenge_DoesNotExtendProofDeadline() public {
@@ -719,7 +719,7 @@ contract MultiProofGameTest is OPStackFixtures {
     /// @dev A proposer cannot recover a forfeited bond by challenging from a second address.
     function test_SelfChallenge_IsAlwaysLossMaking() public {
         address sybil = makeAddr("proposer-sybil");
-        _fundWLD(sybil, 10 * WLD_UNIT);
+        _fundBondToken(sybil, 10 * TOKEN_UNIT);
 
         // Challenging a proofless proposal still burns part of the proposer's bond.
         MultiProofGame proofless = _proposeAtAnchor();
@@ -783,7 +783,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         _passAirgap(game);
         game.closeGame();
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT + CHALLENGER_BOND);
+        assertEq(bondVault.availableBalance(proposer), 100 * TOKEN_UNIT + CHALLENGER_BOND);
     }
 
     /// @dev Each lane recipient is independently credited in the shared vault.
@@ -802,8 +802,8 @@ contract MultiProofGameTest is OPStackFixtures {
         _claim(game, laneRewardRecipient(1));
         _claim(game, proposer);
 
-        assertEq(wld.balanceOf(laneRewardRecipient(0)), share);
-        assertEq(wld.balanceOf(laneRewardRecipient(1)), share);
+        assertEq(bondToken.balanceOf(laneRewardRecipient(0)), share);
+        assertEq(bondToken.balanceOf(laneRewardRecipient(1)), share);
         (,, bool settled) = bondVault.gameBonds(address(game));
         assertTrue(settled);
     }

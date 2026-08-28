@@ -6,9 +6,9 @@ import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 import {IProxyAdmin} from "@optimism-bedrock/interfaces/universal/IProxyAdmin.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @title IWLDStakingVault
-/// @notice Custodies WLD used by WIP-1006 proposers, challengers, and reward recipients.
-interface IWLDStakingVault {
+/// @title IERC20StakingVault
+/// @notice Custodies the ERC-20 token used by WIP-1006 proposers, challengers, and reward recipients.
+interface IERC20StakingVault {
     /// @notice The bonds a registered game custodies and whether its pot has been distributed.
     /// @param proposerBond The proposer bond locked when the game was created; non-zero marks the
     ///        game as registered.
@@ -21,7 +21,7 @@ interface IWLDStakingVault {
     }
 
     /// @notice An account's pending external withdrawal.
-    /// @param amount The total WLD queued for withdrawal.
+    /// @param amount The total ERC-20 token queued for withdrawal.
     /// @param timestamp The latest request time; the delay is measured from here, so a new
     ///        request restarts the wait for the whole pending amount.
     struct WithdrawalRequest {
@@ -31,16 +31,16 @@ interface IWLDStakingVault {
 
     /// @notice A single credit within a game settlement.
     /// @param recipient The account whose available balance is credited.
-    /// @param amount The WLD credited to the recipient.
+    /// @param amount The ERC-20 token credited to the recipient.
     struct Payout {
         address recipient;
         uint256 amount;
     }
 
-    /// @notice Emitted when WLD is deposited into an account's available balance.
-    /// @param depositor The account that supplied the WLD.
+    /// @notice Emitted when ERC-20 token is deposited into an account's available balance.
+    /// @param depositor The account that supplied the ERC-20 token.
     /// @param account The account credited with the balance.
-    /// @param amount The deposited WLD.
+    /// @param amount The deposited ERC-20 token.
     event Deposited(address indexed depositor, address indexed account, uint256 amount);
 
     /// @notice Emitted when a game's proposer bond is locked from its creator's balance.
@@ -60,7 +60,7 @@ interface IWLDStakingVault {
     /// @param amount The total pot distributed.
     event GameSettled(address indexed game, uint256 amount);
 
-    /// @notice Emitted when an account moves available WLD into a pending withdrawal.
+    /// @notice Emitted when an account moves available ERC-20 token into a pending withdrawal.
     /// @param account The requesting account.
     /// @param amount The total pending withdrawal after the request.
     /// @param availableAt The timestamp at which the pending amount becomes claimable.
@@ -68,14 +68,14 @@ interface IWLDStakingVault {
 
     /// @notice Emitted when an account claims a matured withdrawal.
     /// @param account The withdrawing account.
-    /// @param amount The WLD transferred out.
+    /// @param amount The ERC-20 token transferred out.
     event Withdrawn(address indexed account, uint256 amount);
 
     /// @notice Initializes the proxy with its fixed external dependencies.
-    function initialize(IERC20 wld, ISystemConfig systemConfig, IDisputeGameFactory disputeGameFactory) external;
+    function initialize(IERC20 token, ISystemConfig systemConfig, IDisputeGameFactory disputeGameFactory) external;
 
-    /// @notice Canonical WLD token held by the vault.
-    function wld() external view returns (IERC20);
+    /// @notice Canonical ERC-20 token held by the vault.
+    function token() external view returns (IERC20);
 
     /// @notice System configuration supplying the shared pause state.
     function systemConfig() external view returns (ISystemConfig);
@@ -83,10 +83,10 @@ interface IWLDStakingVault {
     /// @notice Canonical factory allowed to create and register WIP-1006 games.
     function disputeGameFactory() external view returns (IDisputeGameFactory);
 
-    /// @notice Delay between requesting and executing an external WLD withdrawal.
+    /// @notice Delay between requesting and executing an external ERC-20 token withdrawal.
     function delay() external view returns (uint256);
 
-    /// @notice Deposited or settled WLD available to fund bonds or request for withdrawal.
+    /// @notice Deposited or settled ERC-20 token available to fund bonds or request for withdrawal.
     function availableBalance(address account) external view returns (uint256);
 
     /// @notice Pending external withdrawal amount and the timestamp of its latest request.
@@ -101,13 +101,13 @@ interface IWLDStakingVault {
     /// @notice Owner of the vault's ProxyAdmin.
     function proxyAdminOwner() external view returns (address);
 
-    /// @notice Deposits the caller's WLD into an account's available balance.
+    /// @notice Deposits the caller's ERC-20 token into an account's available balance.
     function deposit(address account, uint256 amount) external;
 
-    /// @notice Moves available WLD into a pending withdrawal and resets its full delay.
+    /// @notice Moves available ERC-20 token into a pending withdrawal and resets its full delay.
     function requestWithdrawal(uint256 amount) external;
 
-    /// @notice Transfers matured pending WLD to the caller while the system is unpaused.
+    /// @notice Transfers matured pending ERC-20 token to the caller while the system is unpaused.
     function withdraw(uint256 amount) external;
 
     /// @notice Locks the calling game's proposer bond from its creator's available balance.
