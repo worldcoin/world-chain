@@ -208,10 +208,9 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         hold(account, availableBalance[account] + withdrawals[account].amount);
     }
 
-    // TODO(security): Reassess unrestricted `hold` and `recover` authority before production
-    // deployment. These functions intentionally mirror DelayedWETH's break-glass custody model,
-    // but this singleton also holds participants' settled WLD credits and therefore has a
-    // larger blast radius.
+    // TODO(security): Reassess unrestricted `hold` authority before production deployment. This
+    // intentionally mirrors DelayedWETH's break-glass custody model, but this singleton holds
+    // participants' settled WLD credits and therefore has a larger blast radius.
     /// @inheritdoc IWLDStakingVault
     function hold(address account, uint256 amount) public {
         address recipient = _assertProxyAdminOwner();
@@ -228,16 +227,6 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         }
         availableBalance[recipient] += amount;
         emit AccountHeld(account, recipient, amount);
-    }
-
-    /// @inheritdoc IWLDStakingVault
-    function recover(uint256 amount) external {
-        address recipient = _assertProxyAdminOwner();
-        uint256 balance = wld.balanceOf(address(this));
-        uint256 recovered = amount < balance ? amount : balance;
-        // Recovery may seize backing for active games without blocking their later internal settlement.
-        wld.safeTransfer(recipient, recovered);
-        emit Recovered(recipient, recovered);
     }
 
     function _deposit(address account, uint256 amount) internal {

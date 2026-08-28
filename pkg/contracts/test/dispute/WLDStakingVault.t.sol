@@ -298,7 +298,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         assertEq(proposerBond_, PROPOSER_BOND);
     }
 
-    function test_BreakGlassHoldAndRecoverMirrorDelayedWETHTrust() public {
+    function test_BreakGlassHoldMovesCreditToProxyAdminOwner() public {
         MultiProofGame game = _proposeAtAnchor();
         _resolveUnchallenged(game);
         _passAirgap(game);
@@ -307,41 +307,15 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         bondVault.hold(proposer, PROPOSER_BOND);
         assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
         assertEq(bondVault.availableBalance(address(this)), PROPOSER_BOND);
-
-        bondVault.recover(PROPOSER_BOND);
-        assertEq(wld.balanceOf(address(bondVault)), 199 * WLD_UNIT);
-        assertEq(wld.balanceOf(address(this)), PROPOSER_BOND);
-        assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
-        assertEq(bondVault.availableBalance(address(this)), PROPOSER_BOND);
+        assertEq(wld.balanceOf(address(bondVault)), 200 * WLD_UNIT);
     }
 
-    function test_BreakGlassHoldAndRecoverRejectUnauthorizedCaller() public {
+    function test_BreakGlassHoldRejectsUnauthorizedCaller() public {
         address unauthorized = makeAddr("unauthorized");
 
         vm.prank(unauthorized);
         vm.expectRevert(abi.encodeWithSelector(NotProxyAdminOwner.selector, unauthorized));
         bondVault.hold(proposer, WLD_UNIT);
-
-        vm.prank(unauthorized);
-        vm.expectRevert(abi.encodeWithSelector(NotProxyAdminOwner.selector, unauthorized));
-        bondVault.recover(WLD_UNIT);
-    }
-
-    function test_RecoveryDoesNotBlockInternalSettlementOrCreation() public {
-        MultiProofGame game = _proposeAtAnchor();
-        _challenge(game);
-        _submitLanes(game, PROOF_THRESHOLD);
-        game.resolve();
-
-        bondVault.recover(type(uint256).max);
-        assertEq(wld.balanceOf(address(bondVault)), 0);
-
-        _passAirgap(game);
-        game.closeGame();
-
-        MultiProofGame next = _proposeChild(0);
-        (uint256 proposerBond_,,) = bondVault.gameBonds(address(next));
-        assertEq(proposerBond_, PROPOSER_BOND);
     }
 
     function test_OverlappingParticipantRolesSettleOnce() public {
