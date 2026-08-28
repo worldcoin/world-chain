@@ -57,7 +57,7 @@ use world_chain_proof_core::{
 };
 use world_chain_proof_kona_host::online::OnlineHostConfig;
 use world_chain_proof_protocol::{
-    AlloyProofGameProvider, IWLDStakingVault, OptimismConsensusClient, PROOF_SYSTEM_VERSION,
+    AlloyProofGameProvider, IERC20StakingVault, OptimismConsensusClient, PROOF_SYSTEM_VERSION,
     PROOF_THRESHOLD,
 };
 use world_chain_proof_sp1_host::{
@@ -127,8 +127,8 @@ const WORLD_CHALLENGER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
 /// Balance, in wei, allocated to the World Chain defender account in the L1
 /// genesis so it can submit proof-lane transactions. (100 ether)
 const WORLD_DEFENDER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
-/// Mock WLD deposited for each bond-paying proof-system service (100 WLD).
-const WORLD_PROOF_SERVICE_WLD_BALANCE: u128 = 100_000_000_000_000_000_000;
+/// Mock bond tokens deposited for each bond-paying proof-system service (100 tokens).
+const WORLD_PROOF_SERVICE_BOND_TOKEN_BALANCE: u128 = 100_000_000_000_000_000_000;
 
 const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
@@ -287,7 +287,7 @@ struct WorldProofMocksDeployment {
     validity_proof_verifier: String,
     tee_verifier: String,
     security_council: String,
-    wld_token: String,
+    bond_token: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -303,13 +303,13 @@ struct WorldProofSystemDeployment {
     proof_system_version: u64,
     block_interval: u64,
     game_implementation: String,
-    wld_token: String,
-    wld_staking_vault: String,
+    bond_token: String,
+    erc20_staking_vault: String,
 }
 
 sol! {
     #[sol(rpc)]
-    interface IMockWLD {
+    interface IMockBondToken {
         function mint(address recipient, uint256 amount) external;
         function approve(address spender, uint256 amount) external returns (bool);
         function allowance(address owner, address spender) external view returns (uint256);
@@ -1157,7 +1157,7 @@ async fn deploy_world_proof_mocks(
         validity = %mocks.validity_proof_verifier,
         tee = %mocks.tee_verifier,
         council = %mocks.security_council,
-        wld = %mocks.wld_token,
+        bond_token = %mocks.bond_token,
         "World Chain proof-system test doubles deployed (devnet only)"
     );
 
@@ -1250,7 +1250,7 @@ async fn deploy_world_proof_system(
         .env("VALIDITY_PROOF_VERIFIER", &mocks.validity_proof_verifier)
         .env("TEE_VERIFIER", &mocks.tee_verifier)
         .env("SECURITY_COUNCIL_VERIFIER", &mocks.security_council)
-        .env("WLD_TOKEN", &mocks.wld_token)
+        .env("BOND_TOKEN", &mocks.bond_token)
         .env("WORLD_CHAIN_L2_CHAIN_ID", DEV_CHAIN_ID.to_string())
         .env("ROLLUP_CONFIG_HASH", &rollup_config_hash_hex)
         .env("AGGREGATION_VKEY", DEVNET_AGGREGATION_VKEY.to_string())
@@ -1315,8 +1315,8 @@ async fn deploy_world_proof_system(
         validity = %deployment.validity_proof_verifier,
         tee = %deployment.tee_verifier,
         council = %deployment.security_council,
-        wld = %deployment.wld_token,
-        vault = %deployment.wld_staking_vault,
+        bond_token = %deployment.bond_token,
+        vault = %deployment.erc20_staking_vault,
         "World Chain proof-system contracts deployed"
     );
 
@@ -1331,7 +1331,7 @@ async fn deploy_world_proof_system(
         &anchor_state_registry,
         &system_config,
         &op_chain_proxy_admin,
-        &deployment.wld_token,
+        &deployment.bond_token,
         &deployment.game_implementation,
     )
     .await?;
@@ -1350,7 +1350,7 @@ async fn activate_world_proof_system(
     anchor_state_registry: &str,
     system_config: &str,
     op_chain_proxy_admin: &str,
-    wld_token: &str,
+    bond_token: &str,
     game_implementation: &str,
 ) -> Result<()> {
     let output = Command::new("forge")
@@ -1371,7 +1371,7 @@ async fn activate_world_proof_system(
         .env("ANCHOR_STATE_REGISTRY", anchor_state_registry)
         .env("SYSTEM_CONFIG", system_config)
         .env("OP_CHAIN_PROXY_ADMIN", op_chain_proxy_admin)
-        .env("WLD_TOKEN", wld_token)
+        .env("BOND_TOKEN", bond_token)
         .env("GAME_IMPLEMENTATION", game_implementation)
         .output()
         .await
@@ -1432,14 +1432,14 @@ async fn fund_world_proof_bond_account(
     private_key: &str,
     role: &str,
 ) -> Result<()> {
-    let wld_address: Address = deployment
-        .wld_token
+    let bond_token_address: Address = deployment
+        .bond_token
         .parse()
-        .wrap_err("invalid devnet WLD address")?;
+        .wrap_err("invalid devnet bond-token address")?;
     let vault_address: Address = deployment
-        .wld_staking_vault
+        .erc20_staking_vault
         .parse()
-        .wrap_err("invalid devnet WLD staking-vault address")?;
+        .wrap_err("invalid devnet ERC-20 staking-vault address")?;
     let signer: PrivateKeySigner = private_key
         .parse()
         .wrap_err_with(|| format!("invalid World Chain {role} signing key"))?;
@@ -1447,27 +1447,27 @@ async fn fund_world_proof_bond_account(
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
-    let mock_wld = IMockWLD::new(wld_address, provider.clone());
-    let vault = IWLDStakingVault::IWLDStakingVaultInstance::new(vault_address, provider);
-    let amount = U256::from(WORLD_PROOF_SERVICE_WLD_BALANCE);
+    let mock_bond_token = IMockBondToken::new(bond_token_address, provider.clone());
+    let vault = IERC20StakingVault::IERC20StakingVaultInstance::new(vault_address, provider);
+    let amount = U256::from(WORLD_PROOF_SERVICE_BOND_TOKEN_BALANCE);
 
-    let mint_receipt = mock_wld
+    let mint_receipt = mock_bond_token
         .mint(account, amount)
         .send()
         .await?
         .get_receipt()
         .await?;
     if !mint_receipt.status() {
-        bail!("minting mock WLD for the World Chain {role} reverted");
+        bail!("minting mock bond tokens for the World Chain {role} reverted");
     }
-    let approval_receipt = mock_wld
+    let approval_receipt = mock_bond_token
         .approve(vault_address, amount)
         .send()
         .await?
         .get_receipt()
         .await?;
     if !approval_receipt.status() {
-        bail!("approving mock WLD for the World Chain {role} reverted");
+        bail!("approving mock bond tokens for the World Chain {role} reverted");
     }
     let deposit_receipt = vault
         .deposit(account, amount)
@@ -1476,11 +1476,16 @@ async fn fund_world_proof_bond_account(
         .get_receipt()
         .await?;
     if !deposit_receipt.status() {
-        bail!("depositing mock WLD for the World Chain {role} reverted");
+        bail!("depositing mock bond tokens for the World Chain {role} reverted");
     }
-    let remaining_allowance = mock_wld.allowance(account, vault_address).call().await?;
+    let remaining_allowance = mock_bond_token
+        .allowance(account, vault_address)
+        .call()
+        .await?;
     if !remaining_allowance.is_zero() {
-        bail!("deposit left a WLD allowance for the World Chain {role}: {remaining_allowance}");
+        bail!(
+            "deposit left a bond-token allowance for the World Chain {role}: {remaining_allowance}"
+        );
     }
 
     info!(%role, %account, %vault_address, %amount, "funded World Chain proof-system bond account");
@@ -2900,7 +2905,7 @@ async fn start_challenger(
 ///
 /// The proposer signs with the dev proposer key (Anvil account #1), funded via
 /// `fundDevAccounts`. Output roots are read from the op-node rollup RPC and
-/// proposals are created through the factory, which locks WLD from the proposer's vault balance.
+/// proposals are created through the factory, which locks tokens from the proposer's vault balance.
 async fn start_world_chain_proposer(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
@@ -2980,7 +2985,7 @@ async fn start_world_chain_proposer(
 /// Spawns the in-process World Chain proof-system challenger.
 ///
 /// The challenger signs with [`WORLD_CHALLENGER_PRIVATE_KEY`], a dedicated dev
-/// account funded with L1 gas and a WLD vault balance. It scans indexed factory games, recomputes the expected
+/// account funded with L1 gas and a bond-token vault balance. It scans indexed factory games, recomputes the expected
 /// output root from the op-node rollup RPC, and challenges any game whose
 /// `rootClaim` disagrees by calling `MultiProofGame.challenge` on L1.
 async fn start_world_chain_challenger(
@@ -3746,8 +3751,11 @@ fn build_components(
             )
             .with_endpoint("tee-verifier", deployment.tee_verifier.clone())
             .with_endpoint("security-council", deployment.security_council.clone())
-            .with_endpoint("wld", deployment.wld_token.clone())
-            .with_endpoint("wld-staking-vault", deployment.wld_staking_vault.clone())
+            .with_endpoint("bond-token", deployment.bond_token.clone())
+            .with_endpoint(
+                "erc20-staking-vault",
+                deployment.erc20_staking_vault.clone(),
+            )
             .with_note(format!(
                 "WIP-1006 threshold {PROOF_THRESHOLD}/3, proof_system_version={}",
                 deployment.proof_system_version
@@ -3770,7 +3778,7 @@ fn build_components(
             .with_endpoint("dispute-game-factory", deployment.proof_system_factory.clone())
             .with_endpoint("anchor", deployment.anchor_state_registry.clone())
             .with_note(format!(
-                "native in-process proposer locking WLD and creating WIP-1006 games every {} L2 blocks",
+                "native in-process proposer locking ERC-20 bonds and creating WIP-1006 games every {} L2 blocks",
                 deployment.block_interval
             )),
         );

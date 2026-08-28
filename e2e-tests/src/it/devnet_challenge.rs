@@ -78,7 +78,7 @@ async fn bad_root_proposal_is_challenged_and_invalidated() -> eyre::Result<()> {
     );
     ensure!(
         game.gameCreator().call().await? == malicious_address,
-        "the WLD proposal bond must remain attributed to the dishonest proposer"
+        "the proposal bond must remain attributed to the dishonest proposer"
     );
     let vault = vault_at(game.bondVault().call().await?, malicious_provider.clone());
     let game_bond = vault.gameBonds(game_address).call().await?;

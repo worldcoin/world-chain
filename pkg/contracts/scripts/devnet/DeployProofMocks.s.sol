@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {Script} from "forge-std/Script.sol";
 
 import {MockRootIdVerifier} from "../../test/mocks/MockRootIdVerifier.sol";
-import {MockWLD} from "../../test/mocks/MockWLD.sol";
+import {MockBondToken} from "../../test/mocks/MockBondToken.sol";
 
 /// @notice Deploys proof-system test doubles for a local devnet and writes their addresses for
 ///         `DeployProofSystem.s.sol` to consume.
@@ -20,7 +20,7 @@ contract DeployProofMocks is Script {
         MockRootIdVerifier validityVerifier;
         MockRootIdVerifier teeVerifier;
         MockRootIdVerifier councilVerifier;
-        MockWLD wld;
+        MockBondToken bondToken;
     }
 
     function run() external returns (Deployment memory deployment) {
@@ -31,7 +31,7 @@ contract DeployProofMocks is Script {
         deployment.validityVerifier = new MockRootIdVerifier(true);
         deployment.teeVerifier = new MockRootIdVerifier(true);
         deployment.councilVerifier = new MockRootIdVerifier(true);
-        deployment.wld = new MockWLD();
+        deployment.bondToken = new MockBondToken();
         vm.stopBroadcast();
 
         _writeDeployment(deployment);
@@ -45,7 +45,7 @@ contract DeployProofMocks is Script {
         vm.serializeAddress(root, "validityProofVerifier", address(deployment.validityVerifier));
         vm.serializeAddress(root, "teeVerifier", address(deployment.teeVerifier));
         vm.serializeAddress(root, "securityCouncil", address(deployment.councilVerifier));
-        string memory json = vm.serializeAddress(root, "wldToken", address(deployment.wld));
+        string memory json = vm.serializeAddress(root, "bondToken", address(deployment.bondToken));
         vm.writeJson(json, out);
     }
 }

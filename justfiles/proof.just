@@ -174,7 +174,7 @@ proof-deploy-mocks env="alphanet":
     else
         export PROOF_MOCKS_DEPLOYMENT_OUT="deployments/{{env}}-proof-mocks.dryrun.json"
     fi
-    echo "WARNING: deploying MOCK proof-system dependencies (accept-any verifiers and mintable WLD) for '{{env}}'." >&2
+    echo "WARNING: deploying MOCK proof-system dependencies (accept-any verifiers and a mintable bond token) for '{{env}}'." >&2
     echo "Deploying proof mocks (deployment → $PROOF_MOCKS_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofMocks.s.sol:DeployProofMocks \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
@@ -246,11 +246,11 @@ proof-deploy-system env="alphanet":
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
-# Phase 2b (devnet only) – Mint mock WLD and top up proof-system bond accounts.
+# Phase 2b (devnet only) – Mint mock bond tokens and top up proof-system bond accounts.
 # The vault's deposit API credits selected accounts, so the funding operator does not need service
-# keys. Targets make the operation idempotent and account for WLD already returned by settled games.
+# keys. Targets make the operation idempotent and account for tokens already returned by settled games.
 # Run this after deploying the vault and before starting the proposer or challenger.
-[doc("Phase 2b (devnet only) - Fund mock-WLD vault balances for proof-system bond accounts.")]
+[doc("Phase 2b (devnet only) - Fund mock-token vault balances for proof-system bond accounts.")]
 [group('proof')]
 proof-fund-mock-bonds env="alphanet":
     #!/usr/bin/env bash
@@ -259,17 +259,17 @@ proof-fund-mock-bonds env="alphanet":
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     : "${BOND_ACCOUNTS:?BOND_ACCOUNTS is required (comma-separated addresses)}"
     SYSTEM_FILE="pkg/contracts/deployments/{{env}}-proof-system.json"
-    if [ -z "${WLD_STAKING_VAULT:-}" ] && [ -f "$SYSTEM_FILE" ]; then
-        WLD_STAKING_VAULT=$(jq -r '.wldStakingVault // empty' "$SYSTEM_FILE")
-        export WLD_STAKING_VAULT
+    if [ -z "${ERC20_STAKING_VAULT:-}" ] && [ -f "$SYSTEM_FILE" ]; then
+        ERC20_STAKING_VAULT=$(jq -r '.erc20StakingVault // empty' "$SYSTEM_FILE")
+        export ERC20_STAKING_VAULT
     fi
-    : "${WLD_STAKING_VAULT:?WLD_STAKING_VAULT is required (or deploy the proof system first)}"
+    : "${ERC20_STAKING_VAULT:?ERC20_STAKING_VAULT is required (or deploy the proof system first)}"
     export VAULT_BALANCE_TARGET="${VAULT_BALANCE_TARGET:-10000000000000000000000}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
     fi
-    echo "WARNING: minting unrestricted mock WLD for proof-system bond accounts on '{{env}}'." >&2
+    echo "WARNING: minting unrestricted mock bond tokens for proof-system accounts on '{{env}}'." >&2
     echo "  accounts: $BOND_ACCOUNTS" >&2
     echo "  available vault balance target: $VAULT_BALANCE_TARGET base units per account" >&2
     cd pkg/contracts && forge script scripts/devnet/FundProofBondAccounts.s.sol:FundProofBondAccounts \

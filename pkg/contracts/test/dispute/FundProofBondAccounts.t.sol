@@ -2,18 +2,18 @@
 pragma solidity 0.8.28;
 
 import {FundProofBondAccounts} from "../../scripts/devnet/FundProofBondAccounts.s.sol";
-import {IWLDStakingVault} from "../../src/dispute/interfaces/IWLDStakingVault.sol";
+import {IERC20StakingVault} from "../../src/dispute/interfaces/IERC20StakingVault.sol";
 import {OPStackFixtures} from "./OPStackFixtures.sol";
-import {MockWLD} from "../mocks/MockWLD.sol";
+import {MockBondToken} from "../mocks/MockBondToken.sol";
 
 contract FundProofBondAccountsHarness is FundProofBondAccounts {
     function validate(address[] memory accounts, uint256 target) external pure {
         _validate(accounts, target);
     }
 
-    function fund(MockWLD wld, IWLDStakingVault vault, address[] memory accounts, uint256 target) external {
+    function fund(MockBondToken token, IERC20StakingVault vault, address[] memory accounts, uint256 target) external {
         _validate(accounts, target);
-        _fundAccounts(wld, vault, address(this), accounts, target);
+        _fundAccounts(token, vault, address(this), accounts, target);
     }
 }
 
@@ -32,34 +32,34 @@ contract FundProofBondAccountsTest is OPStackFixtures {
 
     function test_run_topsEachAccountUpToTarget() public {
         uint256 existing = 2_000e18;
-        wld.mint(address(this), existing);
-        wld.approve(address(bondVault), existing);
+        bondToken.mint(address(this), existing);
+        bondToken.approve(address(bondVault), existing);
         bondVault.deposit(first, existing);
         _setAccounts(first, second);
         vm.setEnv("PRIVATE_KEY", vm.toString(FUNDING_KEY));
-        vm.setEnv("WLD_STAKING_VAULT", vm.toString(address(bondVault)));
+        vm.setEnv("ERC20_STAKING_VAULT", vm.toString(address(bondVault)));
         vm.setEnv("VAULT_BALANCE_TARGET", vm.toString(TARGET));
 
-        uint256 supplyBefore = wld.totalSupply();
+        uint256 supplyBefore = bondToken.totalSupply();
         funding.run();
 
         assertEq(bondVault.availableBalance(first), TARGET);
         assertEq(bondVault.availableBalance(second), TARGET);
-        assertEq(wld.totalSupply() - supplyBefore, TARGET * 2 - existing);
-        assertEq(wld.balanceOf(vm.addr(FUNDING_KEY)), 0);
-        assertEq(wld.allowance(vm.addr(FUNDING_KEY), address(bondVault)), 0);
+        assertEq(bondToken.totalSupply() - supplyBefore, TARGET * 2 - existing);
+        assertEq(bondToken.balanceOf(vm.addr(FUNDING_KEY)), 0);
+        assertEq(bondToken.allowance(vm.addr(FUNDING_KEY), address(bondVault)), 0);
     }
 
     function test_fund_isIdempotent() public {
         address[] memory accounts = _accounts(first, second);
-        funding.fund(wld, bondVault, accounts, TARGET);
-        uint256 supplyAfterFirstRun = wld.totalSupply();
-        uint256 vaultBalanceAfterFirstRun = wld.balanceOf(address(bondVault));
+        funding.fund(bondToken, bondVault, accounts, TARGET);
+        uint256 supplyAfterFirstRun = bondToken.totalSupply();
+        uint256 vaultBalanceAfterFirstRun = bondToken.balanceOf(address(bondVault));
 
-        funding.fund(wld, bondVault, accounts, TARGET);
+        funding.fund(bondToken, bondVault, accounts, TARGET);
 
-        assertEq(wld.totalSupply(), supplyAfterFirstRun);
-        assertEq(wld.balanceOf(address(bondVault)), vaultBalanceAfterFirstRun);
+        assertEq(bondToken.totalSupply(), supplyAfterFirstRun);
+        assertEq(bondToken.balanceOf(address(bondVault)), vaultBalanceAfterFirstRun);
         assertEq(bondVault.availableBalance(first), TARGET);
         assertEq(bondVault.availableBalance(second), TARGET);
     }
@@ -69,20 +69,20 @@ contract FundProofBondAccountsTest is OPStackFixtures {
         address[] memory accounts = new address[](1);
         accounts[0] = proposer;
 
-        funding.fund(wld, bondVault, accounts, TARGET);
+        funding.fund(bondToken, bondVault, accounts, TARGET);
 
         assertEq(bondVault.availableBalance(proposer), TARGET);
-        assertEq(wld.balanceOf(address(bondVault)), TARGET + PROPOSER_BOND + 100 * WLD_UNIT);
+        assertEq(bondToken.balanceOf(address(bondVault)), TARGET + PROPOSER_BOND + 100 * TOKEN_UNIT);
     }
 
     function test_fund_ignoresDuplicateAccountsAfterFirstTopUp() public {
         address[] memory accounts = _accounts(first, first);
-        uint256 supplyBefore = wld.totalSupply();
+        uint256 supplyBefore = bondToken.totalSupply();
 
-        funding.fund(wld, bondVault, accounts, TARGET);
+        funding.fund(bondToken, bondVault, accounts, TARGET);
 
         assertEq(bondVault.availableBalance(first), TARGET);
-        assertEq(wld.totalSupply() - supplyBefore, TARGET);
+        assertEq(bondToken.totalSupply() - supplyBefore, TARGET);
     }
 
     function test_validate_rejectsZeroAccount() public {

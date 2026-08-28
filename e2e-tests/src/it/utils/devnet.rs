@@ -23,7 +23,7 @@ use world_chain_devnet::{
 };
 use world_chain_proof_protocol::{
     DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS, IAnchorStateRegistry, IDisputeGameFactory,
-    IMultiProofGame, IWLDStakingVault, MULTI_PROOF_GAME_TYPE, read_registered_bond_vault,
+    IERC20StakingVault, IMultiProofGame, MULTI_PROOF_GAME_TYPE, read_registered_bond_vault,
 };
 use world_chain_proposer::AlloyProofSystemClient;
 
@@ -38,13 +38,13 @@ pub(in crate::it) const INVALIDATION_REASON_INVALID_PARENT: u8 = 2;
 
 /// Funds a throwaway Anvil account well above any bond the factory could demand (100 ETH).
 const THROWAWAY_ACCOUNT_BALANCE_WEI: u128 = 100_000_000_000_000_000_000;
-/// Mock WLD deposited for each throwaway proof-system participant (100 WLD).
-const THROWAWAY_ACCOUNT_WLD_BALANCE: u128 = 100_000_000_000_000_000_000;
+/// Mock bond tokens deposited for each throwaway proof-system participant (100 tokens).
+const THROWAWAY_ACCOUNT_BOND_TOKEN_BALANCE: u128 = 100_000_000_000_000_000_000;
 const GAME_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 sol! {
     #[sol(rpc)]
-    interface IMockWLD {
+    interface IMockBondToken {
         function mint(address recipient, uint256 amount) external;
         function approve(address spender, uint256 amount) external returns (bool);
         function allowance(address owner, address spender) external view returns (uint256);
@@ -103,7 +103,7 @@ pub(in crate::it) fn signing_provider(
         .connect_http(Url::parse(rpc)?))
 }
 
-/// Funds a fresh random account with L1 gas and mock WLD deposited into the active bond vault.
+/// Funds a fresh random account with L1 gas and mock tokens deposited into the active bond vault.
 ///
 /// Cheating balance in leaves the shared devnet genesis untouched for every other test.
 pub(in crate::it) async fn funded_throwaway_provider(
@@ -121,30 +121,31 @@ pub(in crate::it) async fn funded_throwaway_provider(
     let factory =
         IDisputeGameFactory::IDisputeGameFactoryInstance::new(factory_address, provider.clone());
     let vault_address = read_registered_bond_vault(&provider, &factory).await?;
-    let vault = IWLDStakingVault::IWLDStakingVaultInstance::new(vault_address, provider.clone());
-    let wld_address = vault.wld().call().await?;
-    let mock_wld = IMockWLD::new(wld_address, provider.clone());
-    let amount = U256::from(THROWAWAY_ACCOUNT_WLD_BALANCE);
+    let vault =
+        IERC20StakingVault::IERC20StakingVaultInstance::new(vault_address, provider.clone());
+    let bond_token_address = vault.token().call().await?;
+    let mock_bond_token = IMockBondToken::new(bond_token_address, provider.clone());
+    let amount = U256::from(THROWAWAY_ACCOUNT_BOND_TOKEN_BALANCE);
 
     ensure!(
-        mock_wld
+        mock_bond_token
             .mint(address, amount)
             .send()
             .await?
             .get_receipt()
             .await?
             .status(),
-        "minting throwaway mock WLD reverted"
+        "minting throwaway mock bond tokens reverted"
     );
     ensure!(
-        mock_wld
+        mock_bond_token
             .approve(vault_address, amount)
             .send()
             .await?
             .get_receipt()
             .await?
             .status(),
-        "approving throwaway mock WLD reverted"
+        "approving throwaway mock bond tokens reverted"
     );
     ensure!(
         vault
@@ -154,15 +155,15 @@ pub(in crate::it) async fn funded_throwaway_provider(
             .get_receipt()
             .await?
             .status(),
-        "depositing throwaway mock WLD reverted"
+        "depositing throwaway mock bond tokens reverted"
     );
     ensure!(
-        mock_wld
+        mock_bond_token
             .allowance(address, vault_address)
             .call()
             .await?
             .is_zero(),
-        "deposit left a WLD allowance for the throwaway account"
+        "deposit left a bond-token allowance for the throwaway account"
     );
 
     Ok((address, provider))
@@ -207,11 +208,11 @@ where
 pub(in crate::it) fn vault_at<P>(
     address: Address,
     provider: P,
-) -> IWLDStakingVault::IWLDStakingVaultInstance<P>
+) -> IERC20StakingVault::IERC20StakingVaultInstance<P>
 where
     P: Provider,
 {
-    IWLDStakingVault::IWLDStakingVaultInstance::new(address, provider)
+    IERC20StakingVault::IERC20StakingVaultInstance::new(address, provider)
 }
 
 /// Polls `probe` until it yields a value, giving up after [`GAME_WAIT_TIMEOUT`].
@@ -453,7 +454,7 @@ where
 
 /// Waits for the complete bond pot of `game_address` to be settled into reusable vault balances.
 pub(in crate::it) async fn wait_for_game_settlement<P>(
-    vault: &IWLDStakingVault::IWLDStakingVaultInstance<P>,
+    vault: &IERC20StakingVault::IERC20StakingVaultInstance<P>,
     game_address: Address,
 ) -> eyre::Result<()>
 where

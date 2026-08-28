@@ -120,7 +120,7 @@ sol! {
     interface IERC20StakingVault {
         event ProposerBondLocked(address indexed game, address indexed proposer, uint256 amount);
         function disputeGameFactory() external view returns (address);
-        function wld() external view returns (address);
+        function token() external view returns (address);
         function availableBalance(address account) external view returns (uint256 amount);
         function gameBonds(address game)
             external
