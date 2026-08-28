@@ -1,14 +1,21 @@
 //! Loads OP pending block for a RPC response.
 
 use alloy_eips::BlockNumberOrTag;
+use reth_chain_state::{BlockState, ExecutedBlock};
+use reth_errors::RethError;
+use reth_evm::ConfigureEvm;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
-use reth_provider::{BlockReader, BlockReaderIdExt, ReceiptProvider};
+use reth_provider::{
+    BlockReader, BlockReaderIdExt, ReceiptProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_rpc_eth_api::{
-    EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,
+    EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
     helpers::{LoadPendingBlock, SpawnBlocking, pending_block::PendingEnvBuilder},
 };
-use reth_rpc_eth_types::{EthApiError, PendingBlock, block::BlockAndReceipts};
+use reth_rpc_eth_types::{
+    EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin, block::BlockAndReceipts,
+};
 
 use crate::eth::FlashblocksEthApi;
 
@@ -34,6 +41,39 @@ where
     #[inline]
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm> {
         self.inner.pending_env_builder()
+    }
+
+    fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
+        if let Some(pending_block) = self.flashblock_pending_block() {
+            let evm_env = self
+                .evm_config()
+                .evm_env(pending_block.recovered_block.header())
+                .map_err(RethError::other)
+                .map_err(Self::Error::from_eth_err)?;
+
+            return Ok(PendingBlockEnv::new(
+                evm_env,
+                PendingBlockEnvOrigin::ActualPending(
+                    pending_block.recovered_block,
+                    pending_block.execution_output.receipts.clone().into(),
+                ),
+            ));
+        }
+
+        self.inner.pending_block_env_and_cfg()
+    }
+
+    async fn local_pending_state(&self) -> Result<Option<StateProviderBox>, Self::Error> {
+        let Some(pending_block) = self.flashblock_pending_block() else {
+            return self.inner.local_pending_state().await;
+        };
+
+        let parent_state = self
+            .provider()
+            .state_by_block_hash(pending_block.recovered_block.parent_hash)
+            .map_err(Self::Error::from_eth_err)?;
+
+        Ok(Some(flashblock_state_provider(pending_block, parent_state)))
     }
 
     /// Returns the locally built pending block
@@ -87,5 +127,58 @@ where
 
     fn pending_block_kind(&self) -> reth_rpc_eth_types::builder::config::PendingBlockKind {
         self.inner.pending_block_kind()
+    }
+}
+
+impl<N, Rpc> FlashblocksEthApi<N, Rpc>
+where
+    N: RpcNodeCore<Primitives = OpPrimitives>,
+    Rpc: RpcConvert + Clone,
+{
+    fn flashblock_pending_block(&self) -> Option<ExecutedBlock<OpPrimitives>> {
+        self.pending_block.as_ref()?.borrow().clone()
+    }
+}
+
+fn flashblock_state_provider(
+    pending_block: ExecutedBlock<OpPrimitives>,
+    parent_state: StateProviderBox,
+) -> StateProviderBox {
+    Box::new(BlockState::new(pending_block).state_provider(parent_state))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use alloy_primitives::Address;
+    use reth_provider::{StateProvider, noop::NoopProvider};
+    use revm::{database::BundleAccount, state::AccountInfo};
+
+    use super::*;
+
+    #[test]
+    fn flashblock_state_overlays_historical_state() {
+        let address = Address::random();
+        let mut pending_block = ExecutedBlock::<OpPrimitives>::default();
+        Arc::make_mut(&mut pending_block.execution_output)
+            .state
+            .state
+            .insert(
+                address,
+                BundleAccount {
+                    info: Some(AccountInfo {
+                        nonce: 7,
+                        ..Default::default()
+                    }),
+                    original_info: None,
+                    storage: Default::default(),
+                    status: Default::default(),
+                },
+            );
+
+        let state = flashblock_state_provider(pending_block, Box::new(NoopProvider::default()));
+
+        assert_eq!(state.account_nonce(&address).unwrap(), Some(7));
     }
 }
