@@ -57,7 +57,7 @@ library TestUtils {
             nonce: (nonceKey << 216) + nonce,
             initCode: new bytes(0),
             callData: data,
-            accountGasLimits: 0x0000000000000000000000000000ffd300000000000000000000000000000000,
+            accountGasLimits: bytes32(uint256(100_000) << 128),
             preVerificationGas: 21000,
             gasFees: 0x0000000000000000000000000000000100000000000000000000000000000001,
             paymasterAndData: new bytes(0),
