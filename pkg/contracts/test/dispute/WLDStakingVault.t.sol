@@ -298,26 +298,6 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         assertEq(proposerBond_, PROPOSER_BOND);
     }
 
-    function test_BreakGlassHoldMovesCreditToProxyAdminOwner() public {
-        MultiProofGame game = _proposeAtAnchor();
-        _resolveUnchallenged(game);
-        _passAirgap(game);
-        game.closeGame();
-
-        bondVault.hold(proposer, PROPOSER_BOND);
-        assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
-        assertEq(bondVault.availableBalance(address(this)), PROPOSER_BOND);
-        assertEq(wld.balanceOf(address(bondVault)), 200 * WLD_UNIT);
-    }
-
-    function test_BreakGlassHoldRejectsUnauthorizedCaller() public {
-        address unauthorized = makeAddr("unauthorized");
-
-        vm.prank(unauthorized);
-        vm.expectRevert(abi.encodeWithSelector(NotProxyAdminOwner.selector, unauthorized));
-        bondVault.hold(proposer, WLD_UNIT);
-    }
-
     function test_OverlappingParticipantRolesSettleOnce() public {
         MultiProofGame game = _proposeAtAnchor();
         vm.prank(proposer);

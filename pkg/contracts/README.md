@@ -14,7 +14,7 @@ WIP-1006 proposal and challenge bonds use WLD held one-to-one in the upgradeable
 
 `MultiProofGame.resolve()` records the outcome and payout credits without moving funds. After ASR finality, `closeGame()` selects normal or refund mode and atomically credits the complete game pot to recipients' reusable vault balances. Each account may later request a WLD withdrawal and transfer it after the vault delay; new requests reset the delay for the full pending amount.
 
-The vault is WIP-1006-only and supports old registered game implementations after upgrades. Its ProxyAdmin owner has break-glass `hold` authority over internal balances, but unlike DelayedWETH has no admin path for extracting backing WLD directly. The DisputeGameFactory owner and vault ProxyAdmin owner must remain the same governance authority; new bond locks fail closed if they diverge.
+The vault is WIP-1006-only and supports old registered game implementations after upgrades. It exposes no administrative path for moving participant balances or extracting backing WLD directly. The DisputeGameFactory owner and vault ProxyAdmin owner must remain the same governance authority; new bond locks fail closed if they diverge.
 
 ## OP Stack Withdrawal Boundary
 
