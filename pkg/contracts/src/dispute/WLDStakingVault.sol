@@ -100,13 +100,8 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     }
 
     /// @inheritdoc IWLDStakingVault
-    function deposit(uint256 amount) external {
-        _depositFor(msg.sender, amount);
-    }
-
-    /// @inheritdoc IWLDStakingVault
-    function depositFor(address account, uint256 amount) external {
-        _depositFor(account, amount);
+    function deposit(address account, uint256 amount) external {
+        _deposit(account, amount);
     }
 
     /// @inheritdoc IWLDStakingVault
@@ -253,7 +248,7 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         emit Recovered(recipient, recovered);
     }
 
-    function _depositFor(address account, uint256 amount) internal {
+    function _deposit(address account, uint256 amount) internal {
         if (account == address(0)) revert InvalidAccount();
         if (amount == 0) revert InvalidAmount();
 

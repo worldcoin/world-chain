@@ -95,7 +95,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         vault.initialize(wld, ISystemConfig(address(systemConfig)), dgf);
     }
 
-    function test_DepositAndDepositForCreditAvailableBalances() public {
+    function test_DepositCreditsSelectedAvailableBalances() public {
         address funder = makeAddr("funder");
         address beneficiary = makeAddr("beneficiary");
         uint256 amount = 3 * WLD_UNIT;
@@ -104,9 +104,9 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         vm.prank(funder);
         wld.approve(address(bondVault), amount);
         vm.prank(funder);
-        bondVault.deposit(WLD_UNIT);
+        bondVault.deposit(funder, WLD_UNIT);
         vm.prank(funder);
-        bondVault.depositFor(beneficiary, 2 * WLD_UNIT);
+        bondVault.deposit(beneficiary, 2 * WLD_UNIT);
 
         assertEq(bondVault.availableBalance(funder), WLD_UNIT);
         assertEq(bondVault.availableBalance(beneficiary), 2 * WLD_UNIT);
@@ -116,16 +116,16 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         assertEq(bondVault.totalLiabilities(), 203 * WLD_UNIT);
     }
 
-    function test_DepositForRejectsZeroAccount() public {
+    function test_DepositRejectsZeroAccount() public {
         vm.prank(proposer);
         vm.expectRevert(InvalidAccount.selector);
-        bondVault.depositFor(address(0), WLD_UNIT);
+        bondVault.deposit(address(0), WLD_UNIT);
     }
 
     function test_DepositRejectsZeroAmount() public {
         vm.prank(proposer);
         vm.expectRevert(InvalidAmount.selector);
-        bondVault.deposit(0);
+        bondVault.deposit(proposer, 0);
     }
 
     function test_PauseAllowsDepositsAndWithdrawalRequests() public {
@@ -137,7 +137,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         systemConfig.setPaused(true);
 
         vm.prank(funder);
-        bondVault.depositFor(beneficiary, WLD_UNIT);
+        bondVault.deposit(beneficiary, WLD_UNIT);
         vm.prank(proposer);
         bondVault.requestWithdrawal(WLD_UNIT);
 

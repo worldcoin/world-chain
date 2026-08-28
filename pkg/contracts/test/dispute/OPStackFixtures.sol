@@ -184,7 +184,7 @@ abstract contract OPStackFixtures is Test {
         vm.prank(account);
         wld.approve(address(bondVault), amount);
         vm.prank(account);
-        bondVault.deposit(amount);
+        bondVault.deposit(account, amount);
     }
 
     /// @dev Creates through the stock factory as `proposer`; the vault locks the bond from
