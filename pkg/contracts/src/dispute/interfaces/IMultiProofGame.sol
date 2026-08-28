@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import {LibProof, InvalidationReason, Bitmap, ProofLane} from "../lib/LibProof.sol";
 import {IWorldChainProofVerifier} from "./IWorldChainProofVerifier.sol";
-import {IWLDStakingVault} from "./IWLDStakingVault.sol";
+import {IERC20StakingVault} from "./IERC20StakingVault.sol";
 
 import {BondDistributionMode, Duration, GameStatus, Hash, Timestamp} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
@@ -64,7 +64,7 @@ interface IMultiProofGame is IDisputeGame {
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
         IAnchorStateRegistry anchorStateRegistry;
-        IWLDStakingVault bondVault;
+        IERC20StakingVault bondVault;
     }
 
     ////////////////////////////////////////////////////////////////
@@ -160,8 +160,8 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Registry providing the anchor root, blacklist, and finality airgap.
     function anchorStateRegistry() external view returns (IAnchorStateRegistry);
 
-    /// @notice WLD bond custody and settlement contract.
-    function bondVault() external view returns (IWLDStakingVault);
+    /// @notice ERC-20 bond custody and settlement contract.
+    function bondVault() external view returns (IERC20StakingVault);
 
     ////////////////////////////////////////////////////////////////
     //                      Proposal context                      //
@@ -257,7 +257,7 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Distribution mode locked in by `closeGame`.
     function bondDistributionMode() external view returns (BondDistributionMode);
 
-    /// @notice Total WLD bonds assigned to this game's vault pot.
+    /// @notice Total ERC-20 bonds assigned to this game's vault pot.
     function totalBonds() external view returns (uint256);
 
     /// @notice Credit owed to `recipient` when the game closes in `NORMAL` mode.

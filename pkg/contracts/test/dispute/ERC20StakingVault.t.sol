@@ -3,8 +3,8 @@ pragma solidity 0.8.28;
 
 import {OPStackFixtures} from "./OPStackFixtures.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
-import {WLDStakingVault} from "../../src/dispute/WLDStakingVault.sol";
-import {IWLDStakingVault} from "../../src/dispute/interfaces/IWLDStakingVault.sol";
+import {ERC20StakingVault} from "../../src/dispute/ERC20StakingVault.sol";
+import {IERC20StakingVault} from "../../src/dispute/interfaces/IERC20StakingVault.sol";
 import {
     GameAlreadySettled,
     GameNotRegistered,
@@ -35,10 +35,10 @@ contract UnregisteredGameHarness {
 ///      occupy the deterministic clone address the vault recomputes.
 contract ImpersonatingGameHarness {
     IDisputeGameFactory internal immutable FACTORY;
-    IWLDStakingVault internal immutable VAULT;
+    IERC20StakingVault internal immutable VAULT;
     address internal immutable VICTIM;
 
-    constructor(IDisputeGameFactory factory, IWLDStakingVault vault, address victim) {
+    constructor(IDisputeGameFactory factory, IERC20StakingVault vault, address victim) {
         FACTORY = factory;
         VAULT = vault;
         VICTIM = victim;
@@ -52,7 +52,7 @@ contract ImpersonatingGameHarness {
         return FACTORY;
     }
 
-    function bondVault() external view returns (IWLDStakingVault) {
+    function bondVault() external view returns (IERC20StakingVault) {
         return VAULT;
     }
 
@@ -77,48 +77,48 @@ contract ImpersonatingGameHarness {
     }
 }
 
-contract WLDStakingVaultAccountingTest is OPStackFixtures {
+contract ERC20StakingVaultAccountingTest is OPStackFixtures {
     function test_ProxyAdminIntrospectionMatchesOPProxy() public view {
         assertEq(address(bondVault.proxyAdmin()), address(proxyAdmin));
         assertEq(bondVault.proxyAdminOwner(), address(this));
     }
 
     function test_Initialize_RejectsUnauthorizedCaller() public {
-        WLDStakingVault implementation = new WLDStakingVault(WLD_WITHDRAWAL_DELAY_SECONDS);
-        IWLDStakingVault vault =
-            IWLDStakingVault(deployCode("opstack/out/Proxy.sol/Proxy.json", abi.encode(address(proxyAdmin))));
+        ERC20StakingVault implementation = new ERC20StakingVault(ERC20_WITHDRAWAL_DELAY_SECONDS);
+        IERC20StakingVault vault =
+            IERC20StakingVault(deployCode("opstack/out/Proxy.sol/Proxy.json", abi.encode(address(proxyAdmin))));
         proxyAdmin.upgrade(payable(address(vault)), address(implementation));
 
         address unauthorized = makeAddr("unauthorized");
         vm.prank(unauthorized);
         vm.expectRevert(abi.encodeWithSelector(NotProxyAdminOwner.selector, unauthorized));
-        vault.initialize(wld, ISystemConfig(address(systemConfig)), dgf);
+        vault.initialize(bondToken, ISystemConfig(address(systemConfig)), dgf);
     }
 
     function test_DepositCreditsSelectedAvailableBalances() public {
         address funder = makeAddr("funder");
         address beneficiary = makeAddr("beneficiary");
-        uint256 amount = 3 * WLD_UNIT;
-        wld.mint(funder, amount);
+        uint256 amount = 3 * TOKEN_UNIT;
+        bondToken.mint(funder, amount);
 
         vm.prank(funder);
-        wld.approve(address(bondVault), amount);
+        bondToken.approve(address(bondVault), amount);
         vm.prank(funder);
-        bondVault.deposit(funder, WLD_UNIT);
+        bondVault.deposit(funder, TOKEN_UNIT);
         vm.prank(funder);
-        bondVault.deposit(beneficiary, 2 * WLD_UNIT);
+        bondVault.deposit(beneficiary, 2 * TOKEN_UNIT);
 
-        assertEq(bondVault.availableBalance(funder), WLD_UNIT);
-        assertEq(bondVault.availableBalance(beneficiary), 2 * WLD_UNIT);
-        assertEq(wld.allowance(funder, address(bondVault)), 0);
-        assertEq(wld.balanceOf(funder), 0);
-        assertEq(wld.balanceOf(address(bondVault)), 203 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(funder), TOKEN_UNIT);
+        assertEq(bondVault.availableBalance(beneficiary), 2 * TOKEN_UNIT);
+        assertEq(bondToken.allowance(funder, address(bondVault)), 0);
+        assertEq(bondToken.balanceOf(funder), 0);
+        assertEq(bondToken.balanceOf(address(bondVault)), 203 * TOKEN_UNIT);
     }
 
     function test_DepositRejectsZeroAccount() public {
         vm.prank(proposer);
         vm.expectRevert(InvalidAccount.selector);
-        bondVault.deposit(address(0), WLD_UNIT);
+        bondVault.deposit(address(0), TOKEN_UNIT);
     }
 
     function test_DepositRejectsZeroAmount() public {
@@ -130,30 +130,30 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
     function test_PauseAllowsDepositsAndWithdrawalRequests() public {
         address funder = makeAddr("paused-funder");
         address beneficiary = makeAddr("paused-beneficiary");
-        wld.mint(funder, WLD_UNIT);
+        bondToken.mint(funder, TOKEN_UNIT);
         vm.prank(funder);
-        wld.approve(address(bondVault), WLD_UNIT);
+        bondToken.approve(address(bondVault), TOKEN_UNIT);
         systemConfig.setPaused(true);
 
         vm.prank(funder);
-        bondVault.deposit(beneficiary, WLD_UNIT);
+        bondVault.deposit(beneficiary, TOKEN_UNIT);
         vm.prank(proposer);
-        bondVault.requestWithdrawal(WLD_UNIT);
+        bondVault.requestWithdrawal(TOKEN_UNIT);
 
-        assertEq(bondVault.availableBalance(beneficiary), WLD_UNIT);
-        assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(beneficiary), TOKEN_UNIT);
+        assertEq(bondVault.availableBalance(proposer), 99 * TOKEN_UNIT);
         (uint256 pending,) = bondVault.withdrawals(proposer);
-        assertEq(pending, WLD_UNIT);
+        assertEq(pending, TOKEN_UNIT);
     }
 
     function test_Create_LocksProposerBondFromAvailableBalance() public {
         MultiProofGame game = _proposeAtAnchor();
 
         assertEq(game.gameCreator(), proposer);
-        assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
-        assertEq(wld.balanceOf(proposer), 0);
-        assertEq(wld.allowance(proposer, address(bondVault)), 0);
-        assertEq(wld.balanceOf(address(bondVault)), 200 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(proposer), 99 * TOKEN_UNIT);
+        assertEq(bondToken.balanceOf(proposer), 0);
+        assertEq(bondToken.allowance(proposer, address(bondVault)), 0);
+        assertEq(bondToken.balanceOf(address(bondVault)), 200 * TOKEN_UNIT);
 
         (uint256 proposerBond_, uint256 challengerBond_, bool settled_) = bondVault.gameBonds(address(game));
         assertEq(proposerBond_, PROPOSER_BOND);
@@ -163,9 +163,9 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
     function test_Create_RevertsWithoutAvailableBalance() public {
         address unfunded = makeAddr("unfunded-proposer");
-        wld.mint(unfunded, PROPOSER_BOND);
+        bondToken.mint(unfunded, PROPOSER_BOND);
         vm.prank(unfunded);
-        wld.approve(address(bondVault), PROPOSER_BOND);
+        bondToken.approve(address(bondVault), PROPOSER_BOND);
 
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         Claim claim = Claim.wrap(_rootClaimFor(target));
@@ -206,7 +206,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         vm.expectRevert();
         impersonator.lock();
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(proposer), 100 * TOKEN_UNIT);
     }
 
     function test_LockChallengerBond_RejectsUnregisteredGame() public {
@@ -217,25 +217,25 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         bondVault.lockChallengerBond();
     }
 
-    function test_Settlement_DelayedWithdrawalTransfersWLD() public {
+    function test_Settlement_DelayedWithdrawalTransfersBondToken() public {
         MultiProofGame game = _proposeAtAnchor();
         _resolveUnchallenged(game);
         _passAirgap(game);
         game.closeGame();
 
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(proposer), 100 * TOKEN_UNIT);
 
         vm.prank(proposer);
         bondVault.requestWithdrawal(PROPOSER_BOND);
-        assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(proposer), 99 * TOKEN_UNIT);
 
-        vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS);
+        vm.warp(block.timestamp + ERC20_WITHDRAWAL_DELAY_SECONDS);
         vm.prank(proposer);
         bondVault.withdraw(PROPOSER_BOND);
 
-        assertEq(wld.balanceOf(proposer), PROPOSER_BOND);
-        assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
-        assertEq(wld.balanceOf(address(bondVault)), 199 * WLD_UNIT);
+        assertEq(bondToken.balanceOf(proposer), PROPOSER_BOND);
+        assertEq(bondVault.availableBalance(proposer), 99 * TOKEN_UNIT);
+        assertEq(bondToken.balanceOf(address(bondVault)), 199 * TOKEN_UNIT);
     }
 
     function test_WithdrawalRequestResetsDelayAndPauseOnlyBlocksTransfer() public {
@@ -246,17 +246,19 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         vm.prank(proposer);
         bondVault.requestWithdrawal(PROPOSER_BOND / 2);
-        vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS - 1);
+        vm.warp(block.timestamp + ERC20_WITHDRAWAL_DELAY_SECONDS - 1);
 
         vm.prank(proposer);
         bondVault.requestWithdrawal(PROPOSER_BOND / 4);
         (, uint256 resetAt) = bondVault.withdrawals(proposer);
         vm.warp(block.timestamp + 1);
         vm.prank(proposer);
-        vm.expectRevert(abi.encodeWithSelector(WithdrawalDelayNotMet.selector, resetAt + WLD_WITHDRAWAL_DELAY_SECONDS));
+        vm.expectRevert(
+            abi.encodeWithSelector(WithdrawalDelayNotMet.selector, resetAt + ERC20_WITHDRAWAL_DELAY_SECONDS)
+        );
         bondVault.withdraw(PROPOSER_BOND / 4);
 
-        vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS - 1);
+        vm.warp(block.timestamp + ERC20_WITHDRAWAL_DELAY_SECONDS - 1);
         systemConfig.setPaused(true);
         vm.prank(proposer);
         vm.expectRevert(WithdrawalPaused.selector);
@@ -280,7 +282,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         (,, bool settled) = bondVault.gameBonds(address(game));
         assertTrue(settled);
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(proposer), 100 * TOKEN_UNIT);
     }
 
     function test_SettledBondIsImmediatelyReusableForNextProposal() public {
@@ -291,9 +293,9 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         MultiProofGame second = _proposeChild(0);
 
-        assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
-        assertEq(wld.balanceOf(proposer), 0);
-        assertEq(wld.allowance(proposer, address(bondVault)), 0);
+        assertEq(bondVault.availableBalance(proposer), 99 * TOKEN_UNIT);
+        assertEq(bondToken.balanceOf(proposer), 0);
+        assertEq(bondToken.allowance(proposer, address(bondVault)), 0);
         (uint256 proposerBond_,,) = bondVault.gameBonds(address(second));
         assertEq(proposerBond_, PROPOSER_BOND);
     }
@@ -310,12 +312,12 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         _passAirgap(game);
         game.closeGame();
 
-        assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(proposer), 100 * TOKEN_UNIT);
     }
 
     function test_Settle_RejectsUnregisteredGame() public {
         UnregisteredGameHarness game = new UnregisteredGameHarness();
-        IWLDStakingVault.Payout[] memory payouts = new IWLDStakingVault.Payout[](0);
+        IERC20StakingVault.Payout[] memory payouts = new IERC20StakingVault.Payout[](0);
 
         vm.prank(address(game));
         vm.expectRevert(abi.encodeWithSelector(GameNotRegistered.selector, address(game)));
@@ -324,8 +326,8 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
     function test_Settle_RejectsInvalidPayoutTotal() public {
         MultiProofGame game = _proposeAtAnchor();
-        IWLDStakingVault.Payout[] memory payouts = new IWLDStakingVault.Payout[](1);
-        payouts[0] = IWLDStakingVault.Payout({recipient: proposer, amount: PROPOSER_BOND - 1});
+        IERC20StakingVault.Payout[] memory payouts = new IERC20StakingVault.Payout[](1);
+        payouts[0] = IERC20StakingVault.Payout({recipient: proposer, amount: PROPOSER_BOND - 1});
 
         vm.prank(address(game));
         vm.expectRevert(abi.encodeWithSelector(InvalidPayoutTotal.selector, PROPOSER_BOND, PROPOSER_BOND - 1));
@@ -334,8 +336,8 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
     function test_Settle_RejectsSecondSettlement() public {
         MultiProofGame game = _proposeAtAnchor();
-        IWLDStakingVault.Payout[] memory payouts = new IWLDStakingVault.Payout[](1);
-        payouts[0] = IWLDStakingVault.Payout({recipient: proposer, amount: PROPOSER_BOND});
+        IERC20StakingVault.Payout[] memory payouts = new IERC20StakingVault.Payout[](1);
+        payouts[0] = IERC20StakingVault.Payout({recipient: proposer, amount: PROPOSER_BOND});
 
         vm.prank(address(game));
         bondVault.settle(payouts);

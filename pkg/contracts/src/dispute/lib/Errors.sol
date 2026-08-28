@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 ////////////////////////////////////////////////////////////////
-//                  `WLDStakingVault` Errors                  //
+//                  `ERC20StakingVault` Errors                  //
 ////////////////////////////////////////////////////////////////
 
 /// @notice Thrown when a game's single challenger bond has already been locked.
@@ -10,7 +10,7 @@ pragma solidity 0.8.28;
 error ChallengerBondAlreadyLocked(address game);
 
 /// @notice Thrown when a deposit does not credit the vault by exactly the stated amount,
-///         guarding against fee-on-transfer or rebasing WLD behavior.
+///         guarding against fee-on-transfer or rebasing token behavior.
 /// @param expected The amount the caller asked to deposit.
 /// @param actual The balance increase the vault actually observed.
 error ExactTransferRequired(uint256 expected, uint256 actual);

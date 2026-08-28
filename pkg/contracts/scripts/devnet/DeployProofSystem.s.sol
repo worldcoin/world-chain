@@ -7,9 +7,9 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 import {LibProof} from "../../src/dispute/lib/LibProof.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
-import {WLDStakingVault} from "../../src/dispute/WLDStakingVault.sol";
+import {ERC20StakingVault} from "../../src/dispute/ERC20StakingVault.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
-import {IWLDStakingVault} from "../../src/dispute/interfaces/IWLDStakingVault.sol";
+import {IERC20StakingVault} from "../../src/dispute/interfaces/IERC20StakingVault.sol";
 import {IWorldChainProofVerifier} from "../../src/dispute/interfaces/IWorldChainProofVerifier.sol";
 
 import {GameType} from "@optimism-bedrock/src/dispute/lib/Types.sol";
@@ -23,7 +23,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @notice Deploys the World Chain proof-system game implementation for the stock OP Stack dispute
 ///         infrastructure deployed by op-deployer.
 ///
-/// Deploys the WIP-1006 singleton WLD staking-vault proxy, or reuses the existing vault during
+/// Deploys the WIP-1006 singleton ERC-20 staking-vault proxy, or reuses the existing vault during
 /// a game rotation, then deploys the `MultiProofGame` implementation. Registration and activation
 /// are deliberately separate: run `ActivateProofSystem.s.sol` after reviewing the deployment
 /// record and offchain inputs. This script never changes the factory or respected game type.
@@ -55,7 +55,7 @@ contract DeployProofSystem is Script {
         IDisputeGameFactory disputeGameFactory;
         IAnchorStateRegistry anchorStateRegistry;
         IProxyAdmin vaultProxyAdmin;
-        IWLDStakingVault bondVault;
+        IERC20StakingVault bondVault;
         MultiProofGame gameImpl;
     }
 
@@ -80,17 +80,17 @@ contract DeployProofSystem is Script {
         IAnchorStateRegistry anchorStateRegistry;
         ISystemConfig systemConfig;
         IProxyAdmin proxyAdmin;
-        IERC20 wld;
-        IWLDStakingVault existingBondVault;
-        uint256 wldWithdrawalDelay;
+        IERC20 bondToken;
+        IERC20StakingVault existingBondVault;
+        uint256 erc20WithdrawalDelay;
         uint256 proxyAdminOwnerKey;
     }
 
     uint64 internal constant DEFAULT_CHALLENGE_PERIOD = 1 days;
     uint64 internal constant DEFAULT_PROOF_PERIOD = 7 days;
     uint256 internal constant DEFAULT_BLOCK_INTERVAL = 450;
-    uint256 internal constant WLD_UNIT = 1e18;
-    uint256 internal constant DEFAULT_PROPOSER_BOND = WLD_UNIT / 100;
+    uint256 internal constant TOKEN_UNIT = 1e18;
+    uint256 internal constant DEFAULT_PROPOSER_BOND = TOKEN_UNIT / 100;
     uint256 internal constant DEFAULT_CHALLENGER_BOND = DEFAULT_PROPOSER_BOND;
     uint8 internal constant DEFAULT_PROOF_THRESHOLD = 2;
 
@@ -103,8 +103,8 @@ contract DeployProofSystem is Script {
         deployment.vaultProxyAdmin = config.proxyAdmin;
         if (address(config.existingBondVault) == address(0)) {
             vm.startBroadcast(config.privateKey);
-            WLDStakingVault vaultImpl = new WLDStakingVault(config.wldWithdrawalDelay);
-            deployment.bondVault = IWLDStakingVault(
+            ERC20StakingVault vaultImpl = new ERC20StakingVault(config.erc20WithdrawalDelay);
+            deployment.bondVault = IERC20StakingVault(
                 deployCode("opstack/out/Proxy.sol/Proxy.json", abi.encode(address(config.proxyAdmin)))
             );
             vm.stopBroadcast();
@@ -115,7 +115,8 @@ contract DeployProofSystem is Script {
                     payable(address(deployment.bondVault)),
                     address(vaultImpl),
                     abi.encodeCall(
-                        IWLDStakingVault.initialize, (config.wld, config.systemConfig, config.disputeGameFactory)
+                        IERC20StakingVault.initialize,
+                        (config.bondToken, config.systemConfig, config.disputeGameFactory)
                     )
                 );
             vm.stopBroadcast();
@@ -157,9 +158,9 @@ contract DeployProofSystem is Script {
         config.anchorStateRegistry = IAnchorStateRegistry(vm.envAddress("ANCHOR_STATE_REGISTRY"));
         config.systemConfig = ISystemConfig(vm.envAddress("SYSTEM_CONFIG"));
         config.proxyAdmin = IProxyAdmin(vm.envAddress("OP_CHAIN_PROXY_ADMIN"));
-        config.wld = IERC20(vm.envAddress("WLD_TOKEN"));
-        config.existingBondVault = IWLDStakingVault(vm.envOr("WLD_STAKING_VAULT", address(0)));
-        config.wldWithdrawalDelay = vm.envOr("WLD_WITHDRAWAL_DELAY", uint256(300));
+        config.bondToken = IERC20(vm.envAddress("BOND_TOKEN"));
+        config.existingBondVault = IERC20StakingVault(vm.envOr("ERC20_STAKING_VAULT", address(0)));
+        config.erc20WithdrawalDelay = vm.envOr("ERC20_WITHDRAWAL_DELAY", uint256(300));
         config.proxyAdminOwnerKey = vm.envOr("OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY", uint256(0));
     }
 
@@ -175,7 +176,7 @@ contract DeployProofSystem is Script {
         _requireContract(address(config.validityProofVerifier), "VALIDITY_PROOF_VERIFIER");
         _requireContract(address(config.teeVerifier), "TEE_VERIFIER");
         _requireContract(address(config.securityCouncil), "SECURITY_COUNCIL_VERIFIER");
-        _requireContract(address(config.wld), "WLD_TOKEN");
+        _requireContract(address(config.bondToken), "BOND_TOKEN");
 
         // The 2-of-3 threshold only means anything if the lanes are independent: pointing two
         // lanes at one verifier lets a single party satisfy both and resolve on its own.
@@ -199,10 +200,12 @@ contract DeployProofSystem is Script {
             config.disputeGameFactory.owner() == config.proxyAdmin.owner(),
             "DeployProofSystem: DGF and ProxyAdmin owners must match"
         );
-        IWLDStakingVault currentBondVault = _currentBondVault(config.disputeGameFactory);
+        IERC20StakingVault currentBondVault = _currentBondVault(config.disputeGameFactory);
         if (address(currentBondVault) != address(0)) {
-            require(address(config.existingBondVault) != address(0), "DeployProofSystem: existing WLD vault required");
-            require(config.existingBondVault == currentBondVault, "DeployProofSystem: must reuse current WLD vault");
+            require(
+                address(config.existingBondVault) != address(0), "DeployProofSystem: existing ERC-20 vault required"
+            );
+            require(config.existingBondVault == currentBondVault, "DeployProofSystem: must reuse current ERC-20 vault");
         }
         if (address(config.existingBondVault) == address(0)) {
             require(config.proxyAdminOwnerKey != 0, "DeployProofSystem: ProxyAdmin owner key required");
@@ -211,8 +214,8 @@ contract DeployProofSystem is Script {
                 "DeployProofSystem: ProxyAdmin owner key mismatch"
             );
         } else {
-            _requireContract(address(config.existingBondVault), "WLD_STAKING_VAULT");
-            require(config.existingBondVault.wld() == config.wld, "DeployProofSystem: vault WLD mismatch");
+            _requireContract(address(config.existingBondVault), "ERC20_STAKING_VAULT");
+            require(config.existingBondVault.token() == config.bondToken, "DeployProofSystem: vault token mismatch");
             require(
                 config.existingBondVault.systemConfig() == config.systemConfig,
                 "DeployProofSystem: vault SystemConfig mismatch"
@@ -226,7 +229,7 @@ contract DeployProofSystem is Script {
                 "DeployProofSystem: vault ProxyAdmin mismatch"
             );
             require(
-                config.existingBondVault.delay() == config.wldWithdrawalDelay,
+                config.existingBondVault.delay() == config.erc20WithdrawalDelay,
                 "DeployProofSystem: vault withdrawal delay mismatch"
             );
         }
@@ -241,14 +244,14 @@ contract DeployProofSystem is Script {
         require(config.challengerBond > 0, "DeployProofSystem: challenger bond required");
     }
 
-    function _currentBondVault(IDisputeGameFactory factory) internal view returns (IWLDStakingVault bondVault) {
+    function _currentBondVault(IDisputeGameFactory factory) internal view returns (IERC20StakingVault bondVault) {
         IDisputeGame currentImplementation = factory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE);
-        if (address(currentImplementation) == address(0)) return IWLDStakingVault(address(0));
+        if (address(currentImplementation) == address(0)) return IERC20StakingVault(address(0));
 
-        try IMultiProofGame(address(currentImplementation)).bondVault() returns (IWLDStakingVault currentBondVault) {
+        try IMultiProofGame(address(currentImplementation)).bondVault() returns (IERC20StakingVault currentBondVault) {
             bondVault = currentBondVault;
         } catch {
-            // The first WLD migration may replace a legacy implementation without this getter.
+            // The first ERC-20 bond migration may replace a legacy implementation without this getter.
         }
     }
 
@@ -294,9 +297,9 @@ contract DeployProofSystem is Script {
         vm.serializeAddress(root, "securityCouncil", address(config.securityCouncil));
         vm.serializeAddress(root, "protocolFeeRecipient", config.protocolFeeRecipient);
         vm.serializeAddress(root, "gameImplementation", address(deployment.gameImpl));
-        vm.serializeAddress(root, "wldToken", address(config.wld));
-        vm.serializeAddress(root, "wldStakingVault", address(deployment.bondVault));
-        vm.serializeAddress(root, "wldStakingVaultProxyAdmin", address(deployment.vaultProxyAdmin));
+        vm.serializeAddress(root, "bondToken", address(config.bondToken));
+        vm.serializeAddress(root, "erc20StakingVault", address(deployment.bondVault));
+        vm.serializeAddress(root, "erc20StakingVaultProxyAdmin", address(deployment.vaultProxyAdmin));
         vm.serializeUint(root, "gameType", uint256(GameType.unwrap(GameTypes.MULTI_PROOF_GAME_TYPE)));
         vm.serializeBytes32(root, "rollupConfigHash", config.rollupConfigHash);
         vm.serializeBytes32(root, "aggregationVKey", config.aggregationVKey);
@@ -309,7 +312,7 @@ contract DeployProofSystem is Script {
         vm.serializeUint(root, "proofPeriod", config.proofPeriod);
         vm.serializeUint(root, "proposerBond", config.proposerBond);
         vm.serializeUint(root, "challengerBond", config.challengerBond);
-        vm.serializeUint(root, "wldWithdrawalDelay", config.wldWithdrawalDelay);
+        vm.serializeUint(root, "erc20WithdrawalDelay", config.erc20WithdrawalDelay);
         vm.serializeUint(root, "retirementTimestampAtDeployment", config.anchorStateRegistry.retirementTimestamp());
         vm.serializeAddress(root, "anchorGameAtDeployment", address(config.anchorStateRegistry.anchorGame()));
         string memory json = vm.serializeUint(root, "proofThreshold", config.proofThreshold);

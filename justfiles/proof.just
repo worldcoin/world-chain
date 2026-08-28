@@ -31,7 +31,7 @@
 #   AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT, TEE_IMAGE_ID,
 #   CERT_MANAGER_ADDRESS, NITRO_ATTESTATION_VERIFIER,
 #   DISPUTE_GAME_FACTORY, ANCHOR_STATE_REGISTRY, SYSTEM_CONFIG,
-#   OP_CHAIN_PROXY_ADMIN, WLD_TOKEN, DGF_OWNER_KEY,
+#   OP_CHAIN_PROXY_ADMIN, BOND_TOKEN, DGF_OWNER_KEY,
 #   GUARDIAN_KEY (when switching the respected game type)
 #
 # PCR0/PCR1/PCR2 are inputs here, not discovered: measure the running enclave
@@ -184,7 +184,7 @@ proof-deploy-mocks env="alphanet":
 # its address only if the verifier gateway or proof interface changes. For a devnet,
 # run `proof-deploy-mocks` first and read the four addresses out of
 # deployments/<env>-proof-mocks.json. An existing deployment record supplies the singleton
-# WLD vault automatically during rotations unless WLD_STAKING_VAULT is set explicitly.
+# ERC-20 vault automatically during rotations unless ERC20_STAKING_VAULT is set explicitly.
 # Phase 2 – Deploy the proof system implementation and vault.
 [group('proof')]
 proof-deploy-system env="alphanet":
@@ -201,7 +201,7 @@ proof-deploy-system env="alphanet":
     : "${ANCHOR_STATE_REGISTRY:?ANCHOR_STATE_REGISTRY is required (op-deployer AnchorStateRegistryProxy)}"
     : "${SYSTEM_CONFIG:?SYSTEM_CONFIG is required (op-deployer SystemConfigProxy)}"
     : "${OP_CHAIN_PROXY_ADMIN:?OP_CHAIN_PROXY_ADMIN is required (op-deployer ProxyAdmin)}"
-    : "${WLD_TOKEN:?WLD_TOKEN is required}"
+    : "${BOND_TOKEN:?BOND_TOKEN is required}"
     : "${PROTOCOL_FEE_RECIPIENT:?PROTOCOL_FEE_RECIPIENT is required (proof-timeout forfeitures)}"
     : "${VALIDITY_PROOF_VERIFIER:?VALIDITY_PROOF_VERIFIER is required (e.g. SP1ValidityVerifier; devnet: proof-deploy-mocks)}"
     : "${TEE_VERIFIER:?TEE_VERIFIER is required (e.g. NitroProofVerifier from proof-deploy-nitro)}"
@@ -211,13 +211,13 @@ proof-deploy-system env="alphanet":
     export PROPOSER_BOND="${PROPOSER_BOND:-10000000000000000}"
     export CHALLENGER_BOND="${CHALLENGER_BOND:-10000000000000000}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
-    export WLD_WITHDRAWAL_DELAY="${WLD_WITHDRAWAL_DELAY:-300}"
+    export ERC20_WITHDRAWAL_DELAY="${ERC20_WITHDRAWAL_DELAY:-300}"
     DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-proof-system.json"
-    if [ -z "${WLD_STAKING_VAULT:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
-        WLD_STAKING_VAULT=$(jq -r '.wldStakingVault // empty' "$DEPLOYMENTS_FILE")
-        export WLD_STAKING_VAULT
+    if [ -z "${ERC20_STAKING_VAULT:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
+        ERC20_STAKING_VAULT=$(jq -r '.erc20StakingVault // empty' "$DEPLOYMENTS_FILE")
+        export ERC20_STAKING_VAULT
     fi
-    if [ -z "${WLD_STAKING_VAULT:-}" ]; then
+    if [ -z "${ERC20_STAKING_VAULT:-}" ]; then
         : "${OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY:?OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY is required for the first vault deployment}"
     fi
     BROADCAST_FLAG=""
@@ -227,9 +227,9 @@ proof-deploy-system env="alphanet":
     echo "Proof-system parameters:" >&2
     echo "  challenge period: $CHALLENGE_PERIOD seconds" >&2
     echo "  proof period: $PROOF_PERIOD seconds" >&2
-    echo "  proposer bond: $PROPOSER_BOND WLD base units" >&2
-    echo "  challenger bond: $CHALLENGER_BOND WLD base units" >&2
-    echo "  WLD vault: ${WLD_STAKING_VAULT:-new singleton}" >&2
+    echo "  proposer bond: $PROPOSER_BOND bond-token base units" >&2
+    echo "  challenger bond: $CHALLENGER_BOND bond-token base units" >&2
+    echo "  ERC-20 vault: ${ERC20_STAKING_VAULT:-new singleton}" >&2
     echo "  aggregation vkey: $AGGREGATION_VKEY" >&2
     echo "  range vkey commitment: $RANGE_VKEY_COMMITMENT" >&2
     echo "  TEE image ID: $TEE_IMAGE_ID" >&2
@@ -257,7 +257,7 @@ proof-activate-system env="alphanet":
     : "${ANCHOR_STATE_REGISTRY:?ANCHOR_STATE_REGISTRY is required}"
     : "${SYSTEM_CONFIG:?SYSTEM_CONFIG is required}"
     : "${OP_CHAIN_PROXY_ADMIN:?OP_CHAIN_PROXY_ADMIN is required}"
-    : "${WLD_TOKEN:?WLD_TOKEN is required}"
+    : "${BOND_TOKEN:?BOND_TOKEN is required}"
     : "${DGF_OWNER_KEY:?DGF_OWNER_KEY is required}"
     DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-proof-system.json"
     if [ -z "${GAME_IMPLEMENTATION:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then

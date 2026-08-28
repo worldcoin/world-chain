@@ -79,7 +79,7 @@ contract ActivateProofSystemTest is OPStackFixtures {
         vm.setEnv("ANCHOR_STATE_REGISTRY", vm.toString(address(asr)));
         vm.setEnv("SYSTEM_CONFIG", vm.toString(address(systemConfig)));
         vm.setEnv("OP_CHAIN_PROXY_ADMIN", vm.toString(address(proxyAdmin)));
-        vm.setEnv("WLD_TOKEN", vm.toString(address(wld)));
+        vm.setEnv("BOND_TOKEN", vm.toString(address(bondToken)));
         vm.setEnv("GAME_IMPLEMENTATION", vm.toString(address(implementation)));
 
         IMultiProofGame activated = activation.run();
@@ -98,7 +98,7 @@ contract ActivateProofSystemTest is OPStackFixtures {
             anchorStateRegistry: asr,
             systemConfig: ISystemConfig(address(systemConfig)),
             proxyAdmin: proxyAdmin,
-            wld: wld,
+            bondToken: bondToken,
             gameImplementation: IMultiProofGame(address(gameImpl)),
             requireFreshAnchor: requireFreshAnchor
         });
