@@ -79,7 +79,7 @@ interface IWLDStakingVault {
     event AccountHeld(address indexed account, address indexed recipient, uint256 amount);
 
     /// @notice Emitted when backing WLD is recovered to the ProxyAdmin owner without reducing
-    ///         recorded liabilities.
+    ///         internal account or game balances.
     /// @param recipient The ProxyAdmin owner the WLD was transferred to.
     /// @param amount The recovered WLD.
     event Recovered(address indexed recipient, uint256 amount);
@@ -87,7 +87,7 @@ interface IWLDStakingVault {
     /// @notice Initializes the proxy with its fixed external dependencies.
     function initialize(IERC20 wld, ISystemConfig systemConfig, IDisputeGameFactory disputeGameFactory) external;
 
-    /// @notice Canonical WLD token backing every vault liability.
+    /// @notice Canonical WLD token held by the vault.
     function wld() external view returns (IERC20);
 
     /// @notice System configuration supplying the shared pause state.
@@ -99,9 +99,6 @@ interface IWLDStakingVault {
     /// @notice Delay between requesting and executing an external WLD withdrawal.
     function delay() external view returns (uint256);
 
-    /// @notice Total WLD owed across available, pending, and active-game balances.
-    function totalLiabilities() external view returns (uint256);
-
     /// @notice Deposited or settled WLD available to fund bonds or request for withdrawal.
     function availableBalance(address account) external view returns (uint256);
 
@@ -110,9 +107,6 @@ interface IWLDStakingVault {
 
     /// @notice Bond amounts assigned to a game and whether its complete pot was settled.
     function gameBonds(address game) external view returns (uint256 proposerBond, uint256 challengerBond, bool settled);
-
-    /// @notice Whether backing WLD currently covers every recorded liability.
-    function isSolvent() external view returns (bool);
 
     /// @notice ProxyAdmin stored in the OP Proxy's ERC-1967 admin slot.
     function proxyAdmin() external view returns (IProxyAdmin);
@@ -147,6 +141,6 @@ interface IWLDStakingVault {
     /// @notice Moves an amount of an account's available and pending claims to the ProxyAdmin owner.
     function hold(address account, uint256 amount) external;
 
-    /// @notice Transfers backing WLD to the ProxyAdmin owner without reducing liabilities.
+    /// @notice Transfers backing WLD to the ProxyAdmin owner without reducing internal balances.
     function recover(uint256 amount) external;
 }

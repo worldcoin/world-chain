@@ -143,8 +143,9 @@ contract ActivateProofSystem is Script {
         );
         require(gameImpl.bondVault().wld() == config.wld, "ActivateProofSystem: vault WLD mismatch");
         require(address(config.wld).code.length > 0, "ActivateProofSystem: WLD token missing");
-        require(gameImpl.bondVault().proxyAdmin() == config.proxyAdmin, "ActivateProofSystem: vault ProxyAdmin mismatch");
-        require(gameImpl.bondVault().isSolvent(), "ActivateProofSystem: vault insolvent");
+        require(
+            gameImpl.bondVault().proxyAdmin() == config.proxyAdmin, "ActivateProofSystem: vault ProxyAdmin mismatch"
+        );
 
         IWLDStakingVault currentBondVault = _currentBondVault(config.disputeGameFactory);
         require(
