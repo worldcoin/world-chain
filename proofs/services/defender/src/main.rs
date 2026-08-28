@@ -18,7 +18,7 @@ use world_chain_defender::{
     AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig, WorldChainDefender,
 };
 use world_chain_proof_protocol::{
-    IDisputeGameFactory, IWLDStakingVault, OptimismConsensusClient, VerifyingConsensusProvider,
+    IDisputeGameFactory, IERC20StakingVault, OptimismConsensusClient, VerifyingConsensusProvider,
     read_registered_bond_vault,
 };
 use world_chain_proof_tx_signer::build_transaction_signer;
@@ -141,7 +141,7 @@ async fn main() -> Result<()> {
     match read_registered_bond_vault(&provider, &factory).await {
         Ok(bond_vault) => {
             let vault =
-                IWLDStakingVault::IWLDStakingVaultInstance::new(bond_vault, provider.clone());
+                IERC20StakingVault::IERC20StakingVaultInstance::new(bond_vault, provider.clone());
             match vault.availableBalance(reward_recipient).call().await {
                 Ok(balance) => world_chain_proof_metrics::record_vault_balance(
                     bond_vault,
@@ -150,11 +150,11 @@ async fn main() -> Result<()> {
                     balance,
                 ),
                 Err(error) => {
-                    warn!(%error, "failed to fetch defender reward-recipient WLD vault balance")
+                    warn!(%error, "failed to fetch defender reward-recipient ERC-20 vault balance")
                 }
             }
         }
-        Err(error) => warn!(%error, "failed to discover WLD vault for defender telemetry"),
+        Err(error) => warn!(%error, "failed to discover ERC-20 vault for defender telemetry"),
     }
 
     let client = AlloyDefenderClient::new(

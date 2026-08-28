@@ -18,7 +18,7 @@ pub struct GameMetadata {
 pub struct ChallengeSubmission {
     /// Transaction hash for the challenge submission.
     pub tx_hash: TxHash,
-    /// WLD bond locked by the challenge, read from the game itself.
+    /// ERC-20 bond locked by the challenge, read from the game itself.
     pub bond: U256,
 }
 
