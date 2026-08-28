@@ -48,7 +48,6 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     IERC20 public wld;
     ISystemConfig public systemConfig;
     IDisputeGameFactory public disputeGameFactory;
-    uint256 public totalLiabilities;
 
     mapping(address account => uint256 amount) public availableBalance;
     mapping(address account => WithdrawalRequest request) public withdrawals;
@@ -95,11 +94,6 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     }
 
     /// @inheritdoc IWLDStakingVault
-    function isSolvent() external view returns (bool) {
-        return wld.balanceOf(address(this)) >= totalLiabilities;
-    }
-
-    /// @inheritdoc IWLDStakingVault
     function deposit(address account, uint256 amount) external {
         _deposit(account, amount);
     }
@@ -129,7 +123,6 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
 
         request.amount -= amount;
         if (request.amount == 0) request.timestamp = 0;
-        totalLiabilities -= amount;
         wld.safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
@@ -242,8 +235,7 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         address recipient = _assertProxyAdminOwner();
         uint256 balance = wld.balanceOf(address(this));
         uint256 recovered = amount < balance ? amount : balance;
-        // Liabilities intentionally remain unchanged: recovery may seize backing for active
-        // games without blocking their later internal settlement.
+        // Recovery may seize backing for active games without blocking their later internal settlement.
         wld.safeTransfer(recipient, recovered);
         emit Recovered(recipient, recovered);
     }
@@ -258,7 +250,6 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
         if (received != amount) revert ExactTransferRequired(amount, received);
 
         availableBalance[account] += amount;
-        totalLiabilities += amount;
         emit Deposited(msg.sender, account, amount);
     }
 

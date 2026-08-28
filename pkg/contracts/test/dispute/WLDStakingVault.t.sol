@@ -113,7 +113,6 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         assertEq(wld.allowance(funder, address(bondVault)), 0);
         assertEq(wld.balanceOf(funder), 0);
         assertEq(wld.balanceOf(address(bondVault)), 203 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 203 * WLD_UNIT);
     }
 
     function test_DepositRejectsZeroAccount() public {
@@ -155,8 +154,6 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         assertEq(wld.balanceOf(proposer), 0);
         assertEq(wld.allowance(proposer, address(bondVault)), 0);
         assertEq(wld.balanceOf(address(bondVault)), 200 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
-        assertTrue(bondVault.isSolvent());
 
         (uint256 proposerBond_, uint256 challengerBond_, bool settled_) = bondVault.gameBonds(address(game));
         assertEq(proposerBond_, PROPOSER_BOND);
@@ -210,7 +207,6 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         vm.expectRevert();
         impersonator.lock();
         assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
     }
 
     function test_LockChallengerBond_RejectsUnregisteredGame() public {
@@ -221,20 +217,17 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         bondVault.lockChallengerBond();
     }
 
-    function test_Settlement_DelayedWithdrawalKeepsExactLiabilities() public {
+    function test_Settlement_DelayedWithdrawalTransfersWLD() public {
         MultiProofGame game = _proposeAtAnchor();
         _resolveUnchallenged(game);
         _passAirgap(game);
         game.closeGame();
 
         assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
-        assertTrue(bondVault.isSolvent());
 
         vm.prank(proposer);
         bondVault.requestWithdrawal(PROPOSER_BOND);
         assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
 
         vm.warp(block.timestamp + WLD_WITHDRAWAL_DELAY_SECONDS);
         vm.prank(proposer);
@@ -242,8 +235,7 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
 
         assertEq(wld.balanceOf(proposer), PROPOSER_BOND);
         assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 199 * WLD_UNIT);
-        assertTrue(bondVault.isSolvent());
+        assertEq(wld.balanceOf(address(bondVault)), 199 * WLD_UNIT);
     }
 
     function test_WithdrawalRequestResetsDelayAndPauseOnlyBlocksTransfer() public {
@@ -304,7 +296,6 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         assertEq(wld.allowance(proposer, address(bondVault)), 0);
         (uint256 proposerBond_,,) = bondVault.gameBonds(address(second));
         assertEq(proposerBond_, PROPOSER_BOND);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
     }
 
     function test_BreakGlassHoldAndRecoverMirrorDelayedWETHTrust() public {
@@ -316,11 +307,12 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         bondVault.hold(proposer, PROPOSER_BOND);
         assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
         assertEq(bondVault.availableBalance(address(this)), PROPOSER_BOND);
-        assertTrue(bondVault.isSolvent());
 
         bondVault.recover(PROPOSER_BOND);
-        assertFalse(bondVault.isSolvent());
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
+        assertEq(wld.balanceOf(address(bondVault)), 199 * WLD_UNIT);
+        assertEq(wld.balanceOf(address(this)), PROPOSER_BOND);
+        assertEq(bondVault.availableBalance(proposer), 99 * WLD_UNIT);
+        assertEq(bondVault.availableBalance(address(this)), PROPOSER_BOND);
     }
 
     function test_BreakGlassHoldAndRecoverRejectUnauthorizedCaller() public {
@@ -335,34 +327,24 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         bondVault.recover(WLD_UNIT);
     }
 
-    function test_DirectDonationCreatesSurplusWithoutChangingLiabilities() public {
-        wld.mint(address(bondVault), 5 * WLD_UNIT);
-
-        assertEq(wld.balanceOf(address(bondVault)), 205 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
-        assertTrue(bondVault.isSolvent());
-    }
-
-    function test_InsolvencyDoesNotBlockInternalSettlementOrCreation() public {
+    function test_RecoveryDoesNotBlockInternalSettlementOrCreation() public {
         MultiProofGame game = _proposeAtAnchor();
         _challenge(game);
         _submitLanes(game, PROOF_THRESHOLD);
         game.resolve();
 
         bondVault.recover(type(uint256).max);
-        assertFalse(bondVault.isSolvent());
+        assertEq(wld.balanceOf(address(bondVault)), 0);
 
         _passAirgap(game);
         game.closeGame();
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
 
         MultiProofGame next = _proposeChild(0);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
         (uint256 proposerBond_,,) = bondVault.gameBonds(address(next));
         assertEq(proposerBond_, PROPOSER_BOND);
     }
 
-    function test_OverlappingParticipantRolesSettleOnceAndConserveLiabilities() public {
+    function test_OverlappingParticipantRolesSettleOnce() public {
         MultiProofGame game = _proposeAtAnchor();
         vm.prank(proposer);
         game.challenge();
@@ -375,7 +357,6 @@ contract WLDStakingVaultAccountingTest is OPStackFixtures {
         game.closeGame();
 
         assertEq(bondVault.availableBalance(proposer), 100 * WLD_UNIT);
-        assertEq(bondVault.totalLiabilities(), 200 * WLD_UNIT);
     }
 
     function test_Settle_RejectsUnregisteredGame() public {

@@ -201,14 +201,8 @@ contract DeployProofSystem is Script {
         );
         IWLDStakingVault currentBondVault = _currentBondVault(config.disputeGameFactory);
         if (address(currentBondVault) != address(0)) {
-            require(
-                address(config.existingBondVault) != address(0),
-                "DeployProofSystem: existing WLD vault required"
-            );
-            require(
-                config.existingBondVault == currentBondVault,
-                "DeployProofSystem: must reuse current WLD vault"
-            );
+            require(address(config.existingBondVault) != address(0), "DeployProofSystem: existing WLD vault required");
+            require(config.existingBondVault == currentBondVault, "DeployProofSystem: must reuse current WLD vault");
         }
         if (address(config.existingBondVault) == address(0)) {
             require(config.proxyAdminOwnerKey != 0, "DeployProofSystem: ProxyAdmin owner key required");
@@ -235,7 +229,6 @@ contract DeployProofSystem is Script {
                 config.existingBondVault.delay() == config.wldWithdrawalDelay,
                 "DeployProofSystem: vault withdrawal delay mismatch"
             );
-            require(config.existingBondVault.isSolvent(), "DeployProofSystem: vault insolvent");
         }
         require(config.protocolFeeRecipient != address(0), "DeployProofSystem: protocol fee recipient required");
         require(config.aggregationVKey != bytes32(0), "DeployProofSystem: aggregation vkey required");
