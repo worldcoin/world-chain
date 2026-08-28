@@ -119,6 +119,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     uint256 public immutable challengerBond;
 
     /// @notice Recipient of the share of forfeited proposer bonds not paid to a challenger.
+    /// @dev May be set to `0x000000000000000000000000000000000000dEaD` to make that share unspendable.
     address public immutable protocolFeeRecipient;
 
     /// @notice SP1 aggregation-program verification key used by the validity lane.
