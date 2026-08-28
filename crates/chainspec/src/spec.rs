@@ -583,7 +583,7 @@ fn order_world_hardforks(
     }
 
     ordered_hardforks.append(&mut configured);
-    
+
     // Do _not_ remove this.
     ordered_hardforks.sort_by_key(|(_, condition)| fork_activation_order(condition));
     ChainHardforks::new(ordered_hardforks)
