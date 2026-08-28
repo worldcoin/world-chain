@@ -73,8 +73,8 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     function initialize(IERC20 wld_, ISystemConfig systemConfig_, IDisputeGameFactory disputeGameFactory_)
         external
         initializer
+        onlyProxyAdminOrOwner
     {
-        _assertProxyAdminOrOwner();
         if (
             address(wld_) == address(0) || address(wld_).code.length == 0 || address(systemConfig_) == address(0)
                 || address(systemConfig_).code.length == 0 || address(disputeGameFactory_) == address(0)
@@ -139,9 +139,7 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     }
 
     /// @inheritdoc IWLDStakingVault
-    function lockProposerBond() external {
-        _assertAlignedOwners();
-
+    function lockProposerBond() external ownersAligned {
         IMultiProofGame game = IMultiProofGame(msg.sender);
         if (
             GameType.unwrap(game.gameType()) != GameType.unwrap(GameTypes.MULTI_PROOF_GAME_TYPE)
@@ -176,9 +174,7 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     }
 
     /// @inheritdoc IWLDStakingVault
-    function lockChallengerBond() external {
-        _assertAlignedOwners();
-
+    function lockChallengerBond() external ownersAligned {
         IMultiProofGame game = _registeredGame(msg.sender);
         GameBond storage bond = gameBonds[msg.sender];
         if (bond.proposerBond == 0) revert GameNotRegistered(msg.sender);
@@ -223,8 +219,8 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
     // intentionally mirrors DelayedWETH's break-glass custody model, but this singleton holds
     // participants' settled WLD credits and therefore has a larger blast radius.
     /// @inheritdoc IWLDStakingVault
-    function hold(address account, uint256 amount) public {
-        address recipient = _assertProxyAdminOwner();
+    function hold(address account, uint256 amount) public onlyProxyAdminOwner {
+        address recipient = msg.sender;
         uint256 heldBalance = availableBalance[account] + withdrawals[account].amount;
         if (heldBalance < amount) revert InsufficientBalance(account, heldBalance, amount);
         if (account == recipient || amount == 0) return;
@@ -267,25 +263,27 @@ contract WLDStakingVault is Initializable, IWLDStakingVault {
 
     // Bond locking lets factory-selected game code allocate participant balances, so the factory
     // owner must be the same governance authority that controls this vault.
-    function _assertAlignedOwners() internal view {
+    modifier ownersAligned() {
         address factoryOwner = disputeGameFactory.owner();
         address vaultOwner = proxyAdminOwner();
         if (factoryOwner != vaultOwner) revert OwnerMismatch(factoryOwner, vaultOwner);
+        _;
     }
 
-    function _assertProxyAdminOrOwner() internal view {
+    modifier onlyProxyAdminOrOwner() {
         IProxyAdmin admin = proxyAdmin();
         if (msg.sender != address(admin) && msg.sender != admin.owner()) revert NotProxyAdminOwner(msg.sender);
+        _;
+    }
+
+    modifier onlyProxyAdminOwner() {
+        if (msg.sender != proxyAdminOwner()) revert NotProxyAdminOwner(msg.sender);
+        _;
     }
 
     function _debitAvailable(address account, uint256 amount) internal {
         uint256 available = availableBalance[account];
         if (available < amount) revert InsufficientBalance(account, available, amount);
         availableBalance[account] = available - amount;
-    }
-
-    function _assertProxyAdminOwner() internal view returns (address owner) {
-        owner = proxyAdminOwner();
-        if (msg.sender != owner) revert NotProxyAdminOwner(msg.sender);
     }
 }
