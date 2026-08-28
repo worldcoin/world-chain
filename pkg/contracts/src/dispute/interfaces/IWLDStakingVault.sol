@@ -78,12 +78,6 @@ interface IWLDStakingVault {
     /// @param amount The seized WLD.
     event AccountHeld(address indexed account, address indexed recipient, uint256 amount);
 
-    /// @notice Emitted when backing WLD is recovered to the ProxyAdmin owner without reducing
-    ///         internal account or game balances.
-    /// @param recipient The ProxyAdmin owner the WLD was transferred to.
-    /// @param amount The recovered WLD.
-    event Recovered(address indexed recipient, uint256 amount);
-
     /// @notice Initializes the proxy with its fixed external dependencies.
     function initialize(IERC20 wld, ISystemConfig systemConfig, IDisputeGameFactory disputeGameFactory) external;
 
@@ -140,7 +134,4 @@ interface IWLDStakingVault {
 
     /// @notice Moves an amount of an account's available and pending claims to the ProxyAdmin owner.
     function hold(address account, uint256 amount) external;
-
-    /// @notice Transfers backing WLD to the ProxyAdmin owner without reducing internal balances.
-    function recover(uint256 amount) external;
 }
