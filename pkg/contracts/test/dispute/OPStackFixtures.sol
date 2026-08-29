@@ -4,33 +4,36 @@ pragma solidity 0.8.28;
 import {Test} from "@forge-std/Test.sol";
 
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
+import {ERC20StakingVault} from "../../src/dispute/ERC20StakingVault.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
+import {IERC20StakingVault} from "../../src/dispute/interfaces/IERC20StakingVault.sol";
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 import {LibProof, ProofLane} from "../../src/dispute/lib/LibProof.sol";
 import {IWorldChainProofVerifier} from "../../src/dispute/interfaces/IWorldChainProofVerifier.sol";
 import {MockRootIdVerifier} from "../mocks/MockRootIdVerifier.sol";
 import {MockSystemConfig} from "../mocks/MockSystemConfig.sol";
+import {MockBondToken} from "../mocks/MockBondToken.sol";
 
 import {Claim, GameStatus, GameType, Hash, Proposal} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
-import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.sol";
 import {IProxyAdmin} from "@optimism-bedrock/interfaces/universal/IProxyAdmin.sol";
 import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 
 /// @dev Test harness deploying the real (pinned) OP `DisputeGameFactory`,
-///      `AnchorStateRegistry`, and `DelayedWETH` from the `opstack/` sub-project artifacts,
+///      `AnchorStateRegistry`, and `Proxy` from the `opstack/` sub-project artifacts,
 ///      wired to a `MultiProofGame` implementation. Run `just build-opstack`
 ///      before `forge test`.
 abstract contract OPStackFixtures is Test {
     GameType internal constant WC_GAME_TYPE = GameTypes.MULTI_PROOF_GAME_TYPE;
     uint256 internal constant FINALITY_DELAY_SECONDS = 3.5 days;
-    uint256 internal constant WETH_DELAY_SECONDS = 7 days;
+    uint256 internal constant ERC20_WITHDRAWAL_DELAY_SECONDS = 7 days;
     uint64 internal constant CHALLENGE_PERIOD = 1 days;
     uint64 internal constant PROOF_PERIOD = 7 days;
-    uint256 internal constant PROPOSER_BOND = 1 ether;
-    uint256 internal constant CHALLENGER_BOND = 0.1 ether;
+    uint256 internal constant TOKEN_UNIT = 1e18;
+    uint256 internal constant PROPOSER_BOND = TOKEN_UNIT;
+    uint256 internal constant CHALLENGER_BOND = TOKEN_UNIT;
     uint8 internal constant PROOF_THRESHOLD = 2;
 
     uint256 internal constant CHAIN_ID = 480;
@@ -52,7 +55,8 @@ abstract contract OPStackFixtures is Test {
     IProxyAdmin internal proxyAdmin;
     IDisputeGameFactory internal dgf;
     IAnchorStateRegistry internal asr;
-    IDelayedWETH internal weth;
+    MockBondToken internal bondToken;
+    IERC20StakingVault internal bondVault;
 
     MockRootIdVerifier internal validityVerifier;
     MockRootIdVerifier internal teeVerifier;
@@ -88,14 +92,14 @@ abstract contract OPStackFixtures is Test {
             )
         );
 
-        // DelayedWETH proxy.
-        weth = IDelayedWETH(
-            payable(_proxied("opstack/out/DelayedWETH.sol/DelayedWETH.json", abi.encode(WETH_DELAY_SECONDS)))
-        );
+        // WIP-1006 ERC-20 bond token staking vault proxy.
+        bondToken = new MockBondToken();
+        ERC20StakingVault vaultImpl = new ERC20StakingVault(ERC20_WITHDRAWAL_DELAY_SECONDS);
+        bondVault = IERC20StakingVault(deployCode("opstack/out/Proxy.sol/Proxy.json", abi.encode(address(proxyAdmin))));
         proxyAdmin.upgradeAndCall(
-            payable(address(weth)),
-            _lastImpl,
-            abi.encodeCall(IDelayedWETH.initialize, (ISystemConfig(address(systemConfig))))
+            payable(address(bondVault)),
+            address(vaultImpl),
+            abi.encodeCall(IERC20StakingVault.initialize, (bondToken, ISystemConfig(address(systemConfig)), dgf))
         );
 
         // World Chain proof-system periphery + game implementation.
@@ -105,13 +109,13 @@ abstract contract OPStackFixtures is Test {
 
         gameImpl = new MultiProofGame(_gameConfig());
         dgf.setImplementation(WC_GAME_TYPE, IDisputeGame(address(gameImpl)), hex"");
-        dgf.setInitBond(WC_GAME_TYPE, PROPOSER_BOND);
+        dgf.setInitBond(WC_GAME_TYPE, 0);
 
         // The registry retires every game created at or before its initialization timestamp.
         vm.warp(block.timestamp + 1);
 
-        vm.deal(proposer, 100 ether);
-        vm.deal(challengerAccount, 100 ether);
+        _fundBondToken(proposer, 100 * TOKEN_UNIT);
+        _fundBondToken(challengerAccount, 100 * TOKEN_UNIT);
     }
 
     /// @dev Address of the implementation most recently deployed by `_proxied`.
@@ -141,7 +145,7 @@ abstract contract OPStackFixtures is Test {
             teeVerifier: IWorldChainProofVerifier(address(teeVerifier)),
             securityCouncil: IWorldChainProofVerifier(address(councilVerifier)),
             anchorStateRegistry: asr,
-            weth: weth
+            bondVault: bondVault
         });
     }
 
@@ -174,14 +178,24 @@ abstract contract OPStackFixtures is Test {
         return keccak256(abi.encode("output-root", l2BlockNumber));
     }
 
-    /// @dev Creates a game through the stock factory as `proposer`.
+    /// @dev Mints ERC-20 bond token to `account` and deposits it into the vault with no remaining allowance.
+    function _fundBondToken(address account, uint256 amount) internal {
+        bondToken.mint(account, amount);
+        vm.prank(account);
+        bondToken.approve(address(bondVault), amount);
+        vm.prank(account);
+        bondVault.deposit(account, amount);
+    }
+
+    /// @dev Creates through the stock factory as `proposer`; the vault locks the bond from
+    ///      the creator's available balance during `initialize`.
     function _propose(uint256 parentIndex, bytes32 rootClaim, uint256 l2BlockNumber, uint256 attempt)
         internal
         returns (MultiProofGame)
     {
         bytes memory extraData = _extraData(l2BlockNumber, parentIndex, attempt);
         vm.prank(proposer);
-        IDisputeGame proxy = dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), extraData);
+        IDisputeGame proxy = dgf.create(WC_GAME_TYPE, Claim.wrap(rootClaim), extraData);
         return MultiProofGame(address(proxy));
     }
 
@@ -193,8 +207,7 @@ abstract contract OPStackFixtures is Test {
         address parent = address(anchorGame) == address(0) ? address(asr) : address(anchorGame);
         bytes memory extraData = _extraDataForParent(target, parent, 0);
         vm.prank(proposer);
-        IDisputeGame proxy =
-            dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
+        IDisputeGame proxy = dgf.create(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
         return MultiProofGame(address(proxy));
     }
 
@@ -207,7 +220,7 @@ abstract contract OPStackFixtures is Test {
 
     function _challenge(MultiProofGame game) internal {
         vm.prank(challengerAccount);
-        game.challenge{value: CHALLENGER_BOND}();
+        game.challenge();
     }
 
     /// @dev Packs a compact `submitProofLane` payload: lane id, reward recipient, then the proof.
@@ -248,10 +261,15 @@ abstract contract OPStackFixtures is Test {
         vm.warp(game.resolvedAt().raw() + FINALITY_DELAY_SECONDS + 1);
     }
 
-    /// @dev Runs the full two-phase DelayedWETH claim for `recipient`.
+    /// @dev Closes the game, then runs the vault's delayed external ERC-20 bond token withdrawal.
     function _claim(MultiProofGame game, address recipient) internal {
-        game.claimCredit(recipient);
-        vm.warp(block.timestamp + WETH_DELAY_SECONDS);
-        game.claimCredit(recipient);
+        game.closeGame();
+        uint256 available = bondVault.availableBalance(recipient);
+        vm.prank(recipient);
+        bondVault.requestWithdrawal(available);
+        vm.warp(block.timestamp + ERC20_WITHDRAWAL_DELAY_SECONDS);
+        (uint256 amount,) = bondVault.withdrawals(recipient);
+        vm.prank(recipient);
+        bondVault.withdraw(amount);
     }
 }

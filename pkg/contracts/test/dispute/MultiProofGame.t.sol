@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {OPStackFixtures} from "./OPStackFixtures.sol";
 import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
+import {OwnerMismatch} from "../../src/dispute/lib/Errors.sol";
 import {LibProof, InvalidationReason, ProofLane, TransitionPublicValues} from "../../src/dispute/lib/LibProof.sol";
 
 import {
@@ -21,7 +22,6 @@ import {
     GameNotOver,
     GameOver,
     GamePaused,
-    IncorrectBondAmount,
     InvalidParentGame,
     ParentGameNotResolved
 } from "@optimism-bedrock/src/dispute/lib/Errors.sol";
@@ -48,60 +48,61 @@ contract MultiProofGameTest is OPStackFixtures {
         (IDisputeGame registered,) = dgf.games(gameType_, rootClaim_, extraData_);
         assertEq(address(registered), address(game));
         assertTrue(asr.isGameRegistered(IDisputeGame(address(game))));
-        assertEq(weth.balanceOf(address(game)), PROPOSER_BOND);
+        (uint256 proposerBond_, uint256 challengerBond_, bool settled_) = bondVault.gameBonds(address(game));
+        assertEq(proposerBond_, PROPOSER_BOND);
+        assertEq(challengerBond_, 0);
+        assertFalse(settled_);
         assertEq(game.proofBitmap().raw(), 0);
     }
 
     function test_Create_RejectsMalformedExtraData() public {
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        Claim claim = Claim.wrap(_rootClaimFor(target));
+        bytes memory shortExtraData = abi.encode(target, address(asr));
 
         vm.prank(proposer);
         vm.expectRevert(BadExtraData.selector);
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), abi.encode(target, address(asr))
-        );
+        dgf.create(WC_GAME_TYPE, claim, shortExtraData);
 
         uint256 malformedParent = uint256(uint160(address(asr))) | (uint256(1) << 160);
         bytes memory extraData = abi.encode(_domainHash(), target, malformedParent, uint256(0));
         vm.prank(proposer);
         vm.expectRevert(BadExtraData.selector);
-        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
+        dgf.create(WC_GAME_TYPE, claim, extraData);
     }
 
     function test_Create_RejectsWrongDomainAndBlockInterval() public {
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         bytes32 wrongDomain = keccak256("wrong-domain");
 
+        Claim claim = Claim.wrap(_rootClaimFor(target));
+        bytes memory wrongDomainExtraData = abi.encode(wrongDomain, target, address(asr), uint256(0));
         vm.prank(proposer);
         vm.expectRevert(
             abi.encodeWithSelector(IMultiProofGame.InvalidDomainHash.selector, gameImpl.domainHash(), wrongDomain)
         );
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), abi.encode(wrongDomain, target, address(asr), uint256(0))
-        );
+        dgf.create(WC_GAME_TYPE, claim, wrongDomainExtraData);
 
         uint256[4] memory wrongTargets =
             [STARTING_ANCHOR_BLOCK, STARTING_ANCHOR_BLOCK - 1, STARTING_ANCHOR_BLOCK + 1, target + 1];
         for (uint256 i = 0; i < wrongTargets.length; i++) {
+            Claim wrongClaim = Claim.wrap(_rootClaimFor(wrongTargets[i]));
+            bytes memory wrongExtraData = _extraData(wrongTargets[i], type(uint256).max, 0);
             vm.prank(proposer);
             vm.expectRevert(
                 abi.encodeWithSelector(IMultiProofGame.InvalidL2BlockNumber.selector, target, wrongTargets[i])
             );
-            dgf.create{value: PROPOSER_BOND}(
-                WC_GAME_TYPE,
-                Claim.wrap(_rootClaimFor(wrongTargets[i])),
-                _extraData(wrongTargets[i], type(uint256).max, 0)
-            );
+            dgf.create(WC_GAME_TYPE, wrongClaim, wrongExtraData);
         }
     }
 
     function test_Create_RejectsUnregisteredAndBlacklistedParents() public {
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        Claim claim = Claim.wrap(_rootClaimFor(target));
+        bytes memory unknownParentExtraData = _extraDataForParent(target, makeAddr("unknown-parent"), 0);
         vm.prank(proposer);
         vm.expectRevert();
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), _extraDataForParent(target, makeAddr("unknown-parent"), 0)
-        );
+        dgf.create(WC_GAME_TYPE, claim, unknownParentExtraData);
 
         MultiProofGame parent = _proposeAtAnchor();
         vm.prank(guardian);
@@ -109,28 +110,10 @@ contract MultiProofGameTest is OPStackFixtures {
 
         uint256 childTarget = parent.l2SequenceNumber() + BLOCK_INTERVAL;
         bytes memory childExtraData = _extraData(childTarget, 0, 0);
+        Claim childClaim = Claim.wrap(_rootClaimFor(childTarget));
         vm.prank(proposer);
         vm.expectRevert(InvalidParentGame.selector);
-        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), childExtraData);
-    }
-
-    function test_Create_RejectsParentFromAnotherGameType() public {
-        GameType otherType = GameType.wrap(43);
-        MultiProofGame otherImpl = new MultiProofGame(_gameConfig());
-        dgf.setImplementation(otherType, IDisputeGame(address(otherImpl)), hex"");
-        dgf.setInitBond(otherType, PROPOSER_BOND);
-
-        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
-        vm.prank(proposer);
-        dgf.create{value: PROPOSER_BOND}(
-            otherType, Claim.wrap(_rootClaimFor(target)), _extraData(target, type(uint256).max, 0)
-        );
-
-        uint256 childTarget = target + BLOCK_INTERVAL;
-        bytes memory childExtraData = _extraData(childTarget, 0, 0);
-        vm.prank(proposer);
-        vm.expectRevert();
-        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), childExtraData);
+        dgf.create(WC_GAME_TYPE, childClaim, childExtraData);
     }
 
     function test_Create_UsesPreviousAnchorGameAfterAnchorAdvances() public {
@@ -141,14 +124,10 @@ contract MultiProofGameTest is OPStackFixtures {
 
         uint256 target = parent.l2SequenceNumber() + BLOCK_INTERVAL;
         bytes memory previousAnchorParentExtraData = _extraData(target, 0, 0);
+        Claim claim = Claim.wrap(_rootClaimFor(target));
         vm.prank(proposer);
-        MultiProofGame previousAnchorChild = MultiProofGame(
-            address(
-                dgf.create{value: PROPOSER_BOND}(
-                    WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), previousAnchorParentExtraData
-                )
-            )
-        );
+        MultiProofGame previousAnchorChild =
+            MultiProofGame(address(dgf.create(WC_GAME_TYPE, claim, previousAnchorParentExtraData)));
         assertEq(previousAnchorChild.parentRef(), address(parent));
         assertEq(Hash.unwrap(previousAnchorChild.startingRootHash()), Claim.unwrap(parent.rootClaim()));
         assertEq(previousAnchorChild.startingBlockNumber(), parent.l2SequenceNumber());
@@ -162,11 +141,11 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(address(asr.anchorGame()), address(parent));
 
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        Claim claim = Claim.wrap(keccak256("late-bootstrap-root"));
+        bytes memory extraData = _extraData(target, type(uint256).max, 0);
         vm.prank(proposer);
         vm.expectRevert(InvalidParentGame.selector);
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(keccak256("late-bootstrap-root")), _extraData(target, type(uint256).max, 0)
-        );
+        dgf.create(WC_GAME_TYPE, claim, extraData);
     }
 
     function test_Constructor_RejectsInvalidConfiguration() public {
@@ -206,6 +185,11 @@ contract MultiProofGameTest is OPStackFixtures {
         new MultiProofGame(config);
 
         config = _gameConfig();
+        config.proposerBond = type(uint256).max / gameImpl.CHALLENGER_REWARD_BPS() + 1;
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
         config.aggregationVKey = bytes32(0);
         vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
@@ -220,12 +204,37 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
 
-        // A DelayedWETH wired to a different SystemConfig than the registry's must be rejected.
+        // A vault wired to a different SystemConfig than the registry's must be rejected.
         config = _gameConfig();
-        vm.mockCall(address(weth), abi.encodeWithSignature("systemConfig()"), abi.encode(address(0xdead)));
+        vm.mockCall(address(bondVault), abi.encodeWithSignature("systemConfig()"), abi.encode(address(0xdead)));
         vm.expectRevert(IMultiProofGame.InconsistentSystemConfiguration.selector);
         new MultiProofGame(config);
         vm.clearMockedCalls();
+    }
+
+    function test_Create_RejectsTimestampBeyondUint64() public {
+        (, uint256 anchorBlock) = asr.getAnchorRoot();
+        uint256 target = anchorBlock + BLOCK_INTERVAL;
+        bytes memory extraData = _extraDataForParent(target, address(asr), 0);
+
+        vm.warp(type(uint64).max);
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMultiProofGame.TimestampOutOfBounds.selector, uint256(type(uint64).max) + uint256(CHALLENGE_PERIOD)
+            )
+        );
+        dgf.create(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
+    }
+
+    function test_Constructor_AllowsIndependentBondAmounts() public {
+        IMultiProofGame.GameConfig memory config = _gameConfig();
+        config.challengerBond = CHALLENGER_BOND * 2;
+
+        MultiProofGame implementation = new MultiProofGame(config);
+
+        assertEq(implementation.proposerBond(), PROPOSER_BOND);
+        assertEq(implementation.challengerBond(), CHALLENGER_BOND * 2);
     }
 
     function test_UnchallengedFlow_AnyProofLaneCanFinalize() public {
@@ -240,7 +249,7 @@ contract MultiProofGameTest is OPStackFixtures {
             game.resolve();
 
             assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
-            assertEq(game.credit(proposer), PROPOSER_BOND);
+            assertEq(game.normalModeCredit(proposer), PROPOSER_BOND);
         }
     }
 
@@ -294,7 +303,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
-        assertEq(game.credit(proposer), PROPOSER_BOND);
+        assertEq(game.normalModeCredit(proposer), PROPOSER_BOND);
         assertLt(block.timestamp, game.challengeDeadline().raw());
     }
 
@@ -310,14 +319,11 @@ contract MultiProofGameTest is OPStackFixtures {
         first.resolve();
         assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
         assertEq(uint8(first.invalidationReason()), uint8(InvalidationReason.PROOF_TIMEOUT));
-        assertEq(first.credit(protocolFeeRecipient), PROPOSER_BOND);
+        assertEq(first.normalModeCredit(protocolFeeRecipient), PROPOSER_BOND);
 
         _passAirgap(first);
-        uint256 timeoutRecipientBalance = protocolFeeRecipient.balance;
-        first.claimCredit(protocolFeeRecipient);
-        vm.warp(block.timestamp + WETH_DELAY_SECONDS);
-        first.claimCredit(protocolFeeRecipient);
-        assertEq(protocolFeeRecipient.balance, timeoutRecipientBalance + PROPOSER_BOND);
+        first.closeGame();
+        assertEq(bondVault.availableBalance(protocolFeeRecipient), PROPOSER_BOND);
 
         MultiProofGame retry =
             _propose(type(uint256).max, Claim.unwrap(first.rootClaim()), first.l2SequenceNumber(), first.attempt() + 1);
@@ -332,33 +338,28 @@ contract MultiProofGameTest is OPStackFixtures {
         game.closeGame();
 
         _passAirgap(game);
-        uint256 balanceBefore = proposer.balance;
         address keeper = makeAddr("keeper");
         vm.prank(keeper);
-        game.claimCredit(proposer);
-        assertEq(game.normalModeCredit(proposer), 0);
-        assertEq(game.refundModeCredit(proposer), 0);
+        game.closeGame();
+        assertEq(bondVault.availableBalance(proposer), 100 * TOKEN_UNIT);
 
         (Hash anchorRoot, uint256 anchorBlock) = asr.getAnchorRoot();
         assertEq(Hash.unwrap(anchorRoot), Claim.unwrap(game.rootClaim()));
         assertEq(anchorBlock, game.l2SequenceNumber());
         assertEq(uint8(game.bondDistributionMode()), uint8(BondDistributionMode.NORMAL));
 
-        vm.warp(block.timestamp + WETH_DELAY_SECONDS);
-        vm.prank(keeper);
-        game.claimCredit(proposer);
-        assertEq(proposer.balance, balanceBefore + PROPOSER_BOND);
-        assertEq(keeper.balance, 0);
+        assertEq(bondToken.balanceOf(proposer), 0);
+        assertEq(bondToken.balanceOf(keeper), 0);
     }
 
     function test_Pause_BlocksCreationAndSettlement() public {
         systemConfig.setPaused(true);
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        Claim claim = Claim.wrap(_rootClaimFor(target));
+        bytes memory extraData = _extraData(target, type(uint256).max, 0);
         vm.prank(proposer);
         vm.expectRevert(GamePaused.selector);
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), _extraData(target, type(uint256).max, 0)
-        );
+        dgf.create(WC_GAME_TYPE, claim, extraData);
 
         systemConfig.setPaused(false);
         MultiProofGame game = _proposeAtAnchor();
@@ -372,18 +373,34 @@ contract MultiProofGameTest is OPStackFixtures {
     function test_Challenge_RequiresBondAndOpenWindow() public {
         MultiProofGame game = _proposeAtAnchor();
 
-        vm.prank(challengerAccount);
-        vm.expectRevert(IncorrectBondAmount.selector);
-        game.challenge{value: CHALLENGER_BOND - 1}();
+        address unfundedChallenger = makeAddr("unfunded-challenger");
+        vm.prank(unfundedChallenger);
+        vm.expectRevert();
+        game.challenge();
 
         _challenge(game);
         assertEq(game.proofBitmap().raw(), 0);
         assertEq(game.refundModeCredit(challengerAccount), CHALLENGER_BOND);
-        assertEq(weth.balanceOf(address(game)), PROPOSER_BOND + CHALLENGER_BOND);
+        (uint256 proposerBond_, uint256 challengerBond_,) = bondVault.gameBonds(address(game));
+        assertEq(proposerBond_, PROPOSER_BOND);
+        assertEq(challengerBond_, CHALLENGER_BOND);
 
         vm.prank(challengerAccount);
         vm.expectRevert(ClaimAlreadyChallenged.selector);
-        game.challenge{value: CHALLENGER_BOND}();
+        game.challenge();
+    }
+
+    function test_Challenge_RejectsDivergedFactoryAndVaultOwners() public {
+        MultiProofGame game = _proposeAtAnchor();
+        address newFactoryOwner = makeAddr("new-factory-owner");
+        dgf.transferOwnership(newFactoryOwner);
+
+        vm.prank(challengerAccount);
+        vm.expectRevert(abi.encodeWithSelector(OwnerMismatch.selector, newFactoryOwner, address(this)));
+        game.challenge();
+
+        assertEq(game.challenger(), address(0));
+        assertEq(bondVault.availableBalance(challengerAccount), 100 * TOKEN_UNIT);
     }
 
     function test_Challenge_DoesNotExtendProofDeadline() public {
@@ -415,7 +432,7 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(game.proofBitmap().count(), 1);
 
         vm.prank(challengerAccount);
-        game.challenge{value: CHALLENGER_BOND}();
+        game.challenge();
 
         game.submitProofLane(_compact(1, laneRewardRecipient(1), abi.encodePacked(game.rootId())));
         game.resolve();
@@ -423,11 +440,12 @@ contract MultiProofGameTest is OPStackFixtures {
 
         // Two lanes plus the proposer split the forfeited challenger bond three ways.
         uint256 share = CHALLENGER_BOND / 3;
-        assertEq(game.credit(laneRewardRecipient(0)), share);
-        assertEq(game.credit(laneRewardRecipient(1)), share);
-        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND - 2 * share);
+        assertEq(game.normalModeCredit(laneRewardRecipient(0)), share);
+        assertEq(game.normalModeCredit(laneRewardRecipient(1)), share);
+        assertEq(game.normalModeCredit(proposer), PROPOSER_BOND + CHALLENGER_BOND - 2 * share);
         assertEq(
-            game.credit(proposer) + game.credit(laneRewardRecipient(0)) + game.credit(laneRewardRecipient(1)),
+            game.normalModeCredit(proposer) + game.normalModeCredit(laneRewardRecipient(0))
+                + game.normalModeCredit(laneRewardRecipient(1)),
             game.totalBonds()
         );
     }
@@ -497,7 +515,7 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.warp(expired.challengeDeadline().raw());
         vm.prank(challengerAccount);
         vm.expectRevert(GameOver.selector);
-        expired.challenge{value: CHALLENGER_BOND}();
+        expired.challenge();
 
         // Once the threshold already guarantees the defender wins.
         (, uint256 anchorBlock) = asr.getAnchorRoot();
@@ -506,7 +524,7 @@ contract MultiProofGameTest is OPStackFixtures {
         _submitLanes(proven, PROOF_THRESHOLD);
         vm.prank(challengerAccount);
         vm.expectRevert(GameOver.selector);
-        proven.challenge{value: CHALLENGER_BOND}();
+        proven.challenge();
     }
 
     function test_ClaimData_FollowsProposalStatusStateMachine() public {
@@ -544,10 +562,12 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(uint8(first.invalidationReason()), uint8(InvalidationReason.PROOF_TIMEOUT));
 
         uint256 reward = (PROPOSER_BOND * gameImpl.CHALLENGER_REWARD_BPS()) / 10_000;
-        assertEq(first.credit(challengerAccount), CHALLENGER_BOND + reward);
-        assertEq(first.credit(protocolFeeRecipient), PROPOSER_BOND - reward);
+        assertEq(first.normalModeCredit(challengerAccount), CHALLENGER_BOND + reward);
+        assertEq(first.normalModeCredit(protocolFeeRecipient), PROPOSER_BOND - reward);
         assertEq(
-            first.credit(challengerAccount) + first.credit(protocolFeeRecipient), first.totalBonds(), "bonds conserved"
+            first.normalModeCredit(challengerAccount) + first.normalModeCredit(protocolFeeRecipient),
+            first.totalBonds(),
+            "bonds conserved"
         );
 
         MultiProofGame retry = _propose(type(uint256).max, Claim.unwrap(first.rootClaim()), first.l2SequenceNumber(), 1);
@@ -562,7 +582,7 @@ contract MultiProofGameTest is OPStackFixtures {
         bytes memory retryExtraData = _extraData(l2BlockNumber, type(uint256).max, 1);
         vm.prank(proposer);
         vm.expectRevert();
-        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, claim, retryExtraData);
+        dgf.create(WC_GAME_TYPE, claim, retryExtraData);
     }
 
     function test_ChildWaitsForParentResolutionNotFinality() public {
@@ -613,8 +633,8 @@ contract MultiProofGameTest is OPStackFixtures {
 
         assertEq(uint8(child.status()), uint8(GameStatus.CHALLENGER_WINS));
         assertEq(uint8(child.invalidationReason()), uint8(InvalidationReason.INVALID_PARENT));
-        assertEq(child.credit(proposer), PROPOSER_BOND);
-        assertEq(child.credit(challengerAccount), CHALLENGER_BOND);
+        assertEq(child.normalModeCredit(proposer), PROPOSER_BOND);
+        assertEq(child.normalModeCredit(challengerAccount), CHALLENGER_BOND);
     }
 
     function test_BlacklistedParent_CascadesBeforeParentResolution() public {
@@ -660,8 +680,8 @@ contract MultiProofGameTest is OPStackFixtures {
         game.closeGame();
 
         assertEq(uint8(game.bondDistributionMode()), uint8(BondDistributionMode.REFUND));
-        assertEq(game.credit(proposer), PROPOSER_BOND);
-        assertEq(game.credit(challengerAccount), CHALLENGER_BOND);
+        assertEq(game.refundModeCredit(proposer), PROPOSER_BOND);
+        assertEq(game.refundModeCredit(challengerAccount), CHALLENGER_BOND);
         (, uint256 anchorBlock) = asr.getAnchorRoot();
         assertEq(anchorBlock, STARTING_ANCHOR_BLOCK);
     }
@@ -678,8 +698,8 @@ contract MultiProofGameTest is OPStackFixtures {
         game.closeGame();
 
         assertEq(uint8(game.bondDistributionMode()), uint8(BondDistributionMode.REFUND));
-        assertEq(game.credit(proposer), PROPOSER_BOND);
-        assertEq(game.credit(challengerAccount), CHALLENGER_BOND);
+        assertEq(game.refundModeCredit(proposer), PROPOSER_BOND);
+        assertEq(game.refundModeCredit(challengerAccount), CHALLENGER_BOND);
     }
 
     function test_IDisputeGameSurfaceAndProofDomain() public {
@@ -699,17 +719,17 @@ contract MultiProofGameTest is OPStackFixtures {
     /// @dev A proposer cannot recover a forfeited bond by challenging from a second address.
     function test_SelfChallenge_IsAlwaysLossMaking() public {
         address sybil = makeAddr("proposer-sybil");
-        vm.deal(sybil, 10 ether);
+        _fundBondToken(sybil, 10 * TOKEN_UNIT);
 
         // Challenging a proofless proposal still burns part of the proposer's bond.
         MultiProofGame proofless = _proposeAtAnchor();
         vm.prank(sybil);
-        proofless.challenge{value: CHALLENGER_BOND}();
+        proofless.challenge();
 
         vm.warp(proofless.proofDeadline().raw());
         proofless.resolve();
         uint256 staked = PROPOSER_BOND + CHALLENGER_BOND;
-        uint256 recovered = proofless.credit(proposer) + proofless.credit(sybil);
+        uint256 recovered = proofless.normalModeCredit(proposer) + proofless.normalModeCredit(sybil);
         assertLt(recovered, staked, "self-challenge must lose money");
         assertEq(staked - recovered, PROPOSER_BOND - (PROPOSER_BOND * gameImpl.CHALLENGER_REWARD_BPS()) / 10_000);
 
@@ -724,12 +744,12 @@ contract MultiProofGameTest is OPStackFixtures {
             )
         );
         vm.prank(sybil);
-        proven.challenge{value: CHALLENGER_BOND}();
+        proven.challenge();
 
         vm.warp(proven.proofDeadline().raw());
         proven.resolve();
 
-        recovered = proven.credit(proposer) + proven.credit(sybil);
+        recovered = proven.normalModeCredit(proposer) + proven.normalModeCredit(sybil);
         assertLt(recovered, staked, "self-challenge must lose money");
         assertEq(staked - recovered, PROPOSER_BOND - (PROPOSER_BOND * gameImpl.CHALLENGER_REWARD_BPS()) / 10_000);
     }
@@ -741,14 +761,14 @@ contract MultiProofGameTest is OPStackFixtures {
         _resolveUnchallenged(game);
 
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
-        assertEq(game.credit(proposer), PROPOSER_BOND);
-        assertEq(game.credit(proposer), game.totalBonds());
-        assertEq(game.credit(laneRewardRecipient(0)), 0);
-        assertEq(game.credit(laneRewardRecipient(1)), 0);
+        assertEq(game.normalModeCredit(proposer), PROPOSER_BOND);
+        assertEq(game.normalModeCredit(proposer), game.totalBonds());
+        assertEq(game.normalModeCredit(laneRewardRecipient(0)), 0);
+        assertEq(game.normalModeCredit(laneRewardRecipient(1)), 0);
     }
 
-    /// @dev A proposer who proves every lane themselves collects the whole forfeited bond.
-    function test_LaneReward_ProposerProvingEveryLaneTakesAll() public {
+    /// @dev A proposer who proves every lane is settled once despite occupying multiple payout roles.
+    function test_Settlement_DeduplicatesProposerAcrossProofLanes() public {
         MultiProofGame game = _proposeAtAnchor();
         bytes memory proof = abi.encodePacked(game.rootId());
 
@@ -758,11 +778,15 @@ contract MultiProofGameTest is OPStackFixtures {
         game.resolve();
 
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
-        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND);
-        assertEq(game.credit(proposer), game.totalBonds());
+        assertEq(game.normalModeCredit(proposer), PROPOSER_BOND + CHALLENGER_BOND);
+        assertEq(game.normalModeCredit(proposer), game.totalBonds());
+
+        _passAirgap(game);
+        game.closeGame();
+        assertEq(bondVault.availableBalance(proposer), 100 * TOKEN_UNIT + CHALLENGER_BOND);
     }
 
-    /// @dev Each lane recipient withdraws independently through the two-phase DelayedWETH claim.
+    /// @dev Each lane recipient is independently credited in the shared vault.
     function test_LaneReward_RecipientsClaimIndependently() public {
         MultiProofGame game = _proposeAtAnchor();
         bytes memory proof = abi.encodePacked(game.rootId());
@@ -778,9 +802,10 @@ contract MultiProofGameTest is OPStackFixtures {
         _claim(game, laneRewardRecipient(1));
         _claim(game, proposer);
 
-        assertEq(laneRewardRecipient(0).balance, share);
-        assertEq(laneRewardRecipient(1).balance, share);
-        assertEq(weth.balanceOf(address(game)), 0, "game must be fully drained");
+        assertEq(bondToken.balanceOf(laneRewardRecipient(0)), share);
+        assertEq(bondToken.balanceOf(laneRewardRecipient(1)), share);
+        (,, bool settled) = bondVault.gameBonds(address(game));
+        assertTrue(settled);
     }
 
     /// @dev A zero recipient forfeits its share without stranding any other payout.
@@ -794,9 +819,13 @@ contract MultiProofGameTest is OPStackFixtures {
         game.resolve();
 
         uint256 share = CHALLENGER_BOND / 3;
-        assertEq(game.credit(address(0)), share);
-        assertEq(game.credit(laneRewardRecipient(1)), share);
-        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND - 2 * share);
+        assertEq(game.normalModeCredit(address(0)), share);
+        assertEq(game.normalModeCredit(laneRewardRecipient(1)), share);
+        assertEq(game.normalModeCredit(proposer), PROPOSER_BOND + CHALLENGER_BOND - 2 * share);
+
+        _passAirgap(game);
+        game.closeGame();
+        assertEq(bondVault.availableBalance(address(0)), share);
     }
 
     /// @dev `laneRecipient` records the first submitter; a duplicate no-op cannot reassign it.

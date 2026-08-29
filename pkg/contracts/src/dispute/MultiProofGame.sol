@@ -12,6 +12,7 @@ import {
 import {GameTypes} from "./lib/GameTypes.sol";
 import {IMultiProofGame} from "./interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
+import {IERC20StakingVault} from "./interfaces/IERC20StakingVault.sol";
 
 import {Clone} from "@solady/utils/Clone.sol";
 import {
@@ -27,7 +28,6 @@ import {
 import {
     AlreadyInitialized,
     BadExtraData,
-    BondTransferFailed,
     ClaimAlreadyChallenged,
     ClaimAlreadyResolved,
     GameNotFinalized,
@@ -38,14 +38,12 @@ import {
     InvalidBondDistributionMode,
     InvalidParentGame,
     InvalidProposalStatus,
-    NoCreditToClaim,
     ParentGameNotResolved,
     UnexpectedRootClaim
 } from "@optimism-bedrock/src/dispute/lib/Errors.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
-import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.sol";
 import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 
@@ -121,6 +119,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     uint256 public immutable challengerBond;
 
     /// @notice Recipient of the share of forfeited proposer bonds not paid to a challenger.
+    /// @dev May be set to `0x000000000000000000000000000000000000dEaD` to make that share unspendable.
     address public immutable protocolFeeRecipient;
 
     /// @notice SP1 aggregation-program verification key used by the validity lane.
@@ -143,8 +142,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Registry providing the anchor root, blacklist, and finality airgap.
     IAnchorStateRegistry public immutable anchorStateRegistry;
 
-    /// @notice The DelayedWETH contract used for bond custody.
-    IDelayedWETH public immutable weth;
+    /// @notice ERC-20 vault used for bond custody and settlement.
+    IERC20StakingVault public immutable bondVault;
 
     /// @notice The starting timestamp of the game.
     Timestamp public createdAt;
@@ -189,11 +188,12 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     constructor(GameConfig memory config) {
         if (
             config.blockInterval == 0 || config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod
-                || config.proposerBond == 0 || config.challengerBond == 0 || config.proofThreshold < 2
+                || config.proposerBond == 0 || config.proposerBond > type(uint256).max / CHALLENGER_REWARD_BPS
+                || config.challengerBond == 0 || config.proofThreshold < 2
                 || config.proofThreshold > LibProof.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
                 || config.aggregationVKey == bytes32(0) || config.rangeVKeyCommitment == bytes32(0)
                 || config.teeImageId == bytes32(0) || address(config.anchorStateRegistry) == address(0)
-                || address(config.weth) == address(0) || address(config.validityProofVerifier) == address(0)
+                || address(config.bondVault) == address(0) || address(config.validityProofVerifier) == address(0)
                 || address(config.teeVerifier) == address(0) || address(config.securityCouncil) == address(0)
         ) {
             revert InvalidActivationParameters();
@@ -207,7 +207,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (address(factory) == address(0) || chainId == 0) {
             revert InvalidActivationParameters();
         }
-        if (address(config.weth.systemConfig()) != address(systemConfig)) {
+        if (
+            address(config.bondVault.systemConfig()) != address(systemConfig)
+                || address(config.bondVault.disputeGameFactory()) != address(factory)
+        ) {
             revert InconsistentSystemConfiguration();
         }
 
@@ -229,7 +232,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         securityCouncil = config.securityCouncil;
         disputeGameFactory = factory;
         anchorStateRegistry = config.anchorStateRegistry;
-        weth = config.weth;
+        bondVault = config.bondVault;
     }
 
     ////////////////////////////////////////////////////////////////
@@ -333,8 +336,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             revert NotDisputeGameFactory(msg.sender);
         }
 
-        // Defense-in-depth against `setInitBond` drifting from the configured proposer bond.
-        if (msg.value != proposerBond) revert IncorrectBondAmount();
+        // WIP-1006 uses ERC-20 tokens held by the vault; the stock factory bond must remain zero.
+        if (msg.value != 0) revert IncorrectBondAmount();
 
         // Preserves the former propose-time registry pause gate.
         if (anchorStateRegistry.paused()) revert GamePaused();
@@ -397,7 +400,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         claimData = ClaimData({
             status: ProposalStatus.Unchallenged,
             challenger: address(0),
-            deadline: Timestamp.wrap(uint64(block.timestamp + challengePeriod.raw())),
+            deadline: _toTimestamp(block.timestamp + challengePeriod.raw()),
             proofBitmap: Bitmap.wrap(0),
             invalidationReason: InvalidationReason.NONE
         });
@@ -405,10 +408,13 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // Set the game as initialized.
         initialized = true;
 
-        _depositBond(gameCreator());
+        // Lock the proposer bond from the creator's vault balance; the vault authenticates this
+        // clone against the factory's deterministic deployment address.
+        bondVault.lockProposerBond();
+        _depositBond(gameCreator(), proposerBond);
 
         // Set the game's starting timestamp.
-        createdAt = Timestamp.wrap(uint64(block.timestamp));
+        createdAt = _toTimestamp(block.timestamp);
 
         // Set whether the game type was respected when the game was created.
         wasRespectedGameTypeWhenCreated =
@@ -430,10 +436,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         return _isValidGame(IDisputeGame(parentRef_));
     }
 
-    function _depositBond(address refundRecipient) internal {
-        refundModeCredit[refundRecipient] += msg.value;
-        totalBonds += msg.value;
-        weth.deposit{value: msg.value}();
+    function _depositBond(address refundRecipient, uint256 amount) internal {
+        refundModeCredit[refundRecipient] += amount;
+        totalBonds += amount;
     }
 
     ////////////////////////////////////////////////////////////////
@@ -441,7 +446,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     ////////////////////////////////////////////////////////////////
 
     /// @notice Challenges the game.
-    function challenge() external payable returns (ProposalStatus) {
+    function challenge() external returns (ProposalStatus) {
         // INVARIANT: Cannot challenge if the game is already resolved.
         if (status != GameStatus.IN_PROGRESS) revert ClaimAlreadyResolved();
 
@@ -452,9 +457,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // INVARIANT: Can only challenge a game that has not been challenged yet.
         if (claimData.challenger != address(0)) revert ClaimAlreadyChallenged();
 
-        // If the required bond is not met, revert.
-        if (msg.value != challengerBond) revert IncorrectBondAmount();
-
         // Update the challenger address. Any lanes accepted before the challenge keep counting
         // toward the threshold, but the status returns to `Challenged`.
         claimData.challenger = msg.sender;
@@ -464,7 +466,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // at the challenge, so late challenges cannot extend the game.
         claimData.deadline = proofDeadline();
 
-        _depositBond(msg.sender);
+        bondVault.lockChallengerBond();
+        _depositBond(msg.sender, challengerBond);
 
         emit Challenged(msg.sender, claimData.deadline.raw());
 
@@ -596,7 +599,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         // Mark the game as resolved.
         claimData.status = ProposalStatus.Resolved;
-        resolvedAt = Timestamp.wrap(uint64(block.timestamp));
+        resolvedAt = _toTimestamp(block.timestamp);
 
         emit Resolved(status);
 
@@ -645,56 +648,12 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @inheritdoc IMultiProofGame
-    /// @dev Two-phase: the first call unlocks in DelayedWETH, the second (after the WETH
-    ///      delay) withdraws and transfers.
-    function claimCredit(address recipient) external {
-        // If closeGame() flips the distribution mode within this call and there is nothing to
-        // claim, return instead of reverting so the close is not rolled back.
-        bool gameWasOpen = bondDistributionMode == BondDistributionMode.UNDECIDED;
-
-        // Close lazily so claiming does not depend on a separate keeper transaction. This is a
-        // no-op once the distribution mode has been fixed.
-        closeGame();
-
-        uint256 recipientCredit;
-        if (bondDistributionMode == BondDistributionMode.REFUND) {
-            recipientCredit = refundModeCredit[recipient];
-        } else if (bondDistributionMode == BondDistributionMode.NORMAL) {
-            recipientCredit = normalModeCredit[recipient];
-        } else {
-            revert InvalidBondDistributionMode();
-        }
-
-        // Zero the credit and unlock it in DelayedWETH.
-        if (recipientCredit > 0) {
-            refundModeCredit[recipient] = 0;
-            normalModeCredit[recipient] = 0;
-            weth.unlock(recipient, recipientCredit);
-            return;
-        }
-
-        // Phase 2: finalize the pending DelayedWETH withdrawal.
-        (uint256 amount,) = weth.withdrawals(address(this), recipient);
-        if (amount == 0) {
-            if (gameWasOpen) return;
-            revert NoCreditToClaim();
-        }
-
-        weth.withdraw(recipient, amount);
-
-        // solady's CWIA proxy implements `receive()`, so the WETH98 2300-gas transfer above
-        // succeeds without a `receive()` on this implementation.
-        (bool success,) = recipient.call{value: amount}(hex"");
-        if (!success) revert BondTransferFailed();
-    }
-
-    /// @inheritdoc IMultiProofGame
     /// @dev Locks in `REFUND` for improper games — blacklisted, retired, or otherwise
-    ///      invalidated by the registry. Must not revert once closed, or `claimCredit` breaks.
+    ///      invalidated by the registry. Repeated calls are harmless after settlement.
     function closeGame() public {
         if (bondDistributionMode == BondDistributionMode.REFUND || bondDistributionMode == BondDistributionMode.NORMAL)
         {
-            // Already closed; must not revert or `claimCredit` would break.
+            // Settlement is idempotent for permissionless keepers.
             return;
         } else if (bondDistributionMode != BondDistributionMode.UNDECIDED) {
             revert InvalidBondDistributionMode();
@@ -718,7 +677,47 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         bondDistributionMode =
             anchorStateRegistry.isGameProper(self) ? BondDistributionMode.NORMAL : BondDistributionMode.REFUND;
 
+        bondVault.settle(_settlementCredits());
+
         emit GameClosed(bondDistributionMode);
+    }
+
+    function _settlementCandidates() internal view returns (address[] memory candidates) {
+        // Possible recipients are the proposer, challenger, protocol, and one recipient per proof lane.
+        candidates = new address[](3 + LibProof.PROOF_LANE_COUNT);
+        candidates[0] = gameCreator();
+        candidates[1] = claimData.challenger;
+        candidates[2] = protocolFeeRecipient;
+        for (uint8 laneId; laneId < LibProof.PROOF_LANE_COUNT; laneId++) {
+            candidates[3 + laneId] = laneRecipient[laneId];
+        }
+    }
+
+    function _settlementCredits() internal view returns (IERC20StakingVault.Payout[] memory payouts) {
+        address[] memory candidates = _settlementCandidates();
+        payouts = new IERC20StakingVault.Payout[](candidates.length);
+        uint256 payoutCount;
+        // Credits are aggregated by address, but the same address may occupy multiple roles.
+        // Emit each credited candidate once so its complete mapped credit is settled exactly once.
+        for (uint256 i; i < candidates.length; i++) {
+            address candidate = candidates[i];
+            bool duplicate;
+            for (uint256 j; j < payoutCount; j++) {
+                if (payouts[j].recipient == candidate) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+
+            uint256 amount = bondDistributionMode == BondDistributionMode.REFUND
+                ? refundModeCredit[candidate]
+                : normalModeCredit[candidate];
+            if (amount == 0) continue;
+            payouts[payoutCount++] = IERC20StakingVault.Payout({recipient: candidate, amount: amount});
+        }
+
+        // Unused entries remain zero-value payouts, which do not affect vault accounting.
     }
 
     ////////////////////////////////////////////////////////////////
@@ -728,17 +727,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Determines if the game is finished.
     /// @return gameOver_ True if the active deadline has passed or the threshold is reached.
     function gameOver() public view returns (bool gameOver_) {
-        gameOver_ =
-            claimData.deadline.raw() <= uint64(block.timestamp) || claimData.proofBitmap.hasThreshold(PROOF_THRESHOLD);
-    }
-
-    /// @inheritdoc IMultiProofGame
-    function credit(address recipient) external view returns (uint256 credit_) {
-        if (bondDistributionMode == BondDistributionMode.REFUND) {
-            credit_ = refundModeCredit[recipient];
-        } else {
-            credit_ = normalModeCredit[recipient];
-        }
+        gameOver_ = claimData.deadline.raw() <= block.timestamp || claimData.proofBitmap.hasThreshold(PROOF_THRESHOLD);
     }
 
     /// @inheritdoc IMultiProofGame
@@ -797,12 +786,19 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     /// @inheritdoc IMultiProofGame
     function challengeDeadline() public view returns (Timestamp) {
-        return Timestamp.wrap(createdAt.raw() + challengePeriod.raw());
+        return _toTimestamp(uint256(createdAt.raw()) + challengePeriod.raw());
     }
 
     /// @inheritdoc IMultiProofGame
     function proofDeadline() public view returns (Timestamp) {
-        return Timestamp.wrap(createdAt.raw() + proofPeriod.raw());
+        return _toTimestamp(uint256(createdAt.raw()) + proofPeriod.raw());
+    }
+
+    function _toTimestamp(uint256 value) internal pure returns (Timestamp) {
+        if (value > type(uint64).max) revert TimestampOutOfBounds(value);
+        // The bound above proves this narrowing conversion is lossless.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return Timestamp.wrap(uint64(value));
     }
 
     /// @dev Selects the verifier and game-pinned statement for `lane`. The generic public-values
