@@ -21,6 +21,7 @@
 #   Phase 1   proof-deploy-nitro         – Deploy Nitro attestation contracts
 #   Phase 1b  proof-deploy-mocks         – Deploy proof-lane test doubles (devnet only)
 #   Phase 2   proof-deploy-system        – Deploy proof system implementation and vault
+#   Phase 2b  proof-fund-mock-bonds      – Fund persistent devnet bond accounts (devnet only)
 #   Phase 3a  proof-certmanager-prewarm  – Pre-warm CertManager with CA certs
 #   Phase 3b  proof-approve-pcrs         – Approve a PCR set on the verifier
 #   —         proof-activate-system      – Validate, register, and activate WIP-1006
@@ -173,7 +174,7 @@ proof-deploy-mocks env="alphanet":
     else
         export PROOF_MOCKS_DEPLOYMENT_OUT="deployments/{{env}}-proof-mocks.dryrun.json"
     fi
-    echo "WARNING: deploying MOCK proof verifiers (accept any proof) for '{{env}}'." >&2
+    echo "WARNING: deploying MOCK proof-system dependencies (accept-any verifiers and a mintable bond token) for '{{env}}'." >&2
     echo "Deploying proof mocks (deployment → $PROOF_MOCKS_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofMocks.s.sol:DeployProofMocks \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
@@ -243,6 +244,35 @@ proof-deploy-system env="alphanet":
     fi
     echo "Deploying proof system contracts (deployment → $PROOF_SYSTEM_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
+
+# Phase 2b (devnet only) – Mint mock bond tokens and top up proof-system bond accounts.
+# The vault's deposit API credits selected accounts, so the funding operator does not need service
+# keys. Targets make the operation idempotent and account for tokens already returned by settled games.
+# Run this after deploying the vault and before starting the proposer or challenger.
+[doc("Phase 2b (devnet only) - Fund mock-token vault balances for proof-system bond accounts.")]
+[group('proof')]
+proof-fund-mock-bonds env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    : "${BOND_ACCOUNTS:?BOND_ACCOUNTS is required (comma-separated addresses)}"
+    SYSTEM_FILE="pkg/contracts/deployments/{{env}}-proof-system.json"
+    if [ -z "${ERC20_STAKING_VAULT:-}" ] && [ -f "$SYSTEM_FILE" ]; then
+        ERC20_STAKING_VAULT=$(jq -r '.erc20StakingVault // empty' "$SYSTEM_FILE")
+        export ERC20_STAKING_VAULT
+    fi
+    : "${ERC20_STAKING_VAULT:?ERC20_STAKING_VAULT is required (or deploy the proof system first)}"
+    export VAULT_BALANCE_TARGET="${VAULT_BALANCE_TARGET:-10000000000000000000000}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    echo "WARNING: minting unrestricted mock bond tokens for proof-system accounts on '{{env}}'." >&2
+    echo "  accounts: $BOND_ACCOUNTS" >&2
+    echo "  available vault balance target: $VAULT_BALANCE_TARGET base units per account" >&2
+    cd pkg/contracts && forge script scripts/devnet/FundProofBondAccounts.s.sol:FundProofBondAccounts \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Register and activate the WIP-1006 implementation after validating its wiring and current anchor.

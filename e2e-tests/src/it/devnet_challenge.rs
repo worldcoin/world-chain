@@ -1,11 +1,12 @@
-use alloy_primitives::{B256, U256};
+use alloy_primitives::B256;
 use eyre::eyre::ensure;
 use world_chain_proof_protocol::LineageProvider;
 use world_chain_proposer::{Proposal, ProposerClient};
 
 use crate::it::utils::devnet::{
     GAME_CHALLENGER_WINS, advance_to_timestamp, funded_throwaway_provider, game_at, l1_contract,
-    l1_rpc_url, proof_system_client, try_build_ha_devnet, wait_for_challenge, wait_for_status,
+    l1_rpc_url, proof_system_client, try_build_ha_devnet, vault_at, wait_for_challenge,
+    wait_for_status,
 };
 
 /// End-to-end fault path: a dishonest proposer posts a root that disagrees with consensus, the
@@ -28,7 +29,8 @@ async fn bad_root_proposal_is_challenged_and_invalidated() -> eyre::Result<()> {
     let factory_address = l1_contract(devnet.dispute_game_factory(), "DisputeGameFactory")?;
 
     // A throwaway signer standing in for a dishonest proposer.
-    let (malicious_address, malicious_provider) = funded_throwaway_provider(l1_rpc).await?;
+    let (malicious_address, malicious_provider) =
+        funded_throwaway_provider(l1_rpc, factory_address).await?;
     let contracts = proof_system_client(malicious_provider.clone(), factory_address).await?;
 
     // Wins the first proposal window: the honest proposer can't submit until `block_interval` L2
@@ -75,8 +77,22 @@ async fn bad_root_proposal_is_challenged_and_invalidated() -> eyre::Result<()> {
         "no proof lane should ever land on an invalidated game"
     );
     ensure!(
-        game.credit(malicious_address).call().await? == U256::ZERO,
-        "the dishonest proposer's bond must not be creditable back to them"
+        game.gameCreator().call().await? == malicious_address,
+        "the proposal bond must remain attributed to the dishonest proposer"
+    );
+    let vault = vault_at(game.bondVault().call().await?, malicious_provider.clone());
+    let game_bond = vault.gameBonds(game_address).call().await?;
+    ensure!(
+        game.challenger().call().await? == challenger,
+        "the game did not attribute the challenge to the observed challenger"
+    );
+    ensure!(
+        game_bond.proposerBond == game.proposerBond().call().await?,
+        "the vault did not lock the game's complete proposer bond"
+    );
+    ensure!(
+        game_bond.challengerBond == game.challengerBond().call().await?,
+        "the vault did not lock the game's complete challenger bond"
     );
 
     println!("devnet challenge: bad root at game {game_address} correctly resolved ChallengerWins");

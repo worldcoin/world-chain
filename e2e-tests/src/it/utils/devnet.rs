@@ -14,6 +14,7 @@ use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, ProviderBuilder, WalletProvider, ext::AnvilApi};
 use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::sol;
 use eyre::eyre::{OptionExt, bail, ensure, eyre};
 use url::Url;
 use world_chain_devnet::{
@@ -21,8 +22,8 @@ use world_chain_devnet::{
     is_docker_unavailable,
 };
 use world_chain_proof_protocol::{
-    DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS, IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory,
-    IMultiProofGame, MULTI_PROOF_GAME_TYPE,
+    DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS, IAnchorStateRegistry, IDisputeGameFactory,
+    IERC20StakingVault, IMultiProofGame, MULTI_PROOF_GAME_TYPE, read_registered_bond_vault,
 };
 use world_chain_proposer::AlloyProofSystemClient;
 
@@ -37,7 +38,18 @@ pub(in crate::it) const INVALIDATION_REASON_INVALID_PARENT: u8 = 2;
 
 /// Funds a throwaway Anvil account well above any bond the factory could demand (100 ETH).
 const THROWAWAY_ACCOUNT_BALANCE_WEI: u128 = 100_000_000_000_000_000_000;
+/// Mock bond tokens deposited for each throwaway proof-system participant (100 tokens).
+const THROWAWAY_ACCOUNT_BOND_TOKEN_BALANCE: u128 = 100_000_000_000_000_000_000;
 const GAME_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+sol! {
+    #[sol(rpc)]
+    interface IMockBondToken {
+        function mint(address recipient, uint256 amount) external;
+        function approve(address spender, uint256 amount) external returns (bool);
+        function allowance(address owner, address spender) external view returns (uint256);
+    }
+}
 
 /// Builds the HA-sequencer full stack every proof-system test runs against.
 ///
@@ -91,11 +103,12 @@ pub(in crate::it) fn signing_provider(
         .connect_http(Url::parse(rpc)?))
 }
 
-/// Funds a fresh random account via `anvil_setBalance` and returns it with a signing provider.
+/// Funds a fresh random account with L1 gas and mock tokens deposited into the active bond vault.
 ///
 /// Cheating balance in leaves the shared devnet genesis untouched for every other test.
 pub(in crate::it) async fn funded_throwaway_provider(
     l1_rpc: &str,
+    factory_address: Address,
 ) -> eyre::Result<(Address, impl Provider + WalletProvider + Clone + use<>)> {
     let signer = PrivateKeySigner::random();
     let address = signer.address();
@@ -104,7 +117,56 @@ pub(in crate::it) async fn funded_throwaway_provider(
         .anvil_set_balance(address, U256::from(THROWAWAY_ACCOUNT_BALANCE_WEI))
         .await?;
 
-    Ok((address, signing_provider(l1_rpc, signer)?))
+    let provider = signing_provider(l1_rpc, signer)?;
+    let factory =
+        IDisputeGameFactory::IDisputeGameFactoryInstance::new(factory_address, provider.clone());
+    let vault_address = read_registered_bond_vault(&provider, &factory).await?;
+    let vault =
+        IERC20StakingVault::IERC20StakingVaultInstance::new(vault_address, provider.clone());
+    let bond_token_address = vault.token().call().await?;
+    let mock_bond_token = IMockBondToken::new(bond_token_address, provider.clone());
+    let amount = U256::from(THROWAWAY_ACCOUNT_BOND_TOKEN_BALANCE);
+
+    ensure!(
+        mock_bond_token
+            .mint(address, amount)
+            .send()
+            .await?
+            .get_receipt()
+            .await?
+            .status(),
+        "minting throwaway mock bond tokens reverted"
+    );
+    ensure!(
+        mock_bond_token
+            .approve(vault_address, amount)
+            .send()
+            .await?
+            .get_receipt()
+            .await?
+            .status(),
+        "approving throwaway mock bond tokens reverted"
+    );
+    ensure!(
+        vault
+            .deposit(address, amount)
+            .send()
+            .await?
+            .get_receipt()
+            .await?
+            .status(),
+        "depositing throwaway mock bond tokens reverted"
+    );
+    ensure!(
+        mock_bond_token
+            .allowance(address, vault_address)
+            .call()
+            .await?
+            .is_zero(),
+        "deposit left a bond-token allowance for the throwaway account"
+    );
+
+    Ok((address, provider))
 }
 
 pub(in crate::it) async fn proof_system_client<P>(
@@ -143,14 +205,14 @@ where
     IAnchorStateRegistry::IAnchorStateRegistryInstance::new(address, provider)
 }
 
-pub(in crate::it) fn weth_at<P>(
+pub(in crate::it) fn vault_at<P>(
     address: Address,
     provider: P,
-) -> IDelayedWETH::IDelayedWETHInstance<P>
+) -> IERC20StakingVault::IERC20StakingVaultInstance<P>
 where
     P: Provider,
 {
-    IDelayedWETH::IDelayedWETHInstance::new(address, provider)
+    IERC20StakingVault::IERC20StakingVaultInstance::new(address, provider)
 }
 
 /// Polls `probe` until it yields a value, giving up after [`GAME_WAIT_TIMEOUT`].
@@ -390,48 +452,20 @@ where
     .await
 }
 
-/// Waits for `proposer`'s bond on `game_address` to be credited in `DelayedWETH`, returning the
-/// timestamp at which the withdrawal delay expires.
-pub(in crate::it) async fn wait_for_bond_unlock<P>(
-    weth: &IDelayedWETH::IDelayedWETHInstance<P>,
+/// Waits for the complete bond pot of `game_address` to be settled into reusable vault balances.
+pub(in crate::it) async fn wait_for_game_settlement<P>(
+    vault: &IERC20StakingVault::IERC20StakingVaultInstance<P>,
     game_address: Address,
-    proposer: Address,
-) -> eyre::Result<u64>
-where
-    P: Provider,
-{
-    let delay = weth.delay().call().await?;
-    poll_until("proposer bond credit to unlock", || async {
-        let pending = weth.withdrawals(game_address, proposer).call().await?;
-        if pending.amount.is_zero() {
-            return Ok(None);
-        }
-        let unlock_at: u64 = pending
-            .timestamp
-            .checked_add(delay)
-            .ok_or_eyre("DelayedWETH unlock timestamp overflow")?
-            .try_into()?;
-        Ok(Some(unlock_at))
-    })
-    .await
-}
-
-/// Waits for `proposer`'s bond on `game_address` to be fully withdrawn from `DelayedWETH`.
-pub(in crate::it) async fn wait_for_bond_withdrawal<P>(
-    weth: &IDelayedWETH::IDelayedWETHInstance<P>,
-    game_address: Address,
-    proposer: Address,
 ) -> eyre::Result<()>
 where
     P: Provider,
 {
-    poll_until("proposer bond withdrawal", || async {
-        Ok(weth
-            .withdrawals(game_address, proposer)
+    poll_until("game bond settlement", || async {
+        Ok(vault
+            .gameBonds(game_address)
             .call()
             .await?
-            .amount
-            .is_zero()
+            .settled
             .then_some(()))
     })
     .await

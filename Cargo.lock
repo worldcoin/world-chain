@@ -18682,6 +18682,7 @@ dependencies = [
 name = "world-chain-devnet"
 version = "2.4.3"
 dependencies = [
+ "alloy-contract",
  "alloy-eips 2.1.1",
  "alloy-genesis",
  "alloy-hardforks",

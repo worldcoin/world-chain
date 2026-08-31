@@ -15,7 +15,7 @@ mod types;
 
 // re-exports
 pub use bindings::{
-    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IERC20StakingVault, IMultiProofGame,
+    IAnchorStateRegistry, IDisputeGameFactory, IERC20StakingVault, IMultiProofGame,
 };
 pub use consensus_provider::{
     ConsensusError, ConsensusProvider, OptimismConsensusClient, VerifyingConsensusProvider,

@@ -4,10 +4,10 @@ pragma solidity 0.8.28;
 import {Script} from "forge-std/Script.sol";
 
 import {MockRootIdVerifier} from "../../test/mocks/MockRootIdVerifier.sol";
+import {MockBondToken} from "../../test/mocks/MockBondToken.sol";
 
-/// @notice Deploys the proof-lane test doubles for a local devnet and writes their addresses,
-///         for `DeployProofSystem.s.sol` to consume via `VALIDITY_PROOF_VERIFIER`,
-///         `TEE_VERIFIER`, and `SECURITY_COUNCIL_VERIFIER`.
+/// @notice Deploys proof-system test doubles for a local devnet and writes their addresses for
+///         `DeployProofSystem.s.sol` to consume.
 ///
 /// Split out of `DeployProofSystem.s.sol` so that script cannot mint its own verifiers: a
 /// deployer that fabricates its verifiers can silently register a game type that accepts any
@@ -20,6 +20,7 @@ contract DeployProofMocks is Script {
         MockRootIdVerifier validityVerifier;
         MockRootIdVerifier teeVerifier;
         MockRootIdVerifier councilVerifier;
+        MockBondToken bondToken;
     }
 
     function run() external returns (Deployment memory deployment) {
@@ -30,6 +31,7 @@ contract DeployProofMocks is Script {
         deployment.validityVerifier = new MockRootIdVerifier(true);
         deployment.teeVerifier = new MockRootIdVerifier(true);
         deployment.councilVerifier = new MockRootIdVerifier(true);
+        deployment.bondToken = new MockBondToken();
         vm.stopBroadcast();
 
         _writeDeployment(deployment);
@@ -42,7 +44,8 @@ contract DeployProofMocks is Script {
         string memory root = "mocks";
         vm.serializeAddress(root, "validityProofVerifier", address(deployment.validityVerifier));
         vm.serializeAddress(root, "teeVerifier", address(deployment.teeVerifier));
-        string memory json = vm.serializeAddress(root, "securityCouncil", address(deployment.councilVerifier));
+        vm.serializeAddress(root, "securityCouncil", address(deployment.councilVerifier));
+        string memory json = vm.serializeAddress(root, "bondToken", address(deployment.bondToken));
         vm.writeJson(json, out);
     }
 }
