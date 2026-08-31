@@ -19,7 +19,8 @@
 # Workflow phases owned by this repo:
 #   Phase 0a  proof-rollup-config-hash   – Compute rollup config hash from an L2 RPC
 #   Phase 1   proof-deploy-nitro         – Deploy Nitro attestation contracts
-#   Phase 1b  proof-deploy-mocks         – Deploy proof-lane test doubles (devnet only)
+#   Phase 1b  proof-deploy-mock-bond-token – Deploy a mintable bond token (devnet only)
+#   Phase 1c  proof-deploy-mocks         – Deploy proof-lane test doubles (devnet only)
 #   Phase 2   proof-deploy-system        – Deploy proof system implementation and vault
 #   Phase 2b  proof-fund-mock-bonds      – Fund persistent devnet bond accounts (devnet only)
 #   Phase 3a  proof-certmanager-prewarm  – Pre-warm CertManager with CA certs
@@ -151,6 +152,27 @@ proof-deploy-nitro env="alphanet":
     fi
     echo "Deploying Nitro contracts (deployment → $NITRO_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
+
+# Phase 1b (devnet only) – Deploy only the mintable token for a real-verifier devnet.
+[doc("Phase 1b (devnet only) - Deploy a mintable ERC-20 proof bond token.")]
+[group('proof')]
+proof-deploy-mock-bond-token env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    if [ -n "$BROADCAST_FLAG" ]; then
+        export MOCK_BOND_TOKEN_DEPLOYMENT_OUT="deployments/{{env}}-mock-bond-token.json"
+    else
+        export MOCK_BOND_TOKEN_DEPLOYMENT_OUT="deployments/{{env}}-mock-bond-token.dryrun.json"
+    fi
+    echo "WARNING: deploying an unrestricted mintable mock bond token for '{{env}}'." >&2
+    cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployMockBondToken.s.sol:DeployMockBondToken \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Writes deployments/<env>-proof-mocks.json for proof-deploy-system to consume.
