@@ -3800,9 +3800,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.19.0"
+version = "3.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f05839ce67618e14a09b286535c0d9c94e85ef25469b0e13cb4f844e5593eb19"
+checksum = "ee78f1fbe43ac4a0e47aadb3dbd357b69eb0d3793e948624cd03dd2750ab1c0a"
 dependencies = [
  "serde_core",
  "serde_with_macros",
@@ -3810,9 +3810,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.19.0"
+version = "3.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf2ebbe86054f9b45bc3881e865683ccfaccce97b9b4cb53f3039d67f355a334"
+checksum = "8705578779c2b6bd90d84d66eb2e206b708b1a4d7b9f17641b293545bf1c7e46"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -4756,7 +4756,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-core"
-version = "2.4.2"
+version = "1.0.0-rc.2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -4779,7 +4779,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-nitro-enclave"
-version = "2.4.2"
+version = "1.0.0-rc.2"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
