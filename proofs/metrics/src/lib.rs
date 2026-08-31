@@ -12,7 +12,7 @@ use alloy_rpc_client::{ClientBuilder, RpcClient};
 use alloy_transport::{BoxFuture, TransportError};
 use telemetry_batteries::reexports::metrics;
 use tower::{Layer, Service};
-use tracing::warn;
+use tracing::{info, warn};
 use url::Url;
 
 /// Ethereum L1 execution RPC target label.
@@ -28,10 +28,12 @@ pub const METRICS_L2_FINALIZED_BLOCK_NUMBER: &str = "l2.finalized_block_number";
 pub const METRICS_RPC_CLIENT_REQUESTS: &str = "rpc.client.requests";
 /// Confirmed challenge transactions.
 pub const METRICS_CHALLENGES_SUBMITTED: &str = "challenges.submitted";
-/// ETH bonded by proposer and challenger transactions.
-pub const METRICS_BONDS_POSTED_ETH: &str = "bonds.posted_eth";
-/// ETH transferred back to proposer and challenger wallets after bond settlement.
-pub const METRICS_BONDS_WITHDRAWN_ETH: &str = "bonds.withdrawn_eth";
+/// Bond-token base units locked by proposer and challenger transactions.
+pub const METRICS_BONDS_LOCKED_BASE_UNITS: &str = "bonds.locked_base_units";
+/// Bond-token base units immediately reusable by a proof-system participant.
+pub const METRICS_VAULT_AVAILABLE_BALANCE_BASE_UNITS: &str = "vault.available_balance_base_units";
+/// Games processed by a bond settlement manager.
+pub const METRICS_GAMES_CLOSED: &str = "games.closed";
 /// Confirmed on-chain proof-lane submissions.
 pub const METRICS_PROOF_LANES_SUBMITTED: &str = "proof_lanes.submitted";
 /// Newly created durable proof requests.
@@ -76,14 +78,19 @@ pub fn describe_metrics() {
         "Number of challenge transactions successfully confirmed on L1."
     );
     metrics::describe_histogram!(
-        METRICS_BONDS_POSTED_ETH,
+        METRICS_BONDS_LOCKED_BASE_UNITS,
         metrics::Unit::Count,
-        "ETH bonded by successfully confirmed proposer and challenger transactions."
+        "Bond-token base units locked by successfully confirmed proposer and challenger transactions."
     );
-    metrics::describe_histogram!(
-        METRICS_BONDS_WITHDRAWN_ETH,
+    metrics::describe_gauge!(
+        METRICS_VAULT_AVAILABLE_BALANCE_BASE_UNITS,
         metrics::Unit::Count,
-        "ETH transferred after successfully confirmed proposer and challenger bond withdrawals."
+        "Bond-token base units immediately reusable by the participant in the proof-system staking vault."
+    );
+    metrics::describe_counter!(
+        METRICS_GAMES_CLOSED,
+        metrics::Unit::Count,
+        "Games submitted for settlement or observed as already settled."
     );
     metrics::describe_counter!(
         METRICS_PROOF_LANES_SUBMITTED,
@@ -178,20 +185,42 @@ pub fn increment_challenges_submitted() {
     metrics::counter!(METRICS_CHALLENGES_SUBMITTED).increment(1);
 }
 
-/// Records ETH posted by a successfully confirmed bond transaction.
-pub fn record_bond_posted(role: &'static str, amount: alloy_primitives::U256) {
-    record_bond_amount(METRICS_BONDS_POSTED_ETH, role, amount);
+/// Records bond-token base units locked by a successfully confirmed bond transaction.
+pub fn record_bond_locked(role: &'static str, amount: alloy_primitives::U256) {
+    match amount.to_string().parse::<f64>() {
+        Ok(amount_base_units) => {
+            metrics::histogram!(METRICS_BONDS_LOCKED_BASE_UNITS, "role" => role)
+                .record(amount_base_units);
+        }
+        Err(error) => warn!(%error, %role, ?amount, "failed to convert bond-token base units"),
+    }
 }
 
-/// Records ETH transferred by a successfully confirmed bond withdrawal.
-pub fn record_bond_withdrawn(role: &'static str, amount: alloy_primitives::U256) {
-    record_bond_amount(METRICS_BONDS_WITHDRAWN_ETH, role, amount);
+/// Records a game handled by a bond settlement manager.
+pub fn increment_games_closed(role: &'static str, result: &'static str) {
+    metrics::counter!(METRICS_GAMES_CLOSED, "role" => role, "result" => result).increment(1);
 }
 
-fn record_bond_amount(metric: &'static str, role: &'static str, amount: alloy_primitives::U256) {
-    match format_ether(amount).parse::<f64>() {
-        Ok(amount_eth) => metrics::histogram!(metric, "role" => role).record(amount_eth),
-        Err(error) => warn!(%error, %role, ?amount, "failed to convert bond amount to ETH"),
+/// Records and logs an account's immediately reusable bond-token balance in base units.
+pub fn record_vault_balance(
+    vault_address: Address,
+    account: Address,
+    role: &'static str,
+    balance: alloy_primitives::U256,
+) {
+    let gauge = metrics::gauge!(
+        METRICS_VAULT_AVAILABLE_BALANCE_BASE_UNITS,
+        "role" => role,
+        "address" => account.to_string(),
+    );
+    match balance.to_string().parse::<f64>() {
+        Ok(balance_base_units) => {
+            gauge.set(balance_base_units);
+            info!(%role, %account, %vault_address, %balance, balance_base_units, "refreshed available ERC-20 vault balance");
+        }
+        Err(error) => {
+            warn!(%account, %error, ?balance, "failed to convert vault balance base units")
+        }
     }
 }
 

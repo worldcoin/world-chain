@@ -14,15 +14,17 @@ mod proof_game;
 mod types;
 
 // re-exports
-pub use bindings::{IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame};
+pub use bindings::{
+    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IERC20StakingVault, IMultiProofGame,
+};
 pub use consensus_provider::{
     ConsensusError, ConsensusProvider, OptimismConsensusClient, VerifyingConsensusProvider,
 };
 pub use lineage::{
     LineageAnchor, LineageError, LineageGame, LineageProvider, LineageStop, LineageTransition,
     RegisteredLineageConfig, SelectedLineage, SelectedLineageGame, read_game_for_transition,
-    read_lineage_anchor, read_lineage_resolution_status, read_registered_lineage_config,
-    select_lineage,
+    read_lineage_anchor, read_lineage_resolution_status, read_registered_bond_vault,
+    read_registered_lineage_config, select_lineage,
 };
 pub use proof_game::{
     AlloyProofGameProvider, ProofGameContext, ProofGameContextError, ProofGameProvider,

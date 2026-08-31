@@ -1,21 +1,19 @@
 use crate::{
     error::ChallengerError,
     traits::{BondManagerClient, ChallengerClient, ResolutionManagerClient},
-    types::{
-        ChallengeSubmission, ClaimSubmission, GameMetadata, PendingWithdrawal, ResolveSubmission,
-    },
+    types::{ChallengeSubmission, CloseGameSubmission, GameMetadata, ResolveSubmission},
 };
-use alloy_consensus::BlockHeader;
-use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
+use tracing::warn;
 use world_chain_proof_protocol::{
-    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
-    MULTI_PROOF_GAME_TYPE, ProposalStatus, ResolutionStatus,
+    IAnchorStateRegistry, IDisputeGameFactory, IERC20StakingVault, IMultiProofGame,
+    MULTI_PROOF_GAME_TYPE, ProposalStatus, ResolutionStatus, read_registered_bond_vault,
+    read_registered_lineage_config,
 };
 
 /// Alloy-backed implementation of the challenger contract clients.
@@ -25,6 +23,7 @@ use world_chain_proof_protocol::{
 #[derive(Debug, Clone)]
 pub struct AlloyChallengerClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
+    bond_vault: IERC20StakingVault::IERC20StakingVaultInstance<P>,
     confirmations: u64,
     receipt_timeout: Duration,
     semaphore: Arc<Semaphore>,
@@ -36,28 +35,74 @@ where
     P: Provider + Clone,
 {
     /// Creates an Alloy-backed contract client.
-    pub fn new(
+    pub async fn new(
         provider: P,
         factory_address: Address,
         confirmations: u64,
         receipt_timeout: Duration,
-    ) -> Self {
+    ) -> Result<Self, ChallengerError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
+        read_registered_lineage_config(&provider, &factory).await?;
+        let bond_vault = read_registered_bond_vault(&provider, &factory).await?;
+        let init_bond = factory.initBonds(MULTI_PROOF_GAME_TYPE).call().await?;
+        if !init_bond.is_zero() {
+            return Err(ChallengerError::NonZeroFactoryBond(init_bond));
+        }
+        let vault =
+            IERC20StakingVault::IERC20StakingVaultInstance::new(bond_vault, provider.clone());
+        let configured_factory = vault.disputeGameFactory().call().await?;
+        if configured_factory != factory_address {
+            return Err(ChallengerError::VaultFactoryMismatch {
+                vault: bond_vault,
+                expected: factory_address,
+                actual: configured_factory,
+            });
+        }
         let semaphore = Arc::new(Semaphore::new(1));
-        Self {
+        Ok(Self {
             factory,
+            bond_vault: vault,
             confirmations,
             receipt_timeout,
             semaphore,
             provider,
-        }
+        })
     }
 
     fn game(&self, address: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
         IMultiProofGame::IMultiProofGameInstance::new(address, self.provider.clone())
+    }
+
+    /// Refreshes the managed challenger's reusable bond-token balance metric.
+    pub async fn refresh_vault_balance(&self)
+    where
+        P: WalletProvider,
+    {
+        self.refresh_vault_balance_for(self.provider.default_signer_address())
+            .await;
+    }
+
+    /// Returns the singleton ERC-20 vault discovered from the active implementation.
+    #[must_use]
+    pub fn bond_vault_address(&self) -> Address {
+        *self.bond_vault.address()
+    }
+
+    async fn refresh_vault_balance_for(&self, account: Address) {
+        match self.bond_vault.availableBalance(account).call().await {
+            Ok(balance) => world_chain_proof_metrics::record_vault_balance(
+                self.bond_vault_address(),
+                account,
+                "challenger",
+                balance,
+            ),
+            Err(error) => {
+                warn!(%error, %account, "failed to fetch challenger ERC-20 vault balance")
+            }
+        }
     }
 
     async fn read_game_count(&self) -> Result<u64, ChallengerError> {
@@ -91,41 +136,6 @@ where
             resolvable: result.resolvable,
             outcome: result.outcome.try_into()?,
             invalidation_reason: result.reason.try_into()?,
-        })
-    }
-
-    async fn read_credit(
-        &self,
-        address: Address,
-        recipient: Address,
-    ) -> Result<U256, ChallengerError> {
-        Ok(self.game(address).credit(recipient).call().await?)
-    }
-
-    async fn read_pending_withdrawal(
-        &self,
-        address: Address,
-        recipient: Address,
-    ) -> Result<PendingWithdrawal, ChallengerError> {
-        let weth_address = self.game(address).weth().call().await?;
-        let weth = IDelayedWETH::IDelayedWETHInstance::new(weth_address, self.provider.clone());
-
-        let (pending, delay) = tokio::try_join!(
-            async { weth.withdrawals(address, recipient).call().await },
-            async { weth.delay().call().await },
-        )?;
-
-        if pending.amount.is_zero() {
-            return Ok(PendingWithdrawal::default());
-        }
-        let unlock_at = pending
-            .timestamp
-            .checked_add(delay)
-            .ok_or(ChallengerError::Overflow)?;
-
-        Ok(PendingWithdrawal {
-            amount: pending.amount,
-            unlock_at: u256_to_u64(unlock_at)?,
         })
     }
 }
@@ -171,13 +181,11 @@ where
         address: Address,
     ) -> Result<ChallengeSubmission, ChallengerError> {
         let _permit = self.semaphore.acquire().await?;
-        // The bond is an immutable of whichever implementation this clone was created from, so
-        // it is read per game: a re-registered implementation would otherwise make every
-        // challenge revert with `IncorrectBondAmount`.
+        // Read the game-pinned amount so the submission and telemetry report the actual lock.
         let game = self.game(address);
         let challenger_bond = game.challengerBond().call().await?;
 
-        let pending = game.challenge().value(challenger_bond).send().await?;
+        let pending = game.challenge().send().await?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
@@ -188,7 +196,8 @@ where
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
-        world_chain_proof_metrics::record_bond_posted("challenger", challenger_bond);
+        world_chain_proof_metrics::record_bond_locked("challenger", challenger_bond);
+        self.refresh_vault_balance_for(receipt.from).await;
         Ok(ChallengeSubmission {
             tx_hash,
             bond: challenger_bond,
@@ -253,39 +262,13 @@ where
         Ok(anchor.isGameFinalized(address).call().await?)
     }
 
-    async fn credit(&self, address: Address) -> Result<U256, ChallengerError> {
-        self.read_credit(address, self.challenger_address()).await
+    async fn is_game_settled(&self, address: Address) -> Result<bool, ChallengerError> {
+        Ok(self.bond_vault.gameBonds(address).call().await?.settled)
     }
 
-    async fn pending_withdrawal(
-        &self,
-        address: Address,
-    ) -> Result<PendingWithdrawal, ChallengerError> {
-        self.read_pending_withdrawal(address, self.challenger_address())
-            .await
-    }
-
-    async fn latest_l1_timestamp(&self) -> Result<u64, ChallengerError> {
-        self.provider
-            .get_block_by_number(BlockNumberOrTag::Latest)
-            .await?
-            .map(|block| block.header.timestamp())
-            .ok_or(ChallengerError::UnavailableLatestL1Block)
-    }
-
-    async fn claim_credit(&self, address: Address) -> Result<ClaimSubmission, ChallengerError> {
+    async fn close_game(&self, address: Address) -> Result<CloseGameSubmission, ChallengerError> {
         let _permit = self.semaphore.acquire().await?;
-        let recipient = self.challenger_address();
-        // Read both phases up front so the submission can report what the call moved; the
-        // receipt carries no amount of its own.
-        let credit = self.read_credit(address, recipient).await?;
-        let pending = if credit.is_zero() {
-            self.read_pending_withdrawal(address, recipient).await?
-        } else {
-            PendingWithdrawal::default()
-        };
-
-        let pending_tx = self.game(address).claimCredit(recipient).send().await?;
+        let pending_tx = self.game(address).closeGame().send().await?;
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
             .with_required_confirmations(self.confirmations)
@@ -298,20 +281,9 @@ where
             return Err(ChallengerError::Revert(tx_hash));
         }
 
-        Ok(if credit.is_zero() {
-            world_chain_proof_metrics::record_bond_withdrawn("challenger", pending.amount);
-            ClaimSubmission {
-                tx_hash,
-                amount: pending.amount,
-                withdrawn: true,
-            }
-        } else {
-            ClaimSubmission {
-                tx_hash,
-                amount: credit,
-                withdrawn: false,
-            }
-        })
+        self.refresh_vault_balance_for(receipt.from).await;
+
+        Ok(CloseGameSubmission { tx_hash })
     }
 }
 

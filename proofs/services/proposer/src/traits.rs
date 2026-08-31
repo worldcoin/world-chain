@@ -1,16 +1,16 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256};
 use async_trait::async_trait;
 use world_chain_proof_protocol::{LineageProvider, ResolutionStatus};
 
 use crate::{
     Proposal, ProposalSubmission, ProposerError,
-    types::{ClaimSubmission, CloseGameSubmission, PendingWithdrawal, ResolveSubmission},
+    types::{CloseGameSubmission, ResolveSubmission},
 };
 
 /// Contract surface needed by the asynchronous bond manager.
 #[async_trait]
 pub trait BondManagerClient: Send + Sync {
-    /// Returns the address whose proposal credits are managed.
+    /// Returns the proposer whose games are managed for bond settlement.
     fn proposer_address(&self) -> Address;
 
     /// Returns the proposal domain currently registered for WIP-1006.
@@ -24,7 +24,7 @@ pub trait BondManagerClient: Send + Sync {
     /// holds a game of a different type.
     async fn game_at(&self, index: u64) -> Result<Option<Address>, ProposerError>;
 
-    /// Returns the account that created the provided game.
+    /// Returns the account that created and bonded the provided game.
     async fn game_creator(&self, game: Address) -> Result<Address, ProposerError>;
 
     /// Returns the proposal domain embedded in the provided game.
@@ -37,21 +37,11 @@ pub trait BondManagerClient: Send + Sync {
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError>;
 
     /// Returns whether the registry's finality airgap has elapsed for the provided game.
-    ///
-    /// `claimCredit` calls `closeGame`, which reverts until this holds.
     async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError>;
-
-    /// Returns the credit the managed proposer can unlock from the provided game.
-    async fn credit(&self, game: Address) -> Result<U256, ProposerError>;
-
-    /// Returns the managed proposer's pending `DelayedWETH` withdrawal for the provided game.
-    async fn pending_withdrawal(&self, game: Address) -> Result<PendingWithdrawal, ProposerError>;
-
-    /// Returns the latest L1 block timestamp used by `DelayedWETH`.
-    async fn latest_l1_timestamp(&self) -> Result<u64, ProposerError>;
-
-    /// Advances the managed proposer's two-phase bond claim on the provided game.
-    async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ProposerError>;
+    /// Returns whether the game's complete bond pot has already been settled.
+    async fn is_game_settled(&self, game: Address) -> Result<bool, ProposerError>;
+    /// Settles the game's complete bond pot into reusable vault balances.
+    async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError>;
 }
 
 /// Minimal contract surface needed by the proposer.

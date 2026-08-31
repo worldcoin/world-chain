@@ -246,20 +246,7 @@ pub async fn read_registered_lineage_config<P>(
 where
     P: Provider + Clone,
 {
-    let implementation_address = factory
-        .gameImpls(MULTI_PROOF_GAME_TYPE)
-        .call()
-        .await
-        .map_err(|error| LineageError::Contract(error.to_string()))?;
-    if implementation_address == Address::ZERO {
-        return Err(LineageError::Contract(format!(
-            "dispute-game factory {} has no implementation for game type {MULTI_PROOF_GAME_TYPE}",
-            factory.address()
-        )));
-    }
-
-    let implementation =
-        IMultiProofGame::IMultiProofGameInstance::new(implementation_address, provider.clone());
+    let implementation = read_registered_game_implementation(provider, factory).await?;
     let (domain_hash, anchor_registry, block_interval) = provider
         .multicall()
         .add(implementation.domainHash())
@@ -285,6 +272,52 @@ where
         block_interval,
         anchor_registry,
     })
+}
+
+/// Discovers the singleton bond vault from the factory's registered WIP-1006 implementation.
+pub async fn read_registered_bond_vault<P>(
+    provider: &P,
+    factory: &IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
+) -> Result<Address, LineageError>
+where
+    P: Provider + Clone,
+{
+    let implementation = read_registered_game_implementation(provider, factory).await?;
+    let bond_vault = implementation
+        .bondVault()
+        .call()
+        .await
+        .map_err(|error| LineageError::Contract(error.to_string()))?;
+    if bond_vault == Address::ZERO {
+        return Err(LineageError::Contract(
+            "registered game implementation has no bond vault".into(),
+        ));
+    }
+    Ok(bond_vault)
+}
+
+async fn read_registered_game_implementation<P>(
+    provider: &P,
+    factory: &IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
+) -> Result<IMultiProofGame::IMultiProofGameInstance<P>, LineageError>
+where
+    P: Provider + Clone,
+{
+    let implementation_address = factory
+        .gameImpls(MULTI_PROOF_GAME_TYPE)
+        .call()
+        .await
+        .map_err(|error| LineageError::Contract(error.to_string()))?;
+    if implementation_address == Address::ZERO {
+        return Err(LineageError::Contract(format!(
+            "dispute-game factory {} has no implementation for game type {MULTI_PROOF_GAME_TYPE}",
+            factory.address()
+        )));
+    }
+    Ok(IMultiProofGame::IMultiProofGameInstance::new(
+        implementation_address,
+        provider.clone(),
+    ))
 }
 
 /// Looks up the highest sequential retry attempt for a transition.

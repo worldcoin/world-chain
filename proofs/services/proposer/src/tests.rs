@@ -1,13 +1,10 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
-use alloy_primitives::{Address, B256, BlockNumber, U256, address, b256};
+use alloy_primitives::{Address, B256, BlockNumber, address, b256};
 use async_trait::async_trait;
 use world_chain_proof_protocol::{
     ConsensusError, ConsensusProvider, GameStatus, InvalidationReason, LineageAnchor, LineageError,
@@ -18,10 +15,7 @@ use world_chain_proof_protocol::{
 use crate::{
     BondManager, BondManagerClient, BondManagerConfig, Proposal, ProposalSubmission,
     ProposerClient, ProposerConfig, ProposerError, ProposerScan, WorldChainProposer,
-    types::{
-        ClaimSubmission, CloseGameSubmission, NextProposalAction, PendingWithdrawal,
-        ResolveSubmission,
-    },
+    types::{CloseGameSubmission, NextProposalAction, ResolveSubmission},
 };
 
 const DOMAIN_HASH: B256 = b256!("1111111111111111111111111111111111111111111111111111111111111111");
@@ -150,8 +144,6 @@ impl ProposerClient for MockContracts {
     }
 }
 
-/// Two-phase bond client mirroring `MultiProofGame.claimCredit`: the first claim moves credit
-/// into a pending `DelayedWETH` withdrawal, the second drains it.
 #[derive(Debug, Clone)]
 struct MockBondClient {
     proposer: Address,
@@ -164,13 +156,10 @@ struct MockBondClient {
     resolution_statuses: Arc<Mutex<HashMap<Address, ResolutionStatus>>>,
     resolutions: Arc<Mutex<Vec<Address>>>,
     unfinalized_games: Arc<Mutex<HashSet<Address>>>,
-    credit: Arc<Mutex<HashMap<Address, U256>>>,
-    pending: Arc<Mutex<HashMap<Address, PendingWithdrawal>>>,
-    latest_l1_timestamp: Arc<AtomicU64>,
-    unlocks: Arc<Mutex<Vec<Address>>>,
-    withdrawals: Arc<Mutex<Vec<Address>>>,
+    settled_games: Arc<Mutex<HashSet<Address>>>,
+    closes: Arc<Mutex<Vec<Address>>>,
     fail_game_at_once: Arc<Mutex<Option<u64>>>,
-    fail_claim_once: Arc<Mutex<HashSet<Address>>>,
+    fail_close_once: Arc<Mutex<HashSet<Address>>>,
 }
 
 impl MockBondClient {
@@ -195,13 +184,10 @@ impl MockBondClient {
             resolution_statuses: Arc::default(),
             resolutions: Arc::default(),
             unfinalized_games: Arc::default(),
-            credit: Arc::default(),
-            pending: Arc::default(),
-            latest_l1_timestamp: Arc::default(),
-            unlocks: Arc::default(),
-            withdrawals: Arc::default(),
+            settled_games: Arc::default(),
+            closes: Arc::default(),
             fail_game_at_once: Arc::default(),
-            fail_claim_once: Arc::default(),
+            fail_close_once: Arc::default(),
         }
     }
 }
@@ -308,75 +294,30 @@ impl BondManagerClient for MockBondClient {
             .contains(&game))
     }
 
-    async fn credit(&self, game: Address) -> Result<U256, ProposerError> {
+    async fn is_game_settled(&self, game: Address) -> Result<bool, ProposerError> {
         Ok(self
-            .credit
+            .settled_games
             .lock()
             .expect("not poisoned")
-            .get(&game)
-            .copied()
-            .unwrap_or_default())
+            .contains(&game))
     }
 
-    async fn pending_withdrawal(&self, game: Address) -> Result<PendingWithdrawal, ProposerError> {
-        Ok(self
-            .pending
-            .lock()
-            .expect("not poisoned")
-            .get(&game)
-            .copied()
-            .unwrap_or_default())
-    }
-
-    async fn latest_l1_timestamp(&self) -> Result<u64, ProposerError> {
-        Ok(self.latest_l1_timestamp.load(Ordering::SeqCst))
-    }
-
-    async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ProposerError> {
+    async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
         if self
-            .fail_claim_once
+            .fail_close_once
             .lock()
             .expect("not poisoned")
             .remove(&game)
         {
-            return Err(ProposerError::message("injected claim failure"));
+            return Err(ProposerError::message("injected close failure"));
         }
-
-        let credit = self
-            .credit
+        self.settled_games
             .lock()
             .expect("not poisoned")
-            .remove(&game)
-            .unwrap_or_default();
-        if credit > U256::ZERO {
-            // Phase 1: unlock in DelayedWETH, immediately withdrawable in tests.
-            self.pending.lock().expect("not poisoned").insert(
-                game,
-                PendingWithdrawal {
-                    amount: credit,
-                    unlock_at: 0,
-                },
-            );
-            self.unlocks.lock().expect("not poisoned").push(game);
-            return Ok(ClaimSubmission {
-                tx_hash: B256::repeat_byte(0xdd),
-                amount: credit,
-                withdrawn: false,
-            });
-        }
-
-        // Phase 2: drain the pending withdrawal.
-        let pending = self
-            .pending
-            .lock()
-            .expect("not poisoned")
-            .remove(&game)
-            .unwrap_or_default();
-        self.withdrawals.lock().expect("not poisoned").push(game);
-        Ok(ClaimSubmission {
+            .insert(game);
+        self.closes.lock().expect("not poisoned").push(game);
+        Ok(CloseGameSubmission {
             tx_hash: B256::repeat_byte(0xde),
-            amount: pending.amount,
-            withdrawn: true,
         })
     }
 }
@@ -972,25 +913,25 @@ async fn bond_manager_retries_complete_range_after_partial_scan_failure() {
 }
 
 #[tokio::test]
-async fn bond_manager_prunes_resolved_games_and_retries_failed_claims() {
+async fn bond_manager_settles_finalized_games_and_retries_failed_closes() {
     let proposer = Address::repeat_byte(0xa1);
     let unresolved = game_address(1);
-    let zero_credit = game_address(2);
-    let claimable = game_address(3);
-    let retry_claim = game_address(4);
+    let already_settled = game_address(2);
+    let closable = game_address(3);
+    let retry_close = game_address(4);
     let awaiting_airgap = game_address(5);
     let games = vec![
         (unresolved, proposer),
-        (zero_credit, proposer),
-        (claimable, proposer),
-        (retry_claim, proposer),
+        (already_settled, proposer),
+        (closable, proposer),
+        (retry_close, proposer),
         (awaiting_airgap, proposer),
     ];
     let client = MockBondClient::new(proposer, games);
     client.resolved_games.lock().expect("not poisoned").extend([
-        zero_credit,
-        claimable,
-        retry_claim,
+        already_settled,
+        closable,
+        retry_close,
         awaiting_airgap,
     ]);
     client
@@ -998,60 +939,41 @@ async fn bond_manager_prunes_resolved_games_and_retries_failed_claims() {
         .lock()
         .expect("not poisoned")
         .insert(awaiting_airgap);
-    client.credit.lock().expect("not poisoned").extend([
-        (claimable, U256::from(10)),
-        (retry_claim, U256::from(20)),
-        (awaiting_airgap, U256::from(30)),
-    ]);
     client
-        .fail_claim_once
+        .settled_games
         .lock()
         .expect("not poisoned")
-        .insert(retry_claim);
+        .insert(already_settled);
+    client
+        .fail_close_once
+        .lock()
+        .expect("not poisoned")
+        .insert(retry_close);
     let mut manager = BondManager::new(bond_manager_config(100), client.clone());
     manager.scan_games().await.unwrap();
 
-    // Pass 1: only `claimable` advances, and only through the DelayedWETH unlock.
     manager.settle_games().await.unwrap();
 
     assert!(manager.tracks_game(unresolved));
-    assert!(!manager.tracks_game(zero_credit));
-    assert!(
-        manager.tracks_game(claimable),
-        "unlocked bond must stay tracked"
-    );
-    assert!(manager.tracks_game(retry_claim));
+    assert!(!manager.tracks_game(already_settled));
+    assert!(!manager.tracks_game(closable));
+    assert!(manager.tracks_game(retry_close));
     assert!(
         manager.tracks_game(awaiting_airgap),
         "a game inside the finality airgap must stay tracked"
     );
-    assert_eq!(
-        *client.unlocks.lock().expect("not poisoned"),
-        vec![claimable]
-    );
-    assert!(client.withdrawals.lock().expect("not poisoned").is_empty());
+    assert_eq!(*client.closes.lock().expect("not poisoned"), vec![closable]);
 
-    // Pass 2: `claimable` withdraws and is dropped; the failed claim is retried and unlocks.
     manager.settle_games().await.unwrap();
 
-    assert!(!manager.tracks_game(claimable));
-    assert!(manager.tracks_game(retry_claim));
-    assert_eq!(
-        *client.withdrawals.lock().expect("not poisoned"),
-        vec![claimable]
-    );
-
-    // Pass 3: the retried claim withdraws and is dropped.
-    manager.settle_games().await.unwrap();
-
-    assert!(!manager.tracks_game(retry_claim));
-    let withdrawals = client.withdrawals.lock().expect("not poisoned");
-    assert!(withdrawals.contains(&claimable));
-    assert!(withdrawals.contains(&retry_claim));
+    assert!(!manager.tracks_game(retry_close));
+    let closes = client.closes.lock().expect("not poisoned");
+    assert!(closes.contains(&closable));
+    assert!(closes.contains(&retry_close));
 }
 
 #[tokio::test]
-async fn bond_manager_resolves_invalid_parent_before_claiming_refund() {
+async fn bond_manager_resolves_invalid_parent_before_settlement() {
     let proposer = Address::repeat_byte(0xa1);
     let game = game_address(1);
     let client = MockBondClient::new(proposer, vec![(game, proposer)]);
@@ -1067,11 +989,6 @@ async fn bond_manager_resolves_invalid_parent_before_claiming_refund() {
                 invalidation_reason: InvalidationReason::InvalidParent,
             },
         );
-    client
-        .credit
-        .lock()
-        .expect("not poisoned")
-        .insert(game, U256::from(10));
     let mut manager = BondManager::new(bond_manager_config(100), client.clone());
     manager.scan_games().await.unwrap();
 
@@ -1080,18 +997,11 @@ async fn bond_manager_resolves_invalid_parent_before_claiming_refund() {
         *client.resolutions.lock().expect("not poisoned"),
         vec![game]
     );
-    assert!(client.unlocks.lock().expect("not poisoned").is_empty());
+    assert!(client.closes.lock().expect("not poisoned").is_empty());
     assert!(manager.tracks_game(game));
 
     manager.settle_games().await.unwrap();
-    assert_eq!(*client.unlocks.lock().expect("not poisoned"), vec![game]);
-    assert!(manager.tracks_game(game));
-
-    manager.settle_games().await.unwrap();
-    assert_eq!(
-        *client.withdrawals.lock().expect("not poisoned"),
-        vec![game]
-    );
+    assert_eq!(*client.closes.lock().expect("not poisoned"), vec![game]);
     assert!(!manager.tracks_game(game));
 }
 
@@ -1163,11 +1073,6 @@ async fn bond_manager_resolves_positive_game_from_obsolete_domain() {
         .lock()
         .expect("not poisoned")
         .insert(game, positive_ready_status());
-    client
-        .credit
-        .lock()
-        .expect("not poisoned")
-        .insert(game, U256::from(10));
     let mut manager = BondManager::new(bond_manager_config(100), client.clone());
     manager.scan_games().await.unwrap();
 
@@ -1180,14 +1085,7 @@ async fn bond_manager_resolves_positive_game_from_obsolete_domain() {
     assert!(manager.tracks_game(game));
 
     manager.settle_games().await.unwrap();
-    assert_eq!(*client.unlocks.lock().expect("not poisoned"), vec![game]);
-    assert!(manager.tracks_game(game));
-
-    manager.settle_games().await.unwrap();
-    assert_eq!(
-        *client.withdrawals.lock().expect("not poisoned"),
-        vec![game]
-    );
+    assert_eq!(*client.closes.lock().expect("not poisoned"), vec![game]);
     assert!(!manager.tracks_game(game));
 }
 
@@ -1208,7 +1106,7 @@ async fn bond_manager_skips_foreign_game_types() {
 }
 
 #[tokio::test]
-async fn bond_manager_uses_l1_timestamp_for_delayed_withdrawal() {
+async fn bond_manager_prunes_an_already_settled_game_without_closing_again() {
     let proposer = Address::repeat_byte(0xa1);
     let game = game_address(1);
     let client = MockBondClient::new(proposer, vec![(game, proposer)]);
@@ -1217,28 +1115,17 @@ async fn bond_manager_uses_l1_timestamp_for_delayed_withdrawal() {
         .lock()
         .expect("not poisoned")
         .insert(game);
-    client.pending.lock().expect("not poisoned").insert(
-        game,
-        PendingWithdrawal {
-            amount: U256::from(10),
-            unlock_at: 100,
-        },
-    );
-    client.latest_l1_timestamp.store(99, Ordering::SeqCst);
+    client
+        .settled_games
+        .lock()
+        .expect("not poisoned")
+        .insert(game);
 
     let mut manager = BondManager::new(bond_manager_config(100), client.clone());
     manager.scan_games().await.unwrap();
     manager.settle_games().await.unwrap();
-    assert!(manager.tracks_game(game));
-    assert!(client.withdrawals.lock().expect("not poisoned").is_empty());
-
-    client.latest_l1_timestamp.store(100, Ordering::SeqCst);
-    manager.settle_games().await.unwrap();
     assert!(!manager.tracks_game(game));
-    assert_eq!(
-        *client.withdrawals.lock().expect("not poisoned"),
-        vec![game]
-    );
+    assert!(client.closes.lock().expect("not poisoned").is_empty());
 }
 
 #[tokio::test]

@@ -12,12 +12,15 @@ use alloy_provider::ProviderBuilder;
 use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result};
 use clap::{ArgGroup, Parser};
-use tracing::info;
+use tracing::{info, warn};
 use url::Url;
 use world_chain_defender::{
     AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig, WorldChainDefender,
 };
-use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
+use world_chain_proof_protocol::{
+    IDisputeGameFactory, IERC20StakingVault, OptimismConsensusClient, VerifyingConsensusProvider,
+    read_registered_bond_vault,
+};
 use world_chain_proof_tx_signer::build_transaction_signer;
 use world_chain_prover_service::RpcProverServiceClient;
 
@@ -131,6 +134,28 @@ async fn main() -> Result<()> {
         .wallet(wallet)
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, defender_address).await;
+    let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
+        cli.factory_address,
+        provider.clone(),
+    );
+    match read_registered_bond_vault(&provider, &factory).await {
+        Ok(bond_vault) => {
+            let vault =
+                IERC20StakingVault::IERC20StakingVaultInstance::new(bond_vault, provider.clone());
+            match vault.availableBalance(reward_recipient).call().await {
+                Ok(balance) => world_chain_proof_metrics::record_vault_balance(
+                    bond_vault,
+                    reward_recipient,
+                    "defender",
+                    balance,
+                ),
+                Err(error) => {
+                    warn!(%error, "failed to fetch defender reward-recipient ERC-20 vault balance")
+                }
+            }
+        }
+        Err(error) => warn!(%error, "failed to discover ERC-20 vault for defender telemetry"),
+    }
 
     let client = AlloyDefenderClient::new(
         provider,
