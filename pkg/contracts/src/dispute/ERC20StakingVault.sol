@@ -36,7 +36,9 @@ import {LibClone} from "@solady/utils/LibClone.sol";
 
 /// @custom:proxied true
 /// @title ERC20StakingVault
+/// @author World Contributors
 /// @notice A one-to-one ERC-20 ledger for WIP-1006 proposal and challenge bonds.
+/// @custom:security-contact security@toolsforhumanity.com
 contract ERC20StakingVault is Initializable, IERC20StakingVault {
     using SafeERC20 for IERC20;
 

@@ -145,5 +145,4 @@ sol! {
         function setAnchorState(address game) external;
         function paused() external view returns (bool);
     }
-
 }

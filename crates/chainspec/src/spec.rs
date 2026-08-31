@@ -77,6 +77,17 @@ impl WorldChainSpec {
             return;
         };
         self.inner.hardforks.insert(fork, condition);
+        // `ChainHardforks::insert` appends new forks at the end; restore activation order so the
+        // ForkId matches a spec that had the fork in genesis from the start.
+        self.inner.hardforks = order_world_hardforks(
+            self.inner
+                .hardforks
+                .forks_iter()
+                .filter_map(|(fork, condition)| {
+                    convert_op_hardfork(fork).map(|fork| (fork, condition))
+                })
+                .collect(),
+        );
         self.inner.genesis_header = SealedHeader::seal_slow(make_op_genesis_header(
             &self.inner.genesis,
             &self.inner.hardforks,
@@ -572,7 +583,27 @@ fn order_world_hardforks(
     }
 
     ordered_hardforks.append(&mut configured);
+
+    // Do _not_ remove this.
+    ordered_hardforks.sort_by_key(|(_, condition)| fork_activation_order(condition));
     ChainHardforks::new(ordered_hardforks)
+}
+
+/// Sort key ordering hardforks by activation: block-based forks first, then the merge, then
+/// timestamp-based forks.
+fn fork_activation_order(condition: &ForkCondition) -> (u8, u64) {
+    match condition {
+        ForkCondition::Block(block)
+        | ForkCondition::TTD {
+            fork_block: Some(block),
+            ..
+        } => (0, *block),
+        ForkCondition::TTD {
+            fork_block: None, ..
+        } => (1, 0),
+        ForkCondition::Timestamp(timestamp) => (2, *timestamp),
+        ForkCondition::Never => (3, u64::MAX),
+    }
 }
 
 #[cfg(test)]
@@ -689,6 +720,104 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(names, vec!["Jovian", "Karst", "Tropo", "Strato"]);
+    }
+
+    /// World Sepolia-shaped genesis; `karst_in_genesis` toggles the `karstTime` extra field.
+    fn sepolia_like_genesis(karst_in_genesis: bool) -> Genesis {
+        let mut genesis = Genesis::default();
+        genesis.config.chain_id = 4801;
+        let mut times = vec![
+            ("bedrockBlock", 0u64),
+            ("regolithTime", 0),
+            ("canyonTime", 0),
+            ("ecotoneTime", 0),
+            ("fjordTime", 1_721_739_600),
+            ("graniteTime", 1_726_570_800),
+            ("holoceneTime", 1_737_633_600),
+            ("isthmusTime", 1_761_825_600),
+            ("jovianTime", JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA),
+        ];
+        if karst_in_genesis {
+            times.push(("karstTime", KARST_UPGRADE_TIMESTAMP_SEPOLIA));
+        }
+        for (key, value) in times {
+            genesis
+                .config
+                .extra_fields
+                .insert_value(key.to_string(), value)
+                .unwrap();
+        }
+        genesis
+    }
+
+    /// Regression test for the 2026-08-28 stage peering outage: a node whose genesis carried
+    /// `karstTime` advertised a different ForkId than nodes that got Karst via the CLI override,
+    /// so eth/69 handshakes failed both ways and the node had zero peers.
+    #[test]
+    fn fork_id_identical_for_genesis_karst_and_cli_override() {
+        let mut with_karst = WorldChainSpec::from_genesis(sepolia_like_genesis(true));
+        let mut without_karst = WorldChainSpec::from_genesis(sepolia_like_genesis(false));
+
+        // Mirror the unconditional CLI overrides applied on boot.
+        for spec in [&mut with_karst, &mut without_karst] {
+            spec.set_fork(
+                WorldChainHardfork::Jovian,
+                ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA),
+            );
+            spec.set_fork(
+                WorldChainHardfork::Karst,
+                ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_SEPOLIA),
+            );
+            spec.set_fork(
+                EthereumHardfork::Osaka,
+                ForkCondition::Timestamp(KARST_UPGRADE_TIMESTAMP_SEPOLIA),
+            );
+        }
+
+        let pre_karst = Head {
+            number: 33_700_000,
+            timestamp: KARST_UPGRADE_TIMESTAMP_SEPOLIA - 1,
+            ..Default::default()
+        };
+        let post_karst = Head {
+            number: 40_000_000,
+            timestamp: KARST_UPGRADE_TIMESTAMP_SEPOLIA,
+            ..Default::default()
+        };
+
+        for head in [&pre_karst, &post_karst] {
+            assert_eq!(with_karst.fork_id(head), without_karst.fork_id(head));
+        }
+        assert_eq!(with_karst.latest_fork_id(), without_karst.latest_fork_id());
+        assert_eq!(
+            with_karst.fork_id(&pre_karst).next,
+            KARST_UPGRADE_TIMESTAMP_SEPOLIA
+        );
+    }
+
+    /// reth's EIP-2124 fold only dedups adjacent equal activations, so the hardfork list must
+    /// stay ordered by activation no matter how the spec was constructed.
+    #[test]
+    fn hardforks_ordered_by_activation() {
+        let specs = vec![
+            (*WorldChainSpec::mainnet()).clone(),
+            (*WorldChainSpec::sepolia()).clone(),
+            WorldChainSpec::from_genesis(sepolia_like_genesis(true)),
+            WorldChainSpec::from_genesis(sepolia_like_genesis(false)),
+        ];
+        for spec in specs {
+            let keys = spec
+                .inner
+                .hardforks
+                .forks_iter()
+                .map(|(_, condition)| fork_activation_order(&condition))
+                .collect::<Vec<_>>();
+            assert!(
+                keys.windows(2).all(|pair| pair[0] <= pair[1]),
+                "hardforks out of activation order for chain {}: {keys:?}",
+                spec.chain()
+            );
+        }
     }
 
     #[test]
