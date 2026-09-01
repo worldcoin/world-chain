@@ -119,7 +119,7 @@ async fn already_expired_game_is_ignored() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let Some(devnet) = try_build_ha_devnet_with_custom_block_time(
-        "unkown game type is ignored",
+        "already expired game is ignored",
         Duration::from_millis(200), // 200ms block time
     )
     .await?
