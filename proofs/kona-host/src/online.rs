@@ -215,6 +215,18 @@ pub struct RangeProofInput {
     pub witness: WorldRangeWitnessData,
 }
 
+/// Returns whether a failed witness build exhausted its collection deadline.
+///
+/// The public builder returns `anyhow::Error` so callers can keep their existing error context;
+/// this centralizes the timeout classification used for low-cardinality worker metrics.
+pub fn is_witness_generation_timeout(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .to_string()
+            .starts_with("Kona witness generation timed out after ")
+    })
+}
+
 /// Context captured while building a range witness.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
