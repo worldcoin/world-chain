@@ -1,6 +1,7 @@
 use std::time::Duration;
 
-use alloy_primitives::{B256, U256, utils::parse_ether};
+use alloy_primitives::{Address, B256, U256, address, utils::parse_ether};
+use alloy_provider::Provider;
 use eyre::eyre::{ensure, eyre};
 use world_chain_proof_protocol::{IDisputeGameFactory, LineageProvider};
 use world_chain_proposer::{Proposal, ProposerClient};
@@ -13,6 +14,12 @@ use crate::it::utils::{
         try_build_ha_devnet_with_custom_block_time, vault_at, wait_for_challenge, wait_for_status,
     },
 };
+
+/// In-process World Chain challenger (`WORLD_CHALLENGER_PRIVATE_KEY` in
+/// `crates/devnet/src/full_stack.rs`).
+const WORLD_CHALLENGER_ADDRESS: Address = address!("0x743dAA55063C608894C125Cf8eC82Afe83B2d5c5");
+/// Long enough for several challenger poll ticks after the game is L1-finalized.
+const CHALLENGER_IDLE_OBSERVATION: Duration = Duration::from_secs(20);
 
 /// End-to-end fault path: a dishonest proposer posts a root that disagrees with consensus, the
 /// real challenger detects and challenges it, the real defender declines to defend it, and the
@@ -158,6 +165,75 @@ async fn already_expired_game_is_ignored() -> eyre::Result<()> {
     // valid anymore.
     let expected_game_status = 0; // IN_PROGRESS
     assert_eq!(game_status, expected_game_status);
+    Ok(())
+}
+
+/// The challenger completely ignores already challenged games.
+///
+/// Game state alone cannot prove this: a second `challenge()` reverts with
+/// `ClaimAlreadyChallenged` and leaves `challenger()` unchanged. We instead
+/// assert the world challenger's L1 nonce does not move after it has had time
+/// to see the finalized game. A mined (even reverted) challenge would bump it.
+#[ignore = "requires Docker, Foundry, and the full local OP Stack"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn already_challenged_game_is_ignored() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let Some(devnet) = try_build_ha_devnet_with_custom_block_time(
+        "already challenged game is ignored",
+        Duration::from_millis(200), // 200ms block time
+    )
+    .await?
+    else {
+        return Ok(());
+    };
+
+    let l1_rpc = l1_rpc_url(&devnet)?;
+    let factory_address = l1_contract(devnet.dispute_game_factory(), "DisputeGameFactory")?;
+
+    let (address, provider) = funded_throwaway_provider(l1_rpc, factory_address).await?;
+    let contracts = proof_system_client(provider.clone(), factory_address).await?;
+
+    // Wins the first proposal window: the honest proposer can't submit until `block_interval` L2
+    // blocks are safe, several seconds out at devnet block time.
+    let anchor = contracts.lineage_anchor().await?;
+    let registered = contracts.registered_lineage_config();
+    let bad_root = B256::repeat_byte(0xba);
+    let bad_proposal = Proposal {
+        parent_ref: anchor.address,
+        root_claim: bad_root,
+        l2_block_number: anchor
+            .l2_block_number
+            .saturating_add(registered.block_interval),
+        attempt: 0,
+    };
+
+    let submission = contracts.submit_proposal(&bad_proposal).await?;
+    let game_address = submission.game_address;
+    println!(
+        "devnet challenge: malicious proposer {address} posted bad root {bad_root} for l2 block {} at game {game_address}",
+        bad_proposal.l2_block_number
+    );
+    let game = game_at(game_address, provider.clone());
+    // Challenge before L1 finalization so the real challenger first sees an already-challenged game.
+    let receipt = game.challenge().send().await?.get_receipt().await?;
+    assert!(receipt.status());
+    assert_eq!(game.challenger().call().await?, address);
+
+    // Sleep for ~30 secs so that the block that contains that game becomes finalized.
+    // Our challenger only looks at games contained in finalized blocks.
+    tokio::time::sleep(Duration::from_secs(30)).await;
+
+    let nonce_before = provider
+        .get_transaction_count(WORLD_CHALLENGER_ADDRESS)
+        .await?;
+    tokio::time::sleep(CHALLENGER_IDLE_OBSERVATION).await;
+    let nonce_after = provider
+        .get_transaction_count(WORLD_CHALLENGER_ADDRESS)
+        .await?;
+
+    assert_eq!(nonce_after, nonce_before,);
+    assert_eq!(game.challenger().call().await?, address);
     Ok(())
 }
 
