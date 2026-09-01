@@ -144,6 +144,8 @@ jobs:
       matrix:
         service:
           - { suffix: -sp1-worker, package: world-chain-proof-sp1-worker, bin: world-chain-proof-sp1-worker, prefix: digests-sp1-worker, target: sp1-worker }
+          - { suffix: -prover-sp1, package: world-chain-prover-sp1, bin: world-chain-prover-sp1, prefix: digests-prover-sp1, target: final }
+          - { suffix: -prover-nitro, package: world-chain-prover-nitro, bin: world-chain-prover-nitro, prefix: digests-prover-nitro, target: final }
           - { suffix: -proposer, package: world-chain-proposer, bin: world-chain-proposer, prefix: digests-proposer, target: final }
           - { suffix: -challenger, package: world-chain-challenger, bin: world-chain-challenger, prefix: digests-challenger, target: final }
           - { suffix: -defender, package: world-chain-defender, bin: world-chain-defender, prefix: digests-defender, target: final }
@@ -188,6 +190,8 @@ jobs:
       matrix:
         service:
           - { suffix: -sp1-worker, prefix: digests-sp1-worker }
+          - { suffix: -prover-sp1, prefix: digests-prover-sp1 }
+          - { suffix: -prover-nitro, prefix: digests-prover-nitro }
           - { suffix: -proposer, prefix: digests-proposer }
           - { suffix: -challenger, prefix: digests-challenger }
           - { suffix: -defender, prefix: digests-defender }
