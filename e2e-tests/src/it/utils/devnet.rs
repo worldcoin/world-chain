@@ -5,6 +5,7 @@
 
 use std::{
     future::Future,
+    str::FromStr,
     time::{Duration, Instant},
 };
 
@@ -51,11 +52,9 @@ sol! {
     }
 }
 
-/// Builds the HA-sequencer full stack every proof-system test runs against.
-///
-/// `Ok(None)` means Docker is unavailable — the caller should skip, not fail.
-pub(in crate::it) async fn try_build_ha_devnet(
+pub async fn try_build_ha_devnet_with_custom_block_time(
     skip_label: &str,
+    block_time: Duration,
 ) -> eyre::Result<Option<WorldDevnet>> {
     let ha_config = HaSequencerConfig::default()
         .with_sequencer_count(2)
@@ -64,7 +63,7 @@ pub(in crate::it) async fn try_build_ha_devnet(
     match WorldDevnetBuilder::new()
         .preset(WorldDevnetPreset::HaSequencer)
         .ha_sequencer(ha_config)
-        .block_time(Duration::from_secs(1))
+        .block_time(block_time)
         .build()
         .await
     {
@@ -75,6 +74,13 @@ pub(in crate::it) async fn try_build_ha_devnet(
         }
         Err(err) => Err(err),
     }
+}
+
+/// Builds the HA-sequencer full stack every proof-system test runs against.
+///
+/// `Ok(None)` means Docker is unavailable — the caller should skip, not fail.
+pub async fn try_build_ha_devnet(skip_label: &str) -> eyre::Result<Option<WorldDevnet>> {
+    try_build_ha_devnet_with_custom_block_time(skip_label, Duration::from_secs(1)).await
 }
 
 pub(in crate::it) fn l1_rpc_url(devnet: &WorldDevnet) -> eyre::Result<&str> {
@@ -101,6 +107,22 @@ pub(in crate::it) fn signing_provider(
     Ok(ProviderBuilder::new()
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(rpc)?))
+}
+
+/// Funds the address originated from the provided private key with ETH and returns the related provider.
+pub async fn fund_address(
+    l1_rpc: &str,
+    private_key: &str,
+) -> eyre::Result<impl Provider + WalletProvider + Clone + use<>> {
+    let signer = PrivateKeySigner::from_str(private_key)?;
+    let address = signer.address();
+    ProviderBuilder::new()
+        .connect_http(Url::parse(l1_rpc)?)
+        .anvil_set_balance(address, U256::from(THROWAWAY_ACCOUNT_BALANCE_WEI))
+        .await?;
+
+    let provider = signing_provider(l1_rpc, signer)?;
+    Ok(provider)
 }
 
 /// Funds a fresh random account with L1 gas and mock tokens deposited into the active bond vault.
