@@ -27,7 +27,7 @@ use alloy_sol_types::SolValue;
 use anyhow::{Context, bail};
 use tracing::{debug, info};
 use world_chain_proof_kona_host::online::{
-    OnlineHostConfig, RangeWitnessRequest, build_range_input,
+    OnlineHostConfig, RangeWitnessRequest, build_range_input, is_witness_generation_timeout,
 };
 use world_chain_proof_nitro_enclave::{
     ExpectedPcrs, NitroRangeProofRequest,
@@ -116,7 +116,7 @@ where
             "collecting witness data for range"
         );
         let witness_collection_started_at = std::time::Instant::now();
-        let input = build_range_input(
+        let input = match build_range_input(
             &self.config.online,
             RangeWitnessRequest {
                 start_block,
@@ -126,7 +126,29 @@ where
             },
         )
         .await
-        .context("witness generation failed")?;
+        {
+            Ok(input) => {
+                world_chain_proof_metrics::record_witness_collection(
+                    "nitro",
+                    "success",
+                    witness_collection_started_at.elapsed(),
+                );
+                input
+            }
+            Err(error) => {
+                let outcome = if is_witness_generation_timeout(&error) {
+                    "timeout"
+                } else {
+                    "error"
+                };
+                world_chain_proof_metrics::record_witness_collection(
+                    "nitro",
+                    outcome,
+                    witness_collection_started_at.elapsed(),
+                );
+                return Err(error).context("witness generation failed");
+            }
+        };
 
         let nitro_request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
             .context("witness serialize")?;

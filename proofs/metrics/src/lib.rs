@@ -44,6 +44,10 @@ pub const METRICS_PROOF_JOBS_CLAIMED: &str = "proof_jobs.claimed";
 pub const METRICS_PROOF_JOBS_COMPLETED: &str = "proof_jobs.completed";
 /// End-to-end worker proof-job attempt duration.
 pub const METRICS_PROOF_JOB_DURATION_SECONDS: &str = "proof_job.duration_seconds";
+/// Completed witness-collection attempts.
+pub const METRICS_WITNESS_COLLECTIONS_COMPLETED: &str = "witness_collection.completed";
+/// Witness-collection duration.
+pub const METRICS_WITNESS_COLLECTION_DURATION_SECONDS: &str = "witness_collection.duration_seconds";
 /// Whether this worker's enclave signing key is registered on-chain.
 pub const METRICS_ENCLAVE_KEY_REGISTERED: &str = "enclave_key.registered";
 /// Enclave key registration attempts, by outcome.
@@ -116,6 +120,16 @@ pub fn describe_metrics() {
         METRICS_PROOF_JOB_DURATION_SECONDS,
         metrics::Unit::Seconds,
         "End-to-end worker proof-job attempt duration by backend and outcome."
+    );
+    metrics::describe_counter!(
+        METRICS_WITNESS_COLLECTIONS_COMPLETED,
+        metrics::Unit::Count,
+        "Completed Kona witness-collection attempts by backend and outcome."
+    );
+    metrics::describe_histogram!(
+        METRICS_WITNESS_COLLECTION_DURATION_SECONDS,
+        metrics::Unit::Seconds,
+        "Kona witness-collection duration by backend and outcome."
     );
     metrics::describe_gauge!(
         METRICS_ENCLAVE_KEY_REGISTERED,
@@ -253,6 +267,24 @@ pub fn record_proof_job_completed(
     .increment(1);
     metrics::histogram!(
         METRICS_PROOF_JOB_DURATION_SECONDS,
+        "backend" => backend,
+        "outcome" => outcome,
+    )
+    .record(duration.as_secs_f64());
+}
+
+/// Records one Kona witness-collection attempt.
+///
+/// `outcome` is limited to `success`, `timeout`, or `error`.
+pub fn record_witness_collection(backend: &'static str, outcome: &'static str, duration: Duration) {
+    metrics::counter!(
+        METRICS_WITNESS_COLLECTIONS_COMPLETED,
+        "backend" => backend,
+        "outcome" => outcome,
+    )
+    .increment(1);
+    metrics::histogram!(
+        METRICS_WITNESS_COLLECTION_DURATION_SECONDS,
         "backend" => backend,
         "outcome" => outcome,
     )
