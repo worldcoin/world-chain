@@ -89,6 +89,12 @@ pub(in crate::it) fn l1_rpc_url(devnet: &WorldDevnet) -> eyre::Result<&str> {
         .ok_or_eyre("full-stack devnet missing L1 RPC")
 }
 
+pub fn l2_op_node_rpc_url(devnet: &WorldDevnet) -> eyre::Result<&str> {
+    devnet
+        .l2_op_node_rpc_url()
+        .ok_or_eyre("full-stack devnet missing L2 op-node RPC")
+}
+
 /// Parses one of the devnet's optional L1 contract addresses, naming it if absent.
 pub(in crate::it) fn l1_contract(address: Option<&str>, what: &str) -> eyre::Result<Address> {
     Ok(address

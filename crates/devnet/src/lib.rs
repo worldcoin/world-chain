@@ -410,6 +410,13 @@ impl WorldDevnet {
             .or_else(|| self.l1.as_ref().map(L1DevChain::rpc_url))
     }
 
+    /// L2 op-node RPC URL.
+    pub fn l2_op_node_rpc_url(&self) -> Option<&str> {
+        self.full_stack
+            .as_ref()
+            .map(FullStackWorldDevnet::l2_op_node_rpc_url)
+    }
+
     /// L1 OptimismPortal proxy address, when the preset started a full OP Stack.
     pub fn optimism_portal(&self) -> Option<&str> {
         self.full_stack

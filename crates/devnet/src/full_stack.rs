@@ -865,6 +865,10 @@ impl FullStackWorldDevnet {
         &self.sequencers[0].rpc_url
     }
 
+    pub fn l2_op_node_rpc_url(&self) -> &str {
+        &self._op_nodes[0].rpc_url
+    }
+
     /// JSON-RPC URL of the in-process defender prover-service, when enabled.
     #[allow(dead_code)]
     pub fn prover_service_url(&self) -> Option<&str> {

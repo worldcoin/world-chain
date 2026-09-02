@@ -7,13 +7,15 @@
 
 use alloy_primitives::{Address, B256};
 use eyre::eyre::ensure;
-use world_chain_proof_protocol::{LineageProvider, ProofLane, encode_compact_proof};
+use world_chain_proof_protocol::{
+    ConsensusProvider, LineageProvider, OptimismConsensusClient, ProofLane, encode_compact_proof,
+};
 use world_chain_proposer::{Proposal, ProposerClient};
 
 use crate::it::utils::devnet::{
     GAME_CHALLENGER_WINS, GAME_DEFENDER_WINS, INVALIDATION_REASON_INVALID_PARENT,
     INVALIDATION_REASON_PROOF_TIMEOUT, advance_to_timestamp, funded_throwaway_provider, game_at,
-    l1_contract, l1_rpc_url, proof_system_client, resolve_if_still_in_progress,
+    l1_contract, l1_rpc_url, l2_op_node_rpc_url, proof_system_client, resolve_if_still_in_progress,
     try_build_ha_devnet, wait_for_challenge, wait_for_multi_proof_game, wait_for_proof_lane,
     wait_for_status_or_resolve,
 };
@@ -27,10 +29,12 @@ use crate::it::utils::devnet::{
 /// `ChallengerWins`/`PROOF_TIMEOUT` outcome, whether or not the real challenger races in first.
 #[ignore = "requires Docker, Foundry, and the full local OP Stack"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn unproven_proposal_times_out_to_challenger_wins() -> eyre::Result<()> {
+async fn unproven_proposal_with_invalid_root_claim_times_out_to_challenger_wins() -> eyre::Result<()>
+{
     reth_tracing::init_test_tracing();
 
-    let Some(devnet) = try_build_ha_devnet("proof-timeout E2E").await? else {
+    let Some(devnet) = try_build_ha_devnet("proof-timeout with invalid root claim E2E").await?
+    else {
         return Ok(());
     };
 
@@ -48,6 +52,64 @@ async fn unproven_proposal_times_out_to_challenger_wins() -> eyre::Result<()> {
         l2_block_number: anchor
             .l2_block_number
             .saturating_add(registered.block_interval),
+        attempt: 0,
+    };
+    let submission = contracts.submit_proposal(&proposal).await?;
+    let game = game_at(submission.game_address, provider.clone());
+
+    // `proofDeadline()` is always the later deadline (`proofPeriod > challengePeriod`), so
+    // `gameOver()` holds whether or not the real challenger challenged this first.
+    let proof_deadline = game.proofDeadline().call().await?;
+    advance_to_timestamp(&provider, proof_deadline.saturating_add(1)).await?;
+
+    resolve_if_still_in_progress(&game).await?;
+
+    ensure!(
+        game.proofBitmap().call().await? == 0,
+        "no proof lane should ever land on a proposal nobody proved"
+    );
+    ensure!(
+        game.status().call().await? == GAME_CHALLENGER_WINS,
+        "unproven proposal must resolve ChallengerWins on deadline, whether or not it was formally challenged"
+    );
+    ensure!(
+        game.invalidationReason().call().await? == INVALIDATION_REASON_PROOF_TIMEOUT,
+        "unproven proposal must invalidate with PROOF_TIMEOUT"
+    );
+
+    Ok(())
+}
+
+#[ignore = "requires Docker, Foundry, and the full local OP Stack"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn unproven_proposal_with_valid_root_claim_times_out_to_challenger_wins() -> eyre::Result<()>
+{
+    reth_tracing::init_test_tracing();
+
+    let Some(devnet) = try_build_ha_devnet("proof-timeout with valid root claim E2E").await? else {
+        return Ok(());
+    };
+
+    let l2_op_node_rpc = l2_op_node_rpc_url(&devnet)?;
+    let output_root_provider = OptimismConsensusClient::new(l2_op_node_rpc);
+    let l1_rpc = l1_rpc_url(&devnet)?;
+    let factory_address = l1_contract(devnet.dispute_game_factory(), "DisputeGameFactory")?;
+
+    let (_, provider) = funded_throwaway_provider(l1_rpc, factory_address).await?;
+    let contracts = proof_system_client(provider.clone(), factory_address).await?;
+
+    let anchor = contracts.lineage_anchor().await?;
+    let registered = contracts.registered_lineage_config();
+    let l2_block_number = anchor
+        .l2_block_number
+        .saturating_add(registered.block_interval);
+    let root_claim = output_root_provider
+        .output_root_at_block(l2_block_number)
+        .await?;
+    let proposal = Proposal {
+        parent_ref: anchor.address,
+        root_claim,
+        l2_block_number,
         attempt: 0,
     };
     let submission = contracts.submit_proposal(&proposal).await?;
