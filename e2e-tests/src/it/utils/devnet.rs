@@ -89,6 +89,12 @@ pub(in crate::it) fn l1_rpc_url(devnet: &WorldDevnet) -> eyre::Result<&str> {
         .ok_or_eyre("full-stack devnet missing L1 RPC")
 }
 
+pub fn l2_op_node_rpc_url(devnet: &WorldDevnet) -> eyre::Result<&str> {
+    devnet
+        .l2_op_node_rpc_url()
+        .ok_or_eyre("full-stack devnet missing L2 op-node RPC")
+}
+
 /// Parses one of the devnet's optional L1 contract addresses, naming it if absent.
 pub(in crate::it) fn l1_contract(address: Option<&str>, what: &str) -> eyre::Result<Address> {
     Ok(address
@@ -314,6 +320,46 @@ where
         if started.elapsed() >= GAME_WAIT_TIMEOUT {
             bail!(
                 "timed out waiting for a respected WIP-1006 game at or beyond L2 block {min_l2_block}"
+            );
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// Waits for a WIP-1006 game matching `parent_ref`, `l2_block`, and `attempt`.
+pub async fn wait_for_multi_proof_game_attempt<P>(
+    provider: P,
+    factory_address: Address,
+    parent_ref: Address,
+    l2_block: u64,
+    attempt: u64,
+) -> eyre::Result<Address>
+where
+    P: Provider + Clone,
+{
+    let factory =
+        IDisputeGameFactory::IDisputeGameFactoryInstance::new(factory_address, provider.clone());
+    let started = Instant::now();
+
+    loop {
+        let game_count: u64 = factory.gameCount().call().await?.try_into()?;
+        for index in (0..game_count).rev() {
+            let entry = factory.gameAtIndex(U256::from(index)).call().await?;
+            if entry.gameType != MULTI_PROOF_GAME_TYPE {
+                continue;
+            }
+            let game = game_at(entry.proxy, provider.clone());
+            let game_l2_block: u64 = game.l2SequenceNumber().call().await?.try_into()?;
+            let game_attempt: u64 = game.attempt().call().await?.try_into()?;
+            let game_parent = game.parentRef().call().await?;
+            if game_l2_block == l2_block && game_attempt == attempt && game_parent == parent_ref {
+                return Ok(entry.proxy);
+            }
+        }
+
+        if started.elapsed() >= GAME_WAIT_TIMEOUT {
+            bail!(
+                "timed out waiting for WIP-1006 game parent={parent_ref} l2={l2_block} attempt={attempt}"
             );
         }
         tokio::time::sleep(Duration::from_secs(2)).await;

@@ -410,6 +410,32 @@ impl WorldDevnet {
             .or_else(|| self.l1.as_ref().map(L1DevChain::rpc_url))
     }
 
+    /// L2 op-node RPC URL.
+    pub fn l2_op_node_rpc_url(&self) -> Option<&str> {
+        self.full_stack
+            .as_ref()
+            .map(FullStackWorldDevnet::l2_op_node_rpc_url)
+    }
+
+    /// Aborts the in-process defender and its TEE/SP1 workers, when the full stack is running.
+    ///
+    /// See [`FullStackWorldDevnet::stop_defender`].
+    pub fn stop_defender(&mut self) {
+        if let Some(full_stack) = self.full_stack.as_mut() {
+            full_stack.stop_defender();
+        }
+    }
+
+    /// Re-spawns the in-process defender and its TEE/SP1 workers after [`Self::stop_defender`].
+    ///
+    /// See [`FullStackWorldDevnet::start_defender`].
+    pub async fn start_defender(&mut self) -> Result<()> {
+        if let Some(full_stack) = self.full_stack.as_mut() {
+            full_stack.start_defender().await?;
+        }
+        Ok(())
+    }
+
     /// L1 OptimismPortal proxy address, when the preset started a full OP Stack.
     pub fn optimism_portal(&self) -> Option<&str> {
         self.full_stack
