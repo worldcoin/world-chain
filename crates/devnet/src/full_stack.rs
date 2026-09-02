@@ -875,6 +875,16 @@ impl FullStackWorldDevnet {
         self.prover_service_url.as_deref()
     }
 
+    /// Aborts the in-process defender and its TEE/SP1 workers so no proof lanes can land.
+    ///
+    /// Idempotent. Leaves the prover-service RPC up (harmless without requesters) so tests that
+    /// assert an unproven game's timeout outcome can keep the rest of the stack running.
+    pub fn stop_defender(&mut self) {
+        self._world_defender.take();
+        self._nitro_worker.take();
+        self._sp1_worker.take();
+    }
+
     pub fn sequencer_rpc_url(&self) -> &str {
         &self.sequencers[0].rpc_url
     }

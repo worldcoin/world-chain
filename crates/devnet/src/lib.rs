@@ -417,6 +417,15 @@ impl WorldDevnet {
             .map(FullStackWorldDevnet::l2_op_node_rpc_url)
     }
 
+    /// Aborts the in-process defender and its TEE/SP1 workers, when the full stack is running.
+    ///
+    /// See [`FullStackWorldDevnet::stop_defender`].
+    pub fn stop_defender(&mut self) {
+        if let Some(full_stack) = self.full_stack.as_mut() {
+            full_stack.stop_defender();
+        }
+    }
+
     /// L1 OptimismPortal proxy address, when the preset started a full OP Stack.
     pub fn optimism_portal(&self) -> Option<&str> {
         self.full_stack

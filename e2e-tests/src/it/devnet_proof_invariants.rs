@@ -80,15 +80,24 @@ async fn unproven_proposal_with_invalid_root_claim_times_out_to_challenger_wins(
     Ok(())
 }
 
+/// A game that contains a valid root_claim but without any proof will still end up as `CHALLENGER_WINS`.
+/// 
+/// This test is the same as the previous one, but this game contains a valid root_claim, instead of the
+/// invalid root_claim in the other test.
 #[ignore = "requires Docker, Foundry, and the full local OP Stack"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unproven_proposal_with_valid_root_claim_times_out_to_challenger_wins() -> eyre::Result<()>
 {
     reth_tracing::init_test_tracing();
 
-    let Some(devnet) = try_build_ha_devnet("proof-timeout with valid root claim E2E").await? else {
+    let Some(mut devnet) = try_build_ha_devnet("proof-timeout with valid root claim E2E").await?
+    else {
         return Ok(());
     };
+
+    // A valid root sits on the selected lineage, so the live defender would TEE-prove it and
+    // defeat the "nobody proved" premise. Stop it (and its workers) before submitting.
+    devnet.stop_defender();
 
     let l2_op_node_rpc = l2_op_node_rpc_url(&devnet)?;
     let output_root_provider = OptimismConsensusClient::new(l2_op_node_rpc);
