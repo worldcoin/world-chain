@@ -919,20 +919,18 @@ impl FullStackWorldDevnet {
                 .await?,
         );
 
-        if restart_sp1 {
-            if let Some(kind) = sp1_worker_prover_kind()? {
-                self._sp1_worker = Some(
-                    start_sp1_worker(
-                        &l1_rpc,
-                        &l2_rpc,
-                        &prover_service_url,
-                        &rollup_path,
-                        &deployment,
-                        kind,
-                    )
-                    .await?,
-                );
-            }
+        if restart_sp1 && let Some(kind) = sp1_worker_prover_kind()? {
+            self._sp1_worker = Some(
+                start_sp1_worker(
+                    &l1_rpc,
+                    &l2_rpc,
+                    &prover_service_url,
+                    &rollup_path,
+                    &deployment,
+                    kind,
+                )
+                .await?,
+            );
         }
 
         Ok(())
