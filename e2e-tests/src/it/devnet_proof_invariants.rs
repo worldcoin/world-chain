@@ -16,8 +16,8 @@ use crate::it::utils::devnet::{
     GAME_CHALLENGER_WINS, GAME_DEFENDER_WINS, INVALIDATION_REASON_INVALID_PARENT,
     INVALIDATION_REASON_PROOF_TIMEOUT, advance_to_timestamp, funded_throwaway_provider, game_at,
     l1_contract, l1_rpc_url, l2_op_node_rpc_url, proof_system_client, resolve_if_still_in_progress,
-    try_build_ha_devnet, wait_for_challenge, wait_for_multi_proof_game, wait_for_proof_lane,
-    wait_for_status_or_resolve,
+    try_build_ha_devnet, wait_for_challenge, wait_for_multi_proof_game,
+    wait_for_multi_proof_game_attempt, wait_for_proof_lane, wait_for_status_or_resolve,
 };
 
 /// A proposal that never accumulates a valid proof cannot win merely by going unchallenged.
@@ -142,6 +142,105 @@ async fn unproven_proposal_with_valid_root_claim_times_out_to_challenger_wins() 
     ensure!(
         game.invalidationReason().call().await? == INVALIDATION_REASON_PROOF_TIMEOUT,
         "unproven proposal must invalidate with PROOF_TIMEOUT"
+    );
+
+    Ok(())
+}
+
+/// A valid root that times out unproven is retried by the live proposer once the defender returns.
+///
+/// Stops the defender so the honest claim cannot be TEE-proved, lets attempt 0 resolve
+/// `ChallengerWins`/`PROOF_TIMEOUT`, then restarts the defender and asserts the proposer
+/// resubmits the same transition at `attempt + 1` and that retry resolves `DefenderWins`.
+#[ignore = "requires Docker, Foundry, and the full local OP Stack"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn timed_out_valid_root_is_retried_and_defended_after_defender_restart() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let Some(mut devnet) =
+        try_build_ha_devnet("proof-timeout retry after defender restart E2E").await?
+    else {
+        return Ok(());
+    };
+
+    // A valid root sits on the selected lineage, so the live defender would TEE-prove it and
+    // defeat the "nobody proved" premise. Stop it (and its workers) before submitting.
+    devnet.stop_defender();
+
+    let l2_op_node_rpc = l2_op_node_rpc_url(&devnet)?;
+    let output_root_provider = OptimismConsensusClient::new(l2_op_node_rpc);
+    let l1_rpc = l1_rpc_url(&devnet)?;
+    let factory_address = l1_contract(devnet.dispute_game_factory(), "DisputeGameFactory")?;
+
+    let (_, provider) = funded_throwaway_provider(l1_rpc, factory_address).await?;
+    let contracts = proof_system_client(provider.clone(), factory_address).await?;
+
+    let anchor = contracts.lineage_anchor().await?;
+    let registered = contracts.registered_lineage_config();
+    let l2_block_number = anchor
+        .l2_block_number
+        .saturating_add(registered.block_interval);
+    let root_claim = output_root_provider
+        .output_root_at_block(l2_block_number)
+        .await?;
+    let proposal = Proposal {
+        parent_ref: anchor.address,
+        root_claim,
+        l2_block_number,
+        attempt: 0,
+    };
+    let submission = contracts.submit_proposal(&proposal).await?;
+    let game = game_at(submission.game_address, provider.clone());
+
+    let proof_deadline = game.proofDeadline().call().await?;
+    advance_to_timestamp(&provider, proof_deadline.saturating_add(1)).await?;
+
+    resolve_if_still_in_progress(&game).await?;
+
+    ensure!(
+        game.proofBitmap().call().await? == 0,
+        "no proof lane should ever land on a proposal nobody proved"
+    );
+    ensure!(
+        game.status().call().await? == GAME_CHALLENGER_WINS,
+        "unproven proposal must resolve ChallengerWins on deadline"
+    );
+    ensure!(
+        game.invalidationReason().call().await? == INVALIDATION_REASON_PROOF_TIMEOUT,
+        "unproven proposal must invalidate with PROOF_TIMEOUT"
+    );
+
+    // Bring the defender back; the live proposer should resubmit the same transition at attempt 1.
+    devnet.start_defender().await?;
+
+    let retry_address = wait_for_multi_proof_game_attempt(
+        provider.clone(),
+        factory_address,
+        proposal.parent_ref,
+        proposal.l2_block_number,
+        1, // attempt should be exactly 1 as 0 has been tried before and failed
+    )
+    .await?;
+    let retry_game = game_at(retry_address, provider.clone());
+
+    ensure!(
+        retry_game.rootClaim().call().await? == root_claim,
+        "retry must reuse the timed-out game's root claim"
+    );
+    ensure!(
+        retry_address != submission.game_address,
+        "retry must create a distinct factory game"
+    );
+
+    // Unchallenged, a single TEE lane is enough once the challenge window closes.
+    wait_for_proof_lane(&retry_game).await?;
+    let challenge_deadline = retry_game.challengeDeadline().call().await?;
+    advance_to_timestamp(&provider, challenge_deadline.saturating_add(1)).await?;
+    wait_for_status_or_resolve(&retry_game, GAME_DEFENDER_WINS).await?;
+
+    ensure!(
+        retry_game.invalidationReason().call().await? == 0,
+        "a defended retry must have no invalidation reason"
     );
 
     Ok(())

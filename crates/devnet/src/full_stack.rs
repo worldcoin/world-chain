@@ -885,6 +885,59 @@ impl FullStackWorldDevnet {
         self._sp1_worker.take();
     }
 
+    /// Re-spawns the in-process defender and its TEE worker after [`Self::stop_defender`].
+    ///
+    /// Idempotent when the defender is already running. Reuses the still-live prover-service and
+    /// the deployed proof-system addresses. Also restarts the SP1 worker when
+    /// `DEVNET_SP1_WORKER_PROVER` is set, using the rollup config under the stack tempdir.
+    pub async fn start_defender(&mut self) -> Result<()> {
+        if self._world_defender.is_some() {
+            return Ok(());
+        }
+
+        let deployment = self
+            ._proof_system
+            .clone()
+            .ok_or_else(|| eyre!("cannot start defender: proof system was not deployed"))?;
+        let prover_service_url = self
+            .prover_service_url
+            .clone()
+            .ok_or_else(|| eyre!("cannot start defender: prover-service is not running"))?;
+        let l1_rpc = self.l1_rpc_url().to_string();
+        let output_root_rpc = self.l2_op_node_rpc_url().to_string();
+        let l2_rpc = self.l2_rpc_url().to_string();
+        let rollup_path = self._tempdir.path().join("rollup.json");
+        let restart_nitro = self._nitro_worker.is_none();
+        let restart_sp1 = self._sp1_worker.is_none();
+
+        if restart_nitro {
+            self._nitro_worker = Some(start_devnet_nitro_worker(&prover_service_url)?);
+        }
+
+        self._world_defender = Some(
+            start_world_chain_defender(&l1_rpc, &output_root_rpc, &prover_service_url, &deployment)
+                .await?,
+        );
+
+        if restart_sp1 {
+            if let Some(kind) = sp1_worker_prover_kind()? {
+                self._sp1_worker = Some(
+                    start_sp1_worker(
+                        &l1_rpc,
+                        &l2_rpc,
+                        &prover_service_url,
+                        &rollup_path,
+                        &deployment,
+                        kind,
+                    )
+                    .await?,
+                );
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn sequencer_rpc_url(&self) -> &str {
         &self.sequencers[0].rpc_url
     }
