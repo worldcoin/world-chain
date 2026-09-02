@@ -81,7 +81,7 @@ async fn unproven_proposal_with_invalid_root_claim_times_out_to_challenger_wins(
 }
 
 /// A game that contains a valid root_claim but without any proof will still end up as `CHALLENGER_WINS`.
-/// 
+///
 /// This test is the same as the previous one, but this game contains a valid root_claim, instead of the
 /// invalid root_claim in the other test.
 #[ignore = "requires Docker, Foundry, and the full local OP Stack"]
@@ -159,10 +159,11 @@ async fn unproven_proposal_with_valid_root_claim_times_out_to_challenger_wins() 
 /// challenger contesting the parent.
 #[ignore = "requires Docker, Foundry, and the full local OP Stack"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn invalid_parent_cascades_to_challenger_wins() -> eyre::Result<()> {
+async fn invalid_game_with_invalid_parent_cascades_to_challenger_wins() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let Some(devnet) = try_build_ha_devnet("invalid-parent cascade E2E").await? else {
+    let Some(devnet) = try_build_ha_devnet("invalid game with invalid-parent cascade E2E").await?
+    else {
         return Ok(());
     };
 
@@ -195,6 +196,85 @@ async fn invalid_parent_cascades_to_challenger_wins() -> eyre::Result<()> {
         parent_ref: parent_submission.game_address,
         root_claim: B256::repeat_byte(0xcd),
         l2_block_number: parent_l2_block_number.saturating_add(registered.block_interval),
+        attempt: 0,
+    };
+    let child_submission = contracts.submit_proposal(&child_proposal).await?;
+    let child_game = game_at(child_submission.game_address, provider.clone());
+
+    // Wait for the real World Chain challenger to contest the bad parent.
+    wait_for_challenge(&parent_game).await?;
+
+    // Skip past the parent's proof deadline so its challenge can resolve.
+    let parent_proof_deadline = parent_game.proofDeadline().call().await?;
+    advance_to_timestamp(&provider, parent_proof_deadline.saturating_add(1)).await?;
+
+    // Resolved by the real challenger's resolution manager, or by us as a fallback.
+    wait_for_status_or_resolve(&parent_game, GAME_CHALLENGER_WINS).await?;
+
+    // Its l2 block is far beyond the finalized head, so the real challenger never picks it up.
+    resolve_if_still_in_progress(&child_game).await?;
+
+    ensure!(
+        child_game.status().call().await? == GAME_CHALLENGER_WINS,
+        "child of an invalidated parent must resolve ChallengerWins regardless of its own root claim"
+    );
+    ensure!(
+        child_game.invalidationReason().call().await? == INVALIDATION_REASON_INVALID_PARENT,
+        "child of an invalidated parent must invalidate with INVALID_PARENT, not PROOF_TIMEOUT"
+    );
+
+    Ok(())
+}
+
+/// A game that contains a valid root_claim but with an invalid parent will end up to `CHALLENGER_WINS`.
+///
+/// This test is the same as the previous one, but this child game contains a valid root_claim,
+/// instead of the invalid root_claim in the other test.
+#[ignore = "requires Docker, Foundry, and the full local OP Stack"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn valid_game_with_invalid_parent_cascades_to_challenger_wins() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let Some(devnet) = try_build_ha_devnet("valid game with invalid-parent cascade E2E").await?
+    else {
+        return Ok(());
+    };
+
+    let l2_op_node_rpc = l2_op_node_rpc_url(&devnet)?;
+    let output_root_provider = OptimismConsensusClient::new(l2_op_node_rpc);
+    let l1_rpc = l1_rpc_url(&devnet)?;
+    let factory_address = l1_contract(devnet.dispute_game_factory(), "DisputeGameFactory")?;
+
+    let (_, provider) = funded_throwaway_provider(l1_rpc, factory_address).await?;
+    let contracts = proof_system_client(provider.clone(), factory_address).await?;
+
+    let anchor = contracts.lineage_anchor().await?;
+    let registered = contracts.registered_lineage_config();
+
+    // Parent: a bad root that the real challenger will contest.
+    let parent_l2_block_number = anchor
+        .l2_block_number
+        .saturating_add(registered.block_interval);
+    let parent_proposal = Proposal {
+        parent_ref: anchor.address,
+        root_claim: B256::repeat_byte(0xba),
+        l2_block_number: parent_l2_block_number,
+        attempt: 0,
+    };
+    let parent_submission = contracts.submit_proposal(&parent_proposal).await?;
+    let parent_game = game_at(parent_submission.game_address, provider.clone());
+
+    // Child must be created *before* the parent resolves: `_isValidParent`
+    // (MultiProofGame.sol:421-424) rejects parents already known invalid. The cascade under test is
+    // enforced dynamically in `resolve()`, so this ordering is the realistic case.
+    let l2_block_number = parent_l2_block_number.saturating_add(registered.block_interval);
+    let root_claim = output_root_provider
+        .output_root_at_block(l2_block_number)
+        .await?;
+    let child_proposal = Proposal {
+        parent_ref: parent_submission.game_address,
+        root_claim,
+        l2_block_number,
         attempt: 0,
     };
     let child_submission = contracts.submit_proposal(&child_proposal).await?;
