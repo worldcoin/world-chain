@@ -121,7 +121,7 @@ pub struct WorkerArgs {
     allow_unfinalized: bool,
 
     /// Maximum seconds to spend generating one Kona witness.
-    #[arg(long, default_value_t = 900)]
+    #[arg(long, env = "WITNESS_TIMEOUT_SECONDS", default_value_t = 900)]
     witness_timeout_seconds: u64,
 
     /// Prover backend.
