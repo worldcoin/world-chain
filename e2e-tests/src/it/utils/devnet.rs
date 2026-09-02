@@ -326,6 +326,46 @@ where
     }
 }
 
+/// Waits for a WIP-1006 game matching `parent_ref`, `l2_block`, and `attempt`.
+pub async fn wait_for_multi_proof_game_attempt<P>(
+    provider: P,
+    factory_address: Address,
+    parent_ref: Address,
+    l2_block: u64,
+    attempt: u64,
+) -> eyre::Result<Address>
+where
+    P: Provider + Clone,
+{
+    let factory =
+        IDisputeGameFactory::IDisputeGameFactoryInstance::new(factory_address, provider.clone());
+    let started = Instant::now();
+
+    loop {
+        let game_count: u64 = factory.gameCount().call().await?.try_into()?;
+        for index in (0..game_count).rev() {
+            let entry = factory.gameAtIndex(U256::from(index)).call().await?;
+            if entry.gameType != MULTI_PROOF_GAME_TYPE {
+                continue;
+            }
+            let game = game_at(entry.proxy, provider.clone());
+            let game_l2_block: u64 = game.l2SequenceNumber().call().await?.try_into()?;
+            let game_attempt: u64 = game.attempt().call().await?.try_into()?;
+            let game_parent = game.parentRef().call().await?;
+            if game_l2_block == l2_block && game_attempt == attempt && game_parent == parent_ref {
+                return Ok(entry.proxy);
+            }
+        }
+
+        if started.elapsed() >= GAME_WAIT_TIMEOUT {
+            bail!(
+                "timed out waiting for WIP-1006 game parent={parent_ref} l2={l2_block} attempt={attempt}"
+            );
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
 /// Waits for `game` to be challenged, returning the challenger's address.
 pub(in crate::it) async fn wait_for_challenge<P>(
     game: &IMultiProofGame::IMultiProofGameInstance<P>,

@@ -426,6 +426,16 @@ impl WorldDevnet {
         }
     }
 
+    /// Re-spawns the in-process defender and its TEE/SP1 workers after [`Self::stop_defender`].
+    ///
+    /// See [`FullStackWorldDevnet::start_defender`].
+    pub async fn start_defender(&mut self) -> Result<()> {
+        if let Some(full_stack) = self.full_stack.as_mut() {
+            full_stack.start_defender().await?;
+        }
+        Ok(())
+    }
+
     /// L1 OptimismPortal proxy address, when the preset started a full OP Stack.
     pub fn optimism_portal(&self) -> Option<&str> {
         self.full_stack
