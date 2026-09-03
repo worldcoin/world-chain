@@ -9,10 +9,10 @@ repository.workspace = true
 build = "build.rs"
 
 [build-dependencies]
-sp1-build = "=6.3.1"
+sp1-build = "=6.5.0"
 
 [dependencies]
-sp1-sdk = { version = "=6.3.1", features = ["network"] }
+sp1-sdk = { version = "=6.5.0", features = ["network"] }
 
 # Proofs release train: cargo-release bumps every shared-version member in lockstep.
 [package.metadata.release]

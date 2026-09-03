@@ -10,7 +10,7 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
-sp1-build = "=6.3.1"
+sp1-build = "=6.5.0"
 
 # Proofs release train: cargo-release bumps every shared-version member in lockstep.
 [package.metadata.release]
