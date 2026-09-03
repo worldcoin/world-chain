@@ -57,6 +57,13 @@ sol! {
         function finalizeWithdrawalTransaction(WithdrawalTransaction tx_) external;
         function finalizedWithdrawals(bytes32 withdrawalHash) external view returns (bool);
     }
+
+    interface IDisputeGame {}
+
+    #[sol(rpc)]
+    interface AnchorStateRegistry {
+        function isGameClaimValid(IDisputeGame _game) public view returns (bool);
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -72,6 +79,7 @@ pub struct ProveWithdrawal {
     pub game_index: u64,
     pub game_l2_block: u64,
     pub game_addr: Address,
+    pub proven_at: u64,
 }
 
 pub async fn initiate_withdrawal<P>(

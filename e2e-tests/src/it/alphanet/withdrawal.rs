@@ -1,12 +1,14 @@
 use crate::it::utils::{
     devnet::wait_for_multi_proof_game,
     withdrawals::{
-        InitiatedWithdrawal, OptimismPortal::OptimismPortalInstance, ProveWithdrawal,
-        build_withdrawal_proof, initiate_withdrawal,
+        AnchorStateRegistry::AnchorStateRegistryInstance, InitiatedWithdrawal,
+        OptimismPortal::OptimismPortalInstance, ProveWithdrawal, build_withdrawal_proof,
+        initiate_withdrawal,
     },
 };
-use alloy_network::EthereumWallet;
-use alloy_provider::ProviderBuilder;
+use alloy_eips::BlockId;
+use alloy_network::{EthereumWallet, ReceiptResponse};
+use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use revm_primitives::{Address, U256};
 use std::str::FromStr;
@@ -60,7 +62,7 @@ async fn prove_withdrawal() {
         .connect(&l2_rpc_endpoint)
         .await
         .unwrap();
-    // fetch InitiatedWithdrawl data from .json file
+    // read InitiatedWithdrawl data from .json file
     let initiated_withdrawal: InitiatedWithdrawal =
         serde_json::from_slice(&std::fs::read("initiated_withdrawal.json").unwrap()).unwrap();
     // wait for a covering WIP1006 game with l2SequenceNumber >= initiated_withdrawal.l2_block
@@ -90,16 +92,82 @@ async fn prove_withdrawal() {
         .unwrap();
     let receipt = pending_tx.get_receipt().await.unwrap();
     assert!(receipt.status());
+    // get the L1 timestamp of the block that includes this proveWithdrawal
+    let block_number = receipt.block_number().unwrap();
+    let block = l1_provider
+        .get_block(BlockId::number(block_number))
+        .await
+        .unwrap()
+        .unwrap();
+    let l1_timestamp = block.header.timestamp;
     // save useful data into a .json file
     let prove_withdrawal = ProveWithdrawal {
         transaction: initiated_withdrawal.transaction,
         game_index,
         game_l2_block,
         game_addr,
+        proven_at: l1_timestamp,
     };
     std::fs::write(
         "prove_withdrawal.json",
         serde_json::to_string_pretty(&prove_withdrawal).unwrap(),
     )
     .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn finalize_withdrawal() {
+    // fetch env vars
+    let l1_private_key_str = std::env::var("L1_PRIVATE_KEY").unwrap();
+    let l1_rpc_endpoint = std::env::var("L1_RPC_ENDPOINT").unwrap();
+    let anchor_state_registry_str = std::env::var("ANCHOR_STATE_REGISTRY").unwrap();
+    let anchor_state_registry_addr = Address::from_str(&anchor_state_registry_str).unwrap();
+    let optimism_portal_str = std::env::var("OPTIMISM_PORTAL").unwrap();
+    let optimism_portal_addr = Address::from_str(&optimism_portal_str).unwrap();
+    // create L1 signer provider
+    let local_signer = PrivateKeySigner::from_str(&l1_private_key_str).unwrap();
+    let l1_provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::from(local_signer))
+        .connect(&l1_rpc_endpoint)
+        .await
+        .unwrap();
+    // read ProveWithdrawl data from .json file
+    let prove_withdrawal: ProveWithdrawal =
+        serde_json::from_slice(&std::fs::read("prove_withdrawal.json").unwrap()).unwrap();
+    // check whether the withdrawal is finalizable:
+    // 1. now - proven.timestamp > OptimismPortal::proofMaturityDelaySeconds()
+    let optimism_portal = OptimismPortalInstance::new(optimism_portal_addr, &l1_provider);
+    let latest_block = l1_provider
+        .get_block(BlockId::latest())
+        .await
+        .unwrap()
+        .unwrap();
+    let now = latest_block.header.timestamp;
+    let proof_maturity_delay_seconds = optimism_portal
+        .proofMaturityDelaySeconds()
+        .call()
+        .await
+        .unwrap();
+    assert!(
+        U256::from(now - prove_withdrawal.proven_at) > proof_maturity_delay_seconds,
+        "proof maturity is not elapsed yet"
+    );
+    // 2. ASR.isGameClaimValid must return true
+    let anchor_state_registry =
+        AnchorStateRegistryInstance::new(anchor_state_registry_addr, &l1_provider);
+    let is_game_claim_valid = anchor_state_registry
+        .isGameClaimValid(prove_withdrawal.game_addr)
+        .call()
+        .await
+        .unwrap();
+    assert!(is_game_claim_valid, "game claim is not valid");
+    // send the OptimismPortal::finalizeWithdrawal
+    let pending_tx = optimism_portal
+        .finalizeWithdrawalTransaction(prove_withdrawal.transaction)
+        .send()
+        .await
+        .unwrap();
+    let receipt = pending_tx.get_receipt().await.unwrap();
+    assert!(receipt.status());
 }
