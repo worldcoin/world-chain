@@ -66,6 +66,14 @@ pub struct InitiatedWithdrawal {
     pub l2_block: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProveWithdrawal {
+    pub transaction: WithdrawalTransaction,
+    pub game_index: u64,
+    pub game_l2_block: u64,
+    pub game_addr: Address,
+}
+
 pub async fn initiate_withdrawal<P>(
     provider: P,
     target_addr: Address,
