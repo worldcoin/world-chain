@@ -30,11 +30,11 @@ async fn init_withdrawal() {
     // target address of the L2 -> L1 withdrawal is the same address that sends the tx on L2
     let target_addr = local_signer_addr;
     // sends the initiate_withdrawal transaction to the L2ToL1MessagePasser contract
-    let initiate_withdrawal = initiate_withdrawal(l2_provider, target_addr).await.unwrap();
+    let initiated_withdrawal = initiate_withdrawal(l2_provider, target_addr).await.unwrap();
     // save the InitiatedWithdrawal data to a .json file
     std::fs::write(
-        "initiate_withdrawal.json",
-        serde_json::to_string_pretty(&initiate_withdrawal).unwrap(),
+        "initiated_withdrawal.json",
+        serde_json::to_string_pretty(&initiated_withdrawal).unwrap(),
     )
     .unwrap();
 }
@@ -103,6 +103,7 @@ async fn prove_withdrawal() {
     // save useful data into a .json file
     let prove_withdrawal = ProveWithdrawal {
         transaction: initiated_withdrawal.transaction,
+        hash: initiated_withdrawal.hash,
         game_index,
         game_l2_block,
         game_addr,
@@ -170,4 +171,12 @@ async fn finalize_withdrawal() {
         .unwrap();
     let receipt = pending_tx.get_receipt().await.unwrap();
     assert!(receipt.status());
+    assert!(
+        optimism_portal
+            .finalizedWithdrawals(prove_withdrawal.hash)
+            .call()
+            .await
+            .unwrap(),
+        "Portal did not persist the finalized withdrawal"
+    );
 }

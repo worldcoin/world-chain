@@ -76,6 +76,7 @@ pub struct InitiatedWithdrawal {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProveWithdrawal {
     pub transaction: WithdrawalTransaction,
+    pub hash: B256,
     pub game_index: u64,
     pub game_l2_block: u64,
     pub game_addr: Address,
