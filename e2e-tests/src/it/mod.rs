@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod acceptance_tests;
 mod admin_tracing;
+mod alphanet;
 mod devnet_challenge;
 mod devnet_proof_invariants;
 mod devnet_smoke;
