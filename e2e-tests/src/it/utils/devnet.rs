@@ -286,12 +286,11 @@ where
     Ok(())
 }
 
-/// Waits for the newest WIP-1006 game at or beyond `min_l2_block`, returning its factory index,
-/// address, and L2 sequence number. Pass `0` for any game at all.
-pub async fn wait_for_multi_proof_game<P>(
+pub async fn wait_for_multi_proof_game_with_timeout<P>(
     provider: P,
     factory_address: Address,
     min_l2_block: u64,
+    timeout: Duration,
 ) -> eyre::Result<(u64, Address, u64)>
 where
     P: Provider + Clone,
@@ -314,13 +313,32 @@ where
             }
         }
 
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
+        if started.elapsed() >= timeout {
             bail!(
                 "timed out waiting for a respected WIP-1006 game at or beyond L2 block {min_l2_block}"
             );
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
+}
+
+/// Waits for the newest WIP-1006 game at or beyond `min_l2_block`, returning its factory index,
+/// address, and L2 sequence number. Pass `0` for any game at all.
+pub async fn wait_for_multi_proof_game<P>(
+    provider: P,
+    factory_address: Address,
+    min_l2_block: u64,
+) -> eyre::Result<(u64, Address, u64)>
+where
+    P: Provider + Clone,
+{
+    wait_for_multi_proof_game_with_timeout(
+        provider,
+        factory_address,
+        min_l2_block,
+        GAME_WAIT_TIMEOUT,
+    )
+    .await
 }
 
 /// Waits for a WIP-1006 game matching `parent_ref`, `l2_block`, and `attempt`.

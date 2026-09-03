@@ -1,5 +1,5 @@
 use crate::it::utils::{
-    devnet::wait_for_multi_proof_game,
+    devnet::wait_for_multi_proof_game_with_timeout,
     withdrawals::{
         AnchorStateRegistry::AnchorStateRegistryInstance, InitiatedWithdrawal,
         OptimismPortal::OptimismPortalInstance, ProveWithdrawal, build_withdrawal_proof,
@@ -11,7 +11,7 @@ use alloy_network::{EthereumWallet, ReceiptResponse};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use revm_primitives::{Address, U256};
-use std::str::FromStr;
+use std::{str::FromStr, time::Duration};
 
 #[tokio::test]
 #[ignore]
@@ -66,10 +66,12 @@ async fn prove_withdrawal() {
     let initiated_withdrawal: InitiatedWithdrawal =
         serde_json::from_slice(&std::fs::read("initiated_withdrawal.json").unwrap()).unwrap();
     // wait for a covering WIP1006 game with l2SequenceNumber >= initiated_withdrawal.l2_block
-    let (game_index, game_addr, game_l2_block) = wait_for_multi_proof_game(
+    let timeout = Duration::from_secs(10);
+    let (game_index, game_addr, game_l2_block) = wait_for_multi_proof_game_with_timeout(
         &l1_provider,
         dispute_game_facatory_addr,
         initiated_withdrawal.l2_block,
+        timeout,
     )
     .await
     .unwrap();
