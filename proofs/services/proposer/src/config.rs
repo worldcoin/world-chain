@@ -15,6 +15,9 @@ pub struct BondManagerConfig {
     pub poll_interval: Duration,
     /// Number of most recently created games scanned on startup.
     pub initial_scan_limit: u64,
+    /// Maximum superseded proof-timeout resolution attempts per settlement pass.
+    /// Zero disables this cleanup without disabling existing settlement behavior.
+    pub max_retry_resolutions_per_tick: usize,
 }
 
 impl BondManagerConfig {
@@ -38,6 +41,7 @@ impl Default for BondManagerConfig {
         Self {
             poll_interval: DEFAULT_BOND_MANAGER_POLL_INTERVAL,
             initial_scan_limit: DEFAULT_BOND_MANAGER_INITIAL_SCAN_LIMIT,
+            max_retry_resolutions_per_tick: 1,
         }
     }
 }

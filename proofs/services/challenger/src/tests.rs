@@ -191,6 +191,11 @@ impl ResolutionManagerClient for MockClient {
             .copied()
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
         Ok(ResolutionStatus {
+            status: if record.proposal_status == ProposalStatus::Resolved {
+                record.resolution_outcome
+            } else {
+                GameStatus::InProgress
+            },
             resolvable: record.resolvable,
             outcome: record.resolution_outcome,
             invalidation_reason: InvalidationReason::try_from(record.resolution_reason)?,
