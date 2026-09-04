@@ -207,6 +207,12 @@ impl NetworkSuccinctProver {
         let mut stdin = SP1Stdin::new();
         stdin.write_vec(request.witness_rkyv);
 
+        self.client
+            .execute(self.range_pk.elf().clone(), stdin.clone())
+            .calculate_gas(true)
+            .await
+            .context("range program simulation failed")?;
+
         let mut proof_request = self.client.prove(&self.range_pk, stdin).compressed();
         if let Some(limits) = self.limits {
             proof_request = proof_request
