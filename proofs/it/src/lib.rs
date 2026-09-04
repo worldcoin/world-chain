@@ -373,13 +373,30 @@ impl LineageProvider for FakeExecution {
         let outcome = record.state.outcome();
         if record.state == GameLifecycle::Finalized {
             return Ok(ResolutionStatus {
+                status: outcome,
                 resolvable: false,
                 outcome,
                 invalidation_reason: InvalidationReason::None,
             });
         }
+        let local_timeout = match record.state {
+            GameLifecycle::Proposed => record.challenge_deadline == 0 && record.proof_bitmap == 0,
+            GameLifecycle::Challenged => {
+                record.proof_deadline == 0 && !has_threshold(record.proof_bitmap)
+            }
+            _ => false,
+        };
+        if local_timeout {
+            return Ok(ResolutionStatus {
+                status: outcome,
+                resolvable: !parent_is_unresolved(&state, record),
+                outcome: GameStatus::ChallengerWins,
+                invalidation_reason: InvalidationReason::ProofTimeout,
+            });
+        }
         if parent_is_unresolved(&state, record) {
             return Ok(ResolutionStatus {
+                status: outcome,
                 resolvable: false,
                 outcome,
                 invalidation_reason: InvalidationReason::None,
@@ -391,35 +408,23 @@ impl LineageProvider for FakeExecution {
         ) && has_threshold(record.proof_bitmap)
         {
             return Ok(ResolutionStatus {
+                status: outcome,
                 resolvable: true,
                 outcome: GameStatus::DefenderWins,
                 invalidation_reason: InvalidationReason::None,
             });
         }
-        if record.state == GameLifecycle::Challenged && record.proof_deadline == 0 {
-            return Ok(ResolutionStatus {
-                resolvable: true,
-                outcome: GameStatus::ChallengerWins,
-                invalidation_reason: InvalidationReason::ProofTimeout,
-            });
-        }
         if record.state == GameLifecycle::Proposed && record.challenge_deadline == 0 {
             return Ok(ResolutionStatus {
+                status: outcome,
                 resolvable: true,
-                outcome: if record.proof_bitmap == 0 {
-                    GameStatus::ChallengerWins
-                } else {
-                    GameStatus::DefenderWins
-                },
-                invalidation_reason: if record.proof_bitmap == 0 {
-                    InvalidationReason::ProofTimeout
-                } else {
-                    InvalidationReason::None
-                },
+                outcome: GameStatus::DefenderWins,
+                invalidation_reason: InvalidationReason::None,
             });
         }
 
         Ok(ResolutionStatus {
+            status: outcome,
             resolvable: false,
             outcome,
             invalidation_reason: InvalidationReason::None,

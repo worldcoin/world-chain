@@ -30,6 +30,9 @@ pub trait BondManagerClient: Send + Sync {
     /// Returns the proposal domain embedded in the provided game.
     async fn game_domain_hash(&self, game: Address) -> Result<B256, ProposerError>;
 
+    /// Returns whether a newer attempt exists for the game's exact transition and domain.
+    async fn has_retry(&self, game: Address) -> Result<bool, ProposerError>;
+
     /// Returns the resolution status of the provided game.
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError>;
 

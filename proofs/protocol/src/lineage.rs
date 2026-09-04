@@ -3,8 +3,9 @@ use crate::{
     IDisputeGameFactory, IMultiProofGame, InvalidationReasonError, MAX_ATTEMPT_SCAN,
     MULTI_PROOF_GAME_TYPE, ProposalCommitment, ResolutionStatus,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_provider::Provider;
+use alloy_sol_types::SolValue;
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -357,20 +358,69 @@ where
     Ok(latest)
 }
 
-/// Reads and decodes a game's current resolution evaluation.
+/// Returns whether the factory contains the next attempt for this exact transition.
+/// Attempts are sequential, so finding the immediate successor establishes supersession.
+pub async fn read_game_has_retry<P>(
+    factory: &IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
+    game: &IMultiProofGame::IMultiProofGameInstance<P>,
+) -> Result<bool, LineageError>
+where
+    P: Provider + Clone,
+{
+    let (domain, block_number, parent, attempt, root) = game
+        .provider()
+        .multicall()
+        .add(game.proposalDomainHash())
+        .add(game.l2SequenceNumber())
+        .add(game.parentRef())
+        .add(game.attempt())
+        .add(game.rootClaim())
+        .aggregate()
+        .await
+        .map_err(|error| {
+            LineageError::Contract(format!(
+                "read retry context for {}: {error}",
+                game.address()
+            ))
+        })?;
+    let Some(next_attempt) = attempt.checked_add(U256::from(1)) else {
+        return Ok(false);
+    };
+    let extra_data = (domain, block_number, parent, next_attempt).abi_encode();
+    let entry = factory
+        .games(MULTI_PROOF_GAME_TYPE, root, extra_data.into())
+        .call()
+        .await
+        .map_err(|error| {
+            LineageError::Contract(format!("look up retry for {}: {error}", game.address()))
+        })?;
+    Ok(entry.proxy != Address::ZERO)
+}
+
+/// Reads the stored status and resolution evaluation atomically so resolution between
+/// separate RPC calls cannot produce an inconsistent snapshot.
 pub async fn read_lineage_resolution_status<P>(
     game: &IMultiProofGame::IMultiProofGameInstance<P>,
 ) -> Result<ResolutionStatus, LineageError>
 where
     P: Provider + Clone,
 {
-    let result = game
-        .resolutionStatus()
-        .call()
+    let (status, result) = game
+        .provider()
+        .multicall()
+        .add(game.status())
+        .add(game.resolutionStatus())
+        .aggregate()
         .await
-        .map_err(|error| LineageError::Contract(error.to_string()))?;
+        .map_err(|error| {
+            LineageError::Contract(format!(
+                "read resolution status for {}: {error}",
+                game.address()
+            ))
+        })?;
 
     Ok(ResolutionStatus {
+        status: status.try_into()?,
         resolvable: result.resolvable,
         outcome: result.outcome.try_into()?,
         invalidation_reason: result.reason.try_into()?,

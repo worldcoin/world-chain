@@ -585,6 +585,23 @@ contract MultiProofGameTest is OPStackFixtures {
         dgf.create(WC_GAME_TYPE, claim, retryExtraData);
     }
 
+    function test_Retry_AllowsLocalProofTimeoutWhilePreviousStillInProgress() public {
+        MultiProofGame parent = _proposeAtAnchor();
+        MultiProofGame child = _proposeChild(0);
+
+        vm.warp(child.challengeDeadline().raw());
+        (bool resolvable, GameStatus outcome, InvalidationReason reason) = child.resolutionStatus();
+        assertFalse(resolvable);
+        assertEq(uint8(outcome), uint8(GameStatus.CHALLENGER_WINS));
+        assertEq(uint8(reason), uint8(InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(child.status()), uint8(GameStatus.IN_PROGRESS));
+        assertEq(uint8(parent.status()), uint8(GameStatus.IN_PROGRESS));
+
+        MultiProofGame retry = _propose(0, Claim.unwrap(child.rootClaim()), child.l2SequenceNumber(), 1);
+        assertEq(retry.attempt(), 1);
+        assertEq(uint8(child.status()), uint8(GameStatus.IN_PROGRESS));
+    }
+
     function test_ChildWaitsForParentResolutionNotFinality() public {
         MultiProofGame parent = _proposeAtAnchor();
         MultiProofGame child = _proposeChild(0);
@@ -604,6 +621,24 @@ contract MultiProofGameTest is OPStackFixtures {
 
         child.resolve();
         assertEq(uint8(child.status()), uint8(GameStatus.DEFENDER_WINS));
+    }
+
+    function test_ResolutionStatus_SurfacesLocalProofTimeoutWhileParentInProgress() public {
+        MultiProofGame parent = _proposeAtAnchor();
+        MultiProofGame child = _proposeChild(0);
+
+        vm.warp(child.challengeDeadline().raw());
+        assertTrue(child.gameOver());
+        assertEq(uint8(parent.status()), uint8(GameStatus.IN_PROGRESS));
+
+        (bool resolvable, GameStatus outcome, InvalidationReason reason) = child.resolutionStatus();
+        assertFalse(resolvable);
+        assertEq(uint8(outcome), uint8(GameStatus.CHALLENGER_WINS));
+        assertEq(uint8(reason), uint8(InvalidationReason.PROOF_TIMEOUT));
+
+        vm.expectRevert(ParentGameNotResolved.selector);
+        child.resolve();
+        assertEq(uint8(child.status()), uint8(GameStatus.IN_PROGRESS));
     }
 
     function test_ParentBlacklistedDuringFinalityAirgap_InvalidatesChild() public {
