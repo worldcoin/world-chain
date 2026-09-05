@@ -36,7 +36,7 @@ alloy-sol-types = { workspace = true, optional = true }
 bincode = { version = "1", optional = true }
 hex = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
-sp1-sdk = { version = "=6.3.1", features = ["network"], optional = true }
+sp1-sdk = { version = "=6.5.0", features = ["network"], optional = true }
 async-trait.workspace = true
 world-chain-prover-service.workspace = true
 
