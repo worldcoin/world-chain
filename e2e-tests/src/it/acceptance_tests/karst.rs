@@ -77,34 +77,71 @@ pub(super) async fn l2_execution_checks(env: &RpcEnv) -> eyre::Result<()> {
         "running Karst L2 execution acceptance tests"
     );
 
-    eprintln!("karst: checking EIP-7910 eth_config");
-    check_eip_7910_eth_config(env).await?;
+    let mut failures = Vec::new();
+    macro_rules! run_check {
+        ($label:literal, $check:expr) => {
+            eprintln!("karst: checking {}", $label);
+            if let Err(err) = $check.await {
+                eprintln!("karst: FAILED {}: {err:#}", $label);
+                failures.push(format!("{}: {err:#}", $label));
+            }
+        };
+    }
 
-    let mut sender = L2TxSender::new(
+    run_check!("EIP-7910 eth_config", check_eip_7910_eth_config(env));
+
+    match L2TxSender::new(
         env.chain_provider().clone(),
         l2_key,
         env.config().tx_timeout,
         env.config().tx_poll_interval,
     )
-    .await?;
+    .await
+    {
+        Ok(mut sender) => {
+            run_check!(
+                "EIP-7823 MODEXP input bound",
+                check_eip_7823_modexp_upper_bound(&mut sender)
+            );
+            run_check!(
+                "EIP-7883 MODEXP gas floor",
+                check_eip_7883_modexp_gas_floor_increase(&mut sender)
+            );
+            run_check!(
+                "EIP-7951 P256VERIFY gas cost",
+                check_eip_7951_p256verify_gas_cost(&mut sender)
+            );
+            run_check!(
+                "bn256 pairing input limit",
+                check_karst_bn256_pairing_input_size_reduction(&mut sender)
+            );
+            run_check!(
+                "EIP-7939 CLZ opcode activation",
+                check_eip_7939_clz_opcode_activation(&mut sender)
+            );
+            run_check!(
+                "EIP-7825 transaction gas cap",
+                check_eip_7825_tx_gas_limit_cap(&mut sender)
+            );
+        }
+        Err(err) => {
+            eprintln!("karst: FAILED transaction sender initialization: {err:#}");
+            failures.push(format!("transaction sender initialization: {err:#}"));
+        }
+    }
 
-    eprintln!("karst: checking EIP-7823 MODEXP input bound");
-    check_eip_7823_modexp_upper_bound(&mut sender).await?;
-    eprintln!("karst: checking EIP-7883 MODEXP gas floor");
-    check_eip_7883_modexp_gas_floor_increase(&mut sender).await?;
-    eprintln!("karst: checking EIP-7951 P256VERIFY gas cost");
-    check_eip_7951_p256verify_gas_cost(&mut sender).await?;
-    eprintln!("karst: checking bn256 pairing input limit");
-    check_karst_bn256_pairing_input_size_reduction(&mut sender).await?;
-    eprintln!("karst: checking EIP-7939 CLZ opcode activation");
-    check_eip_7939_clz_opcode_activation(&mut sender).await?;
-    eprintln!("karst: checking EIP-7825 transaction gas cap");
-    check_eip_7825_tx_gas_limit_cap(&mut sender).await?;
-    eprintln!("karst: checking EIP-7825 deposit bypass");
-    check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env).await?;
+    run_check!(
+        "EIP-7825 deposit bypass",
+        check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env)
+    );
 
     eprintln!("karst: L2 execution checks completed");
     info!("Karst L2 execution acceptance tests completed");
+    ensure!(
+        failures.is_empty(),
+        "Karst L2 execution checks failed:\n{}",
+        failures.join("\n")
+    );
     Ok(())
 }
 
