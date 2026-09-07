@@ -1,4 +1,5 @@
 use alloy_primitives::{Address, B256, TxHash};
+use serde::{Deserialize, Serialize};
 use world_chain_proof_protocol::{InvalidationReason, ProposalCommitment, SelectedLineage};
 
 /// The selected lineage discovered by the proposer and the action available at its tip.
@@ -91,7 +92,7 @@ impl Proposal {
 }
 
 /// Result of a submitted proposal transaction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProposalSubmission {
     /// Transaction hash for the proposal submission.
     pub tx_hash: TxHash,

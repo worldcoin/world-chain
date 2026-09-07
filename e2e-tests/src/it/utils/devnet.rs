@@ -240,11 +240,15 @@ where
     IERC20StakingVault::IERC20StakingVaultInstance::new(address, provider)
 }
 
-/// Polls `probe` until it yields a value, giving up after [`GAME_WAIT_TIMEOUT`].
+/// Polls `probe` until it yields a value, giving up after `timeout`.
 ///
 /// `Ok(None)` means keep waiting; an `Err` aborts immediately, which is how callers fail fast on
-/// terminal states. `what` completes "timed out after 300s waiting for …".
-async fn poll_until<F, Fut, T>(what: &str, mut probe: F) -> eyre::Result<T>
+/// terminal states.
+async fn poll_until_with_timeout<F, Fut, T>(
+    what: &str,
+    mut probe: F,
+    timeout: Duration,
+) -> eyre::Result<T>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = eyre::Result<Option<T>>>,
@@ -254,11 +258,19 @@ where
         if let Some(value) = probe().await? {
             return Ok(value);
         }
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
-            bail!("timed out after {GAME_WAIT_TIMEOUT:?} waiting for {what}");
+        if started.elapsed() >= timeout {
+            bail!("timed out after {timeout:?} waiting for {what}");
         }
         tokio::time::sleep(GAME_POLL_INTERVAL).await;
     }
+}
+
+async fn poll_until<F, Fut, T>(what: &str, probe: F) -> eyre::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = eyre::Result<Option<T>>>,
+{
+    poll_until_with_timeout(what, probe, GAME_WAIT_TIMEOUT).await
 }
 
 pub async fn latest_timestamp<P>(provider: &P) -> eyre::Result<u64>
@@ -382,25 +394,39 @@ where
 }
 
 /// Waits for `game` to be challenged, returning the challenger's address.
+pub async fn wait_for_challenge_with_timeout<P>(
+    game: &IMultiProofGame::IMultiProofGameInstance<P>,
+    timeout: Duration,
+) -> eyre::Result<Address>
+where
+    P: Provider,
+{
+    let address = *game.address();
+    poll_until_with_timeout(
+        &format!("game {address} to be challenged"),
+        || async {
+            let challenger = game.challenger().call().await?;
+            if challenger != Address::ZERO {
+                return Ok(Some(challenger));
+            }
+            ensure!(
+                game.status().call().await? == GAME_IN_PROGRESS,
+                "game {address} resolved before it was ever challenged"
+            );
+            Ok(None)
+        },
+        timeout,
+    )
+    .await
+}
+
 pub async fn wait_for_challenge<P>(
     game: &IMultiProofGame::IMultiProofGameInstance<P>,
 ) -> eyre::Result<Address>
 where
     P: Provider,
 {
-    let address = *game.address();
-    poll_until(&format!("game {address} to be challenged"), || async {
-        let challenger = game.challenger().call().await?;
-        if challenger != Address::ZERO {
-            return Ok(Some(challenger));
-        }
-        ensure!(
-            game.status().call().await? == GAME_IN_PROGRESS,
-            "game {address} resolved before it was ever challenged"
-        );
-        Ok(None)
-    })
-    .await
+    wait_for_challenge_with_timeout(game, GAME_WAIT_TIMEOUT).await
 }
 
 /// Waits for at least one proof lane to land on `game`.

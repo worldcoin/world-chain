@@ -1,1 +1,2 @@
+mod bad_proposal_is_challenged_and_invalidated;
 mod withdrawal;
