@@ -32,7 +32,7 @@ async fn submit_bad_proposal() {
     let registered_block_interval = alloy_proof_system_client
         .registered_lineage_config()
         .block_interval;
-    let bad_root_claim = B256::with_last_byte(1);
+    let bad_root_claim = B256::with_last_byte(2);
     let bad_proposal = Proposal {
         parent_ref: anchor.address,
         root_claim: bad_root_claim,
