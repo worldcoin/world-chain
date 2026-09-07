@@ -370,25 +370,28 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         }
 
         // Retries: attempt N is only proposable when attempt N-1 for the identical transition
-        // timed out on proofs or was created before WIP-1006 became respected. The latter
-        // prevents a pre-cutover game from permanently occupying the factory UUID. Inherited
-        // invalidations rebase onto a replacement parent and therefore restart at attempt zero.
-        // Duplicate attempts are impossible: the factory UUID covers (gameType, rootClaim,
-        // extraData).
+        // timed out on proofs (already settled, or locally doomed per `resolutionStatus`) or was
+        // created before WIP-1006 became respected. The latter prevents a pre-cutover game from
+        // permanently occupying the factory UUID. Inherited invalidations rebase onto a
+        // replacement parent and therefore restart at attempt zero. Duplicate attempts are
+        // impossible: the factory UUID covers (gameType, rootClaim, extraData).
         if (attempt_ > 0) {
             bytes memory previousExtraData = abi.encode(domainHash, l2SequenceNumber_, parentRef_, attempt_ - 1);
+            bytes32 previousUuid = keccak256(abi.encode(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim_, previousExtraData));
             (IDisputeGame previous,) =
                 disputeGameFactory.games(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim_, previousExtraData);
+            if (address(previous) == address(0)) revert GameNotRetryable(previousUuid);
+
+            // Unrespected pre-cutover games may always be replaced. Respected ones only after a
+            // proof-timeout outcome (settled or parent-gated local doom).
+            (, GameStatus previousOutcome, InvalidationReason previousReason) =
+                IMultiProofGame(address(previous)).resolutionStatus();
             if (
-                address(previous) == address(0)
-                    || (previous.wasRespectedGameTypeWhenCreated()
-                        && (previous.status() != GameStatus.CHALLENGER_WINS
-                            || IMultiProofGame(address(previous)).invalidationReason()
-                                != InvalidationReason.PROOF_TIMEOUT))
+                previous.wasRespectedGameTypeWhenCreated()
+                    && (previousOutcome != GameStatus.CHALLENGER_WINS
+                        || previousReason != InvalidationReason.PROOF_TIMEOUT)
             ) {
-                revert GameNotRetryable(keccak256(
-                        abi.encode(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim_, previousExtraData)
-                    ));
+                revert GameNotRetryable(previousUuid);
             }
         }
 
@@ -626,7 +629,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @inheritdoc IMultiProofGame
-    /// @dev View twin of `resolve()`: reports what a resolve call would do right now.
+    /// @dev Reports the eventual outcome. `resolvable` is true only when `resolve()`
+    ///      would succeed. A locally doomed, unproven game surfaces `CHALLENGER_WINS` /
+    ///      `PROOF_TIMEOUT` even while its parent is still open, so keepers can stop building
+    ///      on it. Settlement still waits for the parent so bond credits stay correct.
     function resolutionStatus() external view returns (bool resolvable, GameStatus outcome, InvalidationReason reason) {
         if (status != GameStatus.IN_PROGRESS) {
             return (false, status, claimData.invalidationReason);
@@ -634,17 +640,32 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
+            // Parent game is invalid, return `CHALLENGER_WINS` with `INVALID_PARENT`.
             return (true, GameStatus.CHALLENGER_WINS, InvalidationReason.INVALID_PARENT);
         }
-        if (parentStatus == GameStatus.IN_PROGRESS || !gameOver()) {
-            return (false, GameStatus.IN_PROGRESS, InvalidationReason.NONE);
-        }
 
+        bool parentResolved = parentStatus != GameStatus.IN_PROGRESS;
         bool proven = claimData.status == ProposalStatus.UnchallengedAndValidProofProvided
             || claimData.status == ProposalStatus.ChallengedAndValidProofProvided;
-        return proven
-            ? (true, GameStatus.DEFENDER_WINS, InvalidationReason.NONE)
-            : (true, GameStatus.CHALLENGER_WINS, InvalidationReason.PROOF_TIMEOUT);
+
+        if (!gameOver()) {
+            // This game is not over yet, return `IN_PROGRESS`.
+            return (false, GameStatus.IN_PROGRESS, InvalidationReason.NONE);
+        }
+        // This game is over.
+        if (!proven) {
+            // This game is over but it doesn't have enough proofs.
+            // Return `CHALLENGER_WINS` as outcome. The `resolvable` instead depends on the
+            // parent game: you cannot resolve this game if parent is not resolved yet.
+            return (parentResolved, GameStatus.CHALLENGER_WINS, InvalidationReason.PROOF_TIMEOUT);
+        }
+        // This game is over and has enough proofs.
+        if (!parentResolved) {
+            // Parent game is not resolved yet, therefore return `IN_PROGRESS`.
+            return (false, GameStatus.IN_PROGRESS, InvalidationReason.NONE);
+        }
+        // This game is over, it has enough proofs and the parent is already resolved.
+        return (true, GameStatus.DEFENDER_WINS, InvalidationReason.NONE);
     }
 
     /// @inheritdoc IMultiProofGame

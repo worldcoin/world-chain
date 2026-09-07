@@ -12,8 +12,8 @@ use tokio::sync::Semaphore;
 use tracing::warn;
 use world_chain_proof_protocol::{
     IAnchorStateRegistry, IDisputeGameFactory, IERC20StakingVault, IMultiProofGame,
-    MULTI_PROOF_GAME_TYPE, ProposalStatus, ResolutionStatus, read_registered_bond_vault,
-    read_registered_lineage_config,
+    MULTI_PROOF_GAME_TYPE, ProposalStatus, ResolutionStatus, read_lineage_resolution_status,
+    read_registered_bond_vault, read_registered_lineage_config,
 };
 
 /// Alloy-backed implementation of the challenger contract clients.
@@ -131,12 +131,9 @@ where
         &self,
         address: Address,
     ) -> Result<ResolutionStatus, ChallengerError> {
-        let result = self.game(address).resolutionStatus().call().await?;
-        Ok(ResolutionStatus {
-            resolvable: result.resolvable,
-            outcome: result.outcome.try_into()?,
-            invalidation_reason: result.reason.try_into()?,
-        })
+        read_lineage_resolution_status(&self.game(address))
+            .await
+            .map_err(Into::into)
     }
 }
 

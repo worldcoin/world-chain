@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use alloy_primitives::Address;
 use tracing::{info, warn};
+use world_chain_proof_protocol::{GameStatus, InvalidationReason};
 
 use crate::{BondManagerClient, BondManagerConfig, ProposerError};
 
@@ -12,6 +13,8 @@ pub struct BondManager<E> {
     execution_provider: E,
     proposed_games: HashSet<Address>,
     next_game_index: Option<u64>,
+    /// Rotates cleanup work so a failing resolution cannot starve other superseded attempts.
+    last_retry_resolution: Option<Address>,
 }
 
 impl<E> BondManager<E> {
@@ -22,6 +25,7 @@ impl<E> BondManager<E> {
             execution_provider,
             proposed_games: HashSet::default(),
             next_game_index: None,
+            last_retry_resolution: None,
         }
     }
 
@@ -84,8 +88,14 @@ where
 
     /// Resolves abandoned games, settles finalized games, and prunes settled games.
     pub async fn settle_games(&mut self) -> Result<(), ProposerError> {
-        let proposed_games: Vec<_> = self.proposed_games.iter().copied().collect();
+        let mut proposed_games: Vec<_> = self.proposed_games.iter().copied().collect();
+        proposed_games.sort_unstable();
+        if let Some(last) = self.last_retry_resolution {
+            let start = proposed_games.partition_point(|game| *game <= last);
+            proposed_games.rotate_left(start);
+        }
         let active_domain_hash = self.execution_provider.active_domain_hash();
+        let mut retry_resolutions_attempted = 0;
 
         for game in proposed_games {
             let result: Result<bool, ProposerError> = async {
@@ -98,14 +108,30 @@ where
                 }
                 let resolution_status = self.execution_provider.resolution_status(game).await?;
                 if !resolution_status.is_resolved() {
-                    // Resolve games abandoned by retries or domain upgrades; active-domain direct
-                    // outcomes stay with the proposer to avoid racing retry creation.
+                    // The lineage proposer only visits the highest attempt. Once a retry exists,
+                    // we own cleanup of the old attempt as well as its invalidated descendants.
                     let obsolete_domain_resolvable = if resolution_status.resolvable {
                         self.execution_provider.game_domain_hash(game).await? != active_domain_hash
                     } else {
                         false
                     };
-                    if resolution_status.invalid_parent_resolvable() || obsolete_domain_resolvable {
+                    let superseded_retry = resolution_status.resolvable
+                        && resolution_status.outcome == GameStatus::ChallengerWins
+                        && resolution_status.invalidation_reason
+                            == InvalidationReason::ProofTimeout
+                        && !obsolete_domain_resolvable
+                        && retry_resolutions_attempted < self.config.max_retry_resolutions_per_tick
+                        && self.execution_provider.has_retry(game).await?;
+                    if resolution_status.invalid_parent_resolvable()
+                        || obsolete_domain_resolvable
+                        || superseded_retry
+                    {
+                        if superseded_retry {
+                            // Charge failed submissions against the budget too. The next pass
+                            // starts after this game so a persistent failure cannot monopolize it.
+                            retry_resolutions_attempted += 1;
+                            self.last_retry_resolution = Some(game);
+                        }
                         let submission = self.execution_provider.resolve_game(game).await?;
                         info!(
                             lifecycle_event = "game_resolved",

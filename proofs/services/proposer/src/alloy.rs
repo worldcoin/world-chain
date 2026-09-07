@@ -7,8 +7,9 @@ use tracing::warn;
 use world_chain_proof_protocol::{
     IAnchorStateRegistry, IDisputeGameFactory, IERC20StakingVault, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, MULTI_PROOF_GAME_TYPE,
-    RegisteredLineageConfig, ResolutionStatus, read_game_for_transition, read_lineage_anchor,
-    read_lineage_resolution_status, read_registered_bond_vault, read_registered_lineage_config,
+    RegisteredLineageConfig, ResolutionStatus, read_game_for_transition, read_game_has_retry,
+    read_lineage_anchor, read_lineage_resolution_status, read_registered_bond_vault,
+    read_registered_lineage_config,
 };
 
 use crate::{
@@ -233,6 +234,12 @@ where
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
         self.read_resolution_status(game).await
+    }
+
+    async fn has_retry(&self, game: Address) -> Result<bool, ProposerError> {
+        read_game_has_retry(&self.factory, &self.game(game))
+            .await
+            .map_err(Into::into)
     }
 
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {

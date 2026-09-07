@@ -318,12 +318,17 @@ impl TryFrom<u8> for InvalidationReason {
     }
 }
 
-/// Decoded `MultiProofGame.resolutionStatus()`: what a resolve call would do right now.
+/// A game's stored status and its current resolution evaluation, read at the same block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolutionStatus {
+    /// Actual on-chain `status()`, which only becomes terminal after `resolve()` succeeds.
+    pub status: GameStatus,
+    /// Whether `resolve()` can succeed now.
     pub resolvable: bool,
-    /// The outcome a resolve call would produce, or the outcome already reached.
+    /// Predicted or resolved outcome. A local proof timeout can be terminal while the
+    /// stored status is still `InProgress` and resolution is waiting for the parent.
     pub outcome: GameStatus,
+    /// Current invalidation reason; a local timeout may later become `InvalidParent`.
     pub invalidation_reason: InvalidationReason,
 }
 
@@ -342,10 +347,9 @@ impl ResolutionStatus {
 
     /// Returns whether the game has already reached a terminal state.
     ///
-    /// `outcome` describes the expected result while a game is still resolvable, so a terminal
-    /// outcome only means resolved once `resolvable` is false.
+    /// Neither the predicted outcome nor `resolvable` establishes actual resolution.
     pub fn is_resolved(&self) -> bool {
-        !self.resolvable && self.outcome != GameStatus::InProgress
+        self.status != GameStatus::InProgress
     }
 }
 
@@ -419,6 +423,7 @@ mod tests {
     #[test]
     fn resolution_status_reads_outcomes_not_proposal_states() {
         let finalized = ResolutionStatus {
+            status: GameStatus::InProgress,
             resolvable: true,
             outcome: GameStatus::DefenderWins,
             invalidation_reason: InvalidationReason::None,
@@ -427,6 +432,7 @@ mod tests {
         assert!(!finalized.is_resolved());
 
         let live = ResolutionStatus {
+            status: GameStatus::InProgress,
             resolvable: false,
             outcome: GameStatus::InProgress,
             invalidation_reason: InvalidationReason::None,
@@ -435,11 +441,43 @@ mod tests {
         assert!(!live.is_resolved());
 
         let bad_parent = ResolutionStatus {
+            status: GameStatus::InProgress,
             resolvable: true,
             outcome: GameStatus::ChallengerWins,
             invalidation_reason: InvalidationReason::InvalidParent,
         };
         assert!(bad_parent.invalid_parent_resolvable());
+    }
+
+    #[test]
+    fn local_timeout_is_not_resolved_until_the_stored_status_changes() {
+        let waiting = ResolutionStatus {
+            status: GameStatus::InProgress,
+            resolvable: false,
+            outcome: GameStatus::ChallengerWins,
+            invalidation_reason: InvalidationReason::ProofTimeout,
+        };
+        assert!(!waiting.is_resolved());
+        assert!(!waiting.positive_resolvable());
+        assert!(!waiting.invalid_parent_resolvable());
+
+        let ready = ResolutionStatus {
+            resolvable: true,
+            ..waiting
+        };
+        assert!(!ready.is_resolved());
+        let resolved = ResolutionStatus {
+            status: GameStatus::ChallengerWins,
+            ..waiting
+        };
+        assert!(resolved.is_resolved());
+        let defender_wins = ResolutionStatus {
+            status: GameStatus::DefenderWins,
+            outcome: GameStatus::DefenderWins,
+            invalidation_reason: InvalidationReason::None,
+            ..waiting
+        };
+        assert!(defender_wins.is_resolved());
     }
 
     #[test]

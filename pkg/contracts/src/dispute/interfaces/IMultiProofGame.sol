@@ -174,7 +174,8 @@ interface IMultiProofGame is IDisputeGame {
     function proposalDomainHash() external view returns (bytes32);
 
     /// @notice Retry nonce for this transition. Attempt N requires attempt N-1 to have timed
-    ///         out on proofs or to have been created before this game type became respected.
+    ///         out on proofs (settled or locally doomed) or to have been created before this
+    ///         game type became respected.
     function attempt() external view returns (uint256);
 
     /// @notice Parent game, or the anchor registry when no compatible anchor game exists.
@@ -230,8 +231,10 @@ interface IMultiProofGame is IDisputeGame {
     ///         passed or the proof threshold has been reached.
     function gameOver() external view returns (bool);
 
-    /// @notice Returns whether this game can resolve now and the outcome a resolve call would
-    ///         produce; `outcome` is `IN_PROGRESS` while the game cannot resolve.
+    /// @notice Returns whether this game can resolve now and its eventual outcome.
+    /// @dev `resolvable` is true only when `resolve()` would succeed. `outcome` may already be
+    ///      terminal (e.g. a locally doomed unproven game) while `resolvable` is still false
+    ///      because the parent has not resolved yet.
     function resolutionStatus() external view returns (bool resolvable, GameStatus outcome, InvalidationReason reason);
 
     ////////////////////////////////////////////////////////////////

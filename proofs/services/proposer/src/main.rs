@@ -74,6 +74,14 @@ struct Cli {
     #[arg(long, env = "BOND_MANAGER_INITIAL_SCAN_LIMIT", default_value_t = 1_000)]
     bond_manager_initial_scan_limit: u64,
 
+    /// Maximum superseded proof-timeout resolution attempts per bond-manager pass; zero disables them.
+    #[arg(
+        long,
+        env = "BOND_MANAGER_MAX_RETRY_RESOLUTIONS_PER_TICK",
+        default_value_t = 1
+    )]
+    bond_manager_max_retry_resolutions_per_tick: usize,
+
     /// Number of confirmations to require after sending a tx onchain.
     #[arg(long, env = "CONFIRMATIONS", default_value_t = 5)]
     confirmations: u64,
@@ -141,6 +149,7 @@ async fn main() -> Result<()> {
     let bond_manager_config = BondManagerConfig {
         poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
         initial_scan_limit: cli.bond_manager_initial_scan_limit,
+        max_retry_resolutions_per_tick: cli.bond_manager_max_retry_resolutions_per_tick,
     };
     let mut bond_manager = BondManager::new(bond_manager_config, contracts.clone());
     let output_roots = VerifyingConsensusProvider::new(
