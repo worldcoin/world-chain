@@ -71,8 +71,8 @@ jobs:
             safe_4337_wallet_deployer: "0xd1f0B51940DbD6e73891D2a41Ef14483fDC5Cb6e"
             expected_chain_id: "4801"
             karst_enabled: "true"
-            karst_deposit_enabled: "false"
-            optimism_portal: ""
+            karst_deposit_enabled: "true"
+            optimism_portal: "0xFf6EBa109271fe6d4237EeeD4bAb1dD9A77dD1A4"
             allow_failure: false
           - network: betanet
             environment: dev
