@@ -21,10 +21,10 @@ const GAS_FETCH_MAX_CONCURRENCY: usize = 8;
 
 /// Default SP1 range-proof cycle ceiling; the planning gas target derives from it.
 pub const DEFAULT_RANGE_CYCLE_LIMIT: u64 = 1_500_000_000_000;
-/// Conservative worst-case zkVM cycles per L2 gas (keccak/precompile-heavy blocks); typical
-/// blocks measure ~5-15. Unmeasured on World Chain — replace once `prover-sp1 execute`
-/// numbers exist.
-pub const DEFAULT_CYCLES_PER_GAS: u64 = 25;
+/// Conservative zkVM cycles per L2 gas, calibrated from World Chain HandleOps load.
+/// A 1,000-block Alphanet range used 4,553,216,450 L2 gas and 1,265,948,452,006 cycles
+/// (~278 cycles per L2 gas); round up to retain planning headroom.
+pub const DEFAULT_CYCLES_PER_GAS: u64 = 300;
 /// Caps witness size and build time per range regardless of how empty the blocks are.
 pub const DEFAULT_MAX_BLOCKS_PER_RANGE: u64 = 1_000;
 /// Two bisections shrink a mis-estimated range to a quarter of its planned gas.
@@ -345,10 +345,10 @@ mod tests {
 
     #[test]
     fn gas_target_derives_from_the_cycle_ceiling() {
-        // 1.5T cycles / 25 cycles-per-gas / 2 headroom = 30B gas.
+        // 1.5T cycles / 300 cycles-per-gas / 2 headroom = 2.5B gas.
         assert_eq!(
             target_gas_per_range(DEFAULT_RANGE_CYCLE_LIMIT, DEFAULT_CYCLES_PER_GAS),
-            30_000_000_000
+            2_500_000_000
         );
         assert_eq!(target_gas_per_range(1_000, 25), 20);
         // Never zero, even when the ceiling is smaller than one gas worth of cycles.

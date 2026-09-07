@@ -84,7 +84,7 @@ unexecutable is bisected at its block midpoint and re-proved.
 
 | Variable | Flag | Default |
 |---|---|---:|
-| `SP1_CYCLES_PER_GAS` | `--sp1-cycles-per-gas` | `25` (assumed worst case, unmeasured) |
+| `SP1_CYCLES_PER_GAS` | `--sp1-cycles-per-gas` | `300` (calibrated from HandleOps load) |
 | `SP1_MAX_BLOCKS_PER_RANGE` | `--sp1-max-blocks-per-range` | `1000` |
 | `SP1_MAX_RANGE_SPLITS` | `--sp1-max-range-splits` | `2` |
 

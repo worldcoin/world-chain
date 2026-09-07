@@ -739,7 +739,7 @@ mod tests {
         // The derived gas target tracks the configured cycle ceiling.
         assert_eq!(
             target_gas_per_range(cli.sp1_range_cycle_limit, cli.sp1_cycles_per_gas),
-            30_000_000_000
+            2_500_000_000
         );
     }
 
