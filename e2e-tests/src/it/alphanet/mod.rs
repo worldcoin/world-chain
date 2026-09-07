@@ -1,1 +1,3 @@
+mod already_challenged_game_is_ignored;
+mod bad_proposal_is_challenged_and_invalidated;
 mod withdrawal;
