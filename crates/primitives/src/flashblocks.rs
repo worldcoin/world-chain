@@ -9,14 +9,14 @@ use alloy_consensus::{
     proofs::ordered_trie_root_with_encoder,
 };
 use alloy_eips::{
-    Decodable2718, Encodable2718, eip7685::EMPTY_REQUESTS_HASH,
-    eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH, merge::BEACON_NONCE,
+    Encodable2718, eip7685::EMPTY_REQUESTS_HASH, eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH,
+    merge::BEACON_NONCE,
 };
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
-use op_alloy_consensus::OpTxEnvelope;
+use op_alloy_consensus::{OpTxEnvelope, decode_2718_canonical};
 use reth_chainspec::EthereumHardforks;
 use reth_primitives_traits::{Block as _, BlockBody as _, RecoveredBlock, TxTy};
 
@@ -250,7 +250,7 @@ pub fn recovered_block_from_flashblocks(
     let transactions_encoded = diff
         .transactions
         .iter()
-        .map(|t| TxTy::<OpPrimitives>::decode_2718(&mut t.as_ref()))
+        .map(|t| decode_2718_canonical::<TxTy<OpPrimitives>>(t))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| eyre!("Failed to decode transaction: {:?}", e))?;
 
