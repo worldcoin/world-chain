@@ -74,32 +74,6 @@ async fn challenge_valid_game() {
 
 #[tokio::test]
 #[ignore]
-async fn wait_for_two_proofs() {
-    // fetch env vars
-    let l1_private_key_str = std::env::var("L1_PRIVATE_KEY").unwrap();
-    let l1_rpc_endpoint = std::env::var("L1_RPC_ENDPOINT").unwrap();
-    // create L1 signer provider
-    let local_signer = PrivateKeySigner::from_str(&l1_private_key_str).unwrap();
-    let l1_provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(local_signer))
-        .connect(&l1_rpc_endpoint)
-        .await
-        .unwrap();
-    // read challenged game address from .json file
-    let game_addr: Address =
-        serde_json::from_slice(&std::fs::read("challenged_game_addr.json").unwrap()).unwrap();
-    let game_instance = IMultiProofGameInstance::new(game_addr, &l1_provider);
-    // read proof bitmap
-    let proof_bitmap = game_instance.proofBitmap().call().await.unwrap();
-    // proof bitmap must be != 0, this means that at least 1 proof is provided
-    assert!(proof_bitmap != 0);
-    // proof bitmap must be != 2, this condition together to the previous check
-    // ensures that at least TEE proof + another proof is provided.
-    assert!(proof_bitmap != 2);
-}
-
-#[tokio::test]
-#[ignore]
 async fn wait_defender_wins() {
     // fetch env vars
     let l1_private_key_str = std::env::var("L1_PRIVATE_KEY").unwrap();

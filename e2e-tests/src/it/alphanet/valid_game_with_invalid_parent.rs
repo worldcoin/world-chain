@@ -129,7 +129,7 @@ async fn wait_for_challenger_wins() {
         .unwrap();
     // read ProposalSubmissions from .json file
     let proposal_submissions: Vec<ProposalSubmission> =
-        serde_json::from_slice(&std::fs::read("proposal_submissions.json").unwrap()).unwrap();
+        serde_json::from_slice(&std::fs::read("proposal_subs.json").unwrap()).unwrap();
     assert_eq!(proposal_submissions.len(), 2);
     // assert proof deadline of 2nd game is elapsed, this way proof deadline of 1st game is elapsed too
     let second_game_addr = proposal_submissions[1].game_address;
