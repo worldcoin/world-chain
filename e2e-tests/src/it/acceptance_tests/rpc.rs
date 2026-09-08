@@ -28,6 +28,13 @@ impl RpcEnv {
         let Some(config) = Config::from_env()? else {
             return Ok(None);
         };
+        eprintln!("acceptance: L2 sender address={}", config.l2_key.address());
+        if let Some(deposit) = config.karst_deposit.as_ref() {
+            eprintln!(
+                "acceptance: L1 deposit sender address={}",
+                deposit.l1_key.address()
+            );
+        }
         let provider =
             provider_for_url::<Ethereum>(&config.rpc_url, config.cloudflare_access.as_ref())?;
         let optimism_provider =

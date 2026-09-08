@@ -185,7 +185,7 @@ pub struct WorkerArgs {
     poll_interval_seconds: u64,
 
     /// Maximum seconds to spend generating one Kona witness.
-    #[arg(long, default_value_t = 900)]
+    #[arg(long, env = "WITNESS_TIMEOUT_SECONDS", default_value_t = 900)]
     witness_timeout_seconds: u64,
 
     /// Maximum number of jobs proved concurrently. TEE attestation is cheaper than ZK

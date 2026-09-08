@@ -106,7 +106,7 @@ struct Cli {
     #[arg(long, env = "MAX_RESOLUTIONS_PER_TICK", default_value_t = 1)]
     max_resolutions_per_tick: usize,
 
-    /// Seconds between challenger-bond discovery and withdrawal passes.
+    /// Seconds between challenger-bond discovery and settlement passes.
     #[arg(
         long,
         env = "BOND_MANAGER_POLL_INTERVAL_SECONDS",
@@ -165,7 +165,10 @@ async fn main() -> Result<()> {
         cli.factory_address,
         cli.l1_tx_confirmations,
         Duration::from_secs(cli.l1_tx_receipt_timeout_seconds),
-    );
+    )
+    .await
+    .context("failed to bind the World Chain proof system")?;
+    client.refresh_vault_balance().await;
 
     // Preflight the factory index before entering the scan loop. Crash instead of reporting the
     // process alive while every scan tick fails.
@@ -200,6 +203,7 @@ async fn main() -> Result<()> {
         poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
         initial_scan_limit: cli.bond_manager_initial_scan_limit,
     };
+    let bond_vault = client.bond_vault_address();
     let owned_games = OwnedGames::default();
     let mut challenger = WorldChainChallenger::with_owned_games(
         config,
@@ -216,6 +220,7 @@ async fn main() -> Result<()> {
         output_root_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.output_root_rpc),
         verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         dispute_game_factory = %cli.factory_address,
+        bond_vault = %bond_vault,
         factory_game_count = game_count,
         challenger = %challenger_address,
         max_games_per_tick = cli.max_games_per_tick,

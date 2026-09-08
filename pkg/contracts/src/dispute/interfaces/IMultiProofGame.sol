@@ -3,12 +3,12 @@ pragma solidity 0.8.28;
 
 import {LibProof, InvalidationReason, Bitmap, ProofLane} from "../lib/LibProof.sol";
 import {IWorldChainProofVerifier} from "./IWorldChainProofVerifier.sol";
+import {IERC20StakingVault} from "./IERC20StakingVault.sol";
 
 import {BondDistributionMode, Duration, GameStatus, Hash, Timestamp} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
-import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.sol";
 
 /// @title IMultiProofGame
 /// @author World Contributors
@@ -64,7 +64,7 @@ interface IMultiProofGame is IDisputeGame {
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
         IAnchorStateRegistry anchorStateRegistry;
-        IDelayedWETH weth;
+        IERC20StakingVault bondVault;
     }
 
     ////////////////////////////////////////////////////////////////
@@ -79,6 +79,7 @@ interface IMultiProofGame is IDisputeGame {
     error InvalidProof(ProofLane lane, bytes32 rootId);
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
     error InconsistentSystemConfiguration();
+    error TimestampOutOfBounds(uint256 value);
 
     /// @notice Thrown when a lane that already counts toward the threshold is resubmitted.
     error DuplicateProofLane(ProofLane lane, bytes32 rootId, Bitmap proofBitmap);
@@ -159,8 +160,8 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Registry providing the anchor root, blacklist, and finality airgap.
     function anchorStateRegistry() external view returns (IAnchorStateRegistry);
 
-    /// @notice Bond custody contract.
-    function weth() external view returns (IDelayedWETH);
+    /// @notice ERC-20 bond custody and settlement contract.
+    function bondVault() external view returns (IERC20StakingVault);
 
     ////////////////////////////////////////////////////////////////
     //                      Proposal context                      //
@@ -173,7 +174,8 @@ interface IMultiProofGame is IDisputeGame {
     function proposalDomainHash() external view returns (bytes32);
 
     /// @notice Retry nonce for this transition. Attempt N requires attempt N-1 to have timed
-    ///         out on proofs or to have been created before this game type became respected.
+    ///         out on proofs (settled or locally doomed) or to have been created before this
+    ///         game type became respected.
     function attempt() external view returns (uint256);
 
     /// @notice Parent game, or the anchor registry when no compatible anchor game exists.
@@ -229,16 +231,18 @@ interface IMultiProofGame is IDisputeGame {
     ///         passed or the proof threshold has been reached.
     function gameOver() external view returns (bool);
 
-    /// @notice Returns whether this game can resolve now and the outcome a resolve call would
-    ///         produce; `outcome` is `IN_PROGRESS` while the game cannot resolve.
+    /// @notice Returns whether this game can resolve now and its eventual outcome.
+    /// @dev `resolvable` is true only when `resolve()` would succeed. `outcome` may already be
+    ///      terminal (e.g. a locally doomed unproven game) while `resolvable` is still false
+    ///      because the parent has not resolved yet.
     function resolutionStatus() external view returns (bool resolvable, GameStatus outcome, InvalidationReason reason);
 
     ////////////////////////////////////////////////////////////////
     //                    Challenge and proofs                    //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Disputes a proven proposal during the open challenge window for exactly `challengerBond`.
-    function challenge() external payable returns (ProposalStatus);
+    /// @notice Disputes a proposal, locking `challengerBond` from the caller's available vault balance.
+    function challenge() external returns (ProposalStatus);
 
     /// @notice Submits a compact proof payload. Before a challenge, any accepted lane satisfies
     ///         the initial proof requirement; after a challenge, distinct lanes count toward the
@@ -256,7 +260,7 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Distribution mode locked in by `closeGame`.
     function bondDistributionMode() external view returns (BondDistributionMode);
 
-    /// @notice Total bonds custodied by this game.
+    /// @notice Total ERC-20 bonds assigned to this game's vault pot.
     function totalBonds() external view returns (uint256);
 
     /// @notice Credit owed to `recipient` when the game closes in `NORMAL` mode.
@@ -264,11 +268,4 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Credit owed to `recipient` when the game closes in `REFUND` mode.
     function refundModeCredit(address recipient) external view returns (uint256 amount);
-
-    /// @notice Returns the credit `recipient` can claim from this game.
-    function credit(address recipient) external view returns (uint256);
-
-    /// @notice Permissionlessly claims `recipient`'s credit via the two-phase DelayedWETH flow;
-    ///         the caller cannot redirect funds away from `recipient`.
-    function claimCredit(address recipient) external;
 }

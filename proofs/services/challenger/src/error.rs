@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, TxHash};
+use alloy_primitives::{Address, TxHash, U256};
 use alloy_provider::{PendingTransactionError, transport::RpcError};
 use alloy_transport::TransportErrorKind;
 use thiserror::Error;
@@ -13,6 +13,14 @@ pub enum ChallengerError {
     /// Invalid challenger configuration.
     #[error("invalid challenger config: {0}")]
     InvalidConfig(&'static str),
+    #[error("WIP-1006 factory init bond must be zero, got {0}")]
+    NonZeroFactoryBond(U256),
+    #[error("vault {vault} is wired to factory {actual}, expected {expected}")]
+    VaultFactoryMismatch {
+        vault: Address,
+        expected: Address,
+        actual: Address,
+    },
     /// Adding `block_interval` overflowed `u64`.
     #[error("l2 block number overflow: parent {parent_block} + interval {block_interval}")]
     BlockNumberOverflow {
@@ -36,8 +44,6 @@ pub enum ChallengerError {
     NotExistingInvalidReason(#[from] InvalidationReasonError),
     #[error(transparent)]
     PendingTransaction(#[from] PendingTransactionError),
-    #[error("Latest L1 block is unavailable.")]
-    UnavailableLatestL1Block,
     #[error("Overflow error.")]
     Overflow,
     #[error(transparent)]
@@ -57,6 +63,8 @@ pub enum ChallengerError {
     },
     #[error(transparent)]
     Permit(#[from] AcquireError),
+    #[error(transparent)]
+    Lineage(#[from] world_chain_proof_protocol::LineageError),
 }
 
 impl From<alloy_contract::Error> for ChallengerError {

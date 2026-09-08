@@ -237,6 +237,7 @@ impl LineageProvider for MockClient {
             state => state,
         };
         Ok(ResolutionStatus {
+            status: record.state.outcome(),
             resolvable: lifecycle != record.state,
             outcome: lifecycle.outcome(),
             invalidation_reason: record.invalidation_reason,

@@ -5,6 +5,7 @@
 
 use std::{
     future::Future,
+    str::FromStr,
     time::{Duration, Instant},
 };
 
@@ -14,6 +15,7 @@ use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, ProviderBuilder, WalletProvider, ext::AnvilApi};
 use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::sol;
 use eyre::eyre::{OptionExt, bail, ensure, eyre};
 use url::Url;
 use world_chain_devnet::{
@@ -21,29 +23,38 @@ use world_chain_devnet::{
     is_docker_unavailable,
 };
 use world_chain_proof_protocol::{
-    DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS, IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory,
-    IMultiProofGame, MULTI_PROOF_GAME_TYPE,
+    DEFAULT_L1_TX_RECEIPT_TIMEOUT_SECONDS, IAnchorStateRegistry, IDisputeGameFactory,
+    IERC20StakingVault, IMultiProofGame, MULTI_PROOF_GAME_TYPE, read_registered_bond_vault,
 };
 use world_chain_proposer::AlloyProofSystemClient;
 
 /// How long any single wait on devnet-driven on-chain state may take before the test fails.
-pub(in crate::it) const GAME_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
-pub(in crate::it) const GAME_IN_PROGRESS: u8 = 0;
-pub(in crate::it) const GAME_CHALLENGER_WINS: u8 = 1;
-pub(in crate::it) const GAME_DEFENDER_WINS: u8 = 2;
+pub const GAME_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
+pub const GAME_IN_PROGRESS: u8 = 0;
+pub const GAME_CHALLENGER_WINS: u8 = 1;
+pub const GAME_DEFENDER_WINS: u8 = 2;
 /// `LibProof.InvalidationReason` ordinals (`pkg/contracts/src/dispute/lib/LibProof.sol`).
-pub(in crate::it) const INVALIDATION_REASON_PROOF_TIMEOUT: u8 = 1;
-pub(in crate::it) const INVALIDATION_REASON_INVALID_PARENT: u8 = 2;
+pub const INVALIDATION_REASON_PROOF_TIMEOUT: u8 = 1;
+pub const INVALIDATION_REASON_INVALID_PARENT: u8 = 2;
 
 /// Funds a throwaway Anvil account well above any bond the factory could demand (100 ETH).
 const THROWAWAY_ACCOUNT_BALANCE_WEI: u128 = 100_000_000_000_000_000_000;
+/// Mock bond tokens deposited for each throwaway proof-system participant (100 tokens).
+const THROWAWAY_ACCOUNT_BOND_TOKEN_BALANCE: u128 = 100_000_000_000_000_000_000;
 const GAME_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Builds the HA-sequencer full stack every proof-system test runs against.
-///
-/// `Ok(None)` means Docker is unavailable — the caller should skip, not fail.
-pub(in crate::it) async fn try_build_ha_devnet(
+sol! {
+    #[sol(rpc)]
+    interface IMockBondToken {
+        function mint(address recipient, uint256 amount) external;
+        function approve(address spender, uint256 amount) external returns (bool);
+        function allowance(address owner, address spender) external view returns (uint256);
+    }
+}
+
+pub async fn try_build_ha_devnet_with_custom_block_time(
     skip_label: &str,
+    block_time: Duration,
 ) -> eyre::Result<Option<WorldDevnet>> {
     let ha_config = HaSequencerConfig::default()
         .with_sequencer_count(2)
@@ -52,7 +63,7 @@ pub(in crate::it) async fn try_build_ha_devnet(
     match WorldDevnetBuilder::new()
         .preset(WorldDevnetPreset::HaSequencer)
         .ha_sequencer(ha_config)
-        .block_time(Duration::from_secs(1))
+        .block_time(block_time)
         .build()
         .await
     {
@@ -65,14 +76,27 @@ pub(in crate::it) async fn try_build_ha_devnet(
     }
 }
 
-pub(in crate::it) fn l1_rpc_url(devnet: &WorldDevnet) -> eyre::Result<&str> {
+/// Builds the HA-sequencer full stack every proof-system test runs against.
+///
+/// `Ok(None)` means Docker is unavailable — the caller should skip, not fail.
+pub async fn try_build_ha_devnet(skip_label: &str) -> eyre::Result<Option<WorldDevnet>> {
+    try_build_ha_devnet_with_custom_block_time(skip_label, Duration::from_secs(1)).await
+}
+
+pub fn l1_rpc_url(devnet: &WorldDevnet) -> eyre::Result<&str> {
     devnet
         .l1_rpc_url()
         .ok_or_eyre("full-stack devnet missing L1 RPC")
 }
 
+pub fn l2_op_node_rpc_url(devnet: &WorldDevnet) -> eyre::Result<&str> {
+    devnet
+        .l2_op_node_rpc_url()
+        .ok_or_eyre("full-stack devnet missing L2 op-node RPC")
+}
+
 /// Parses one of the devnet's optional L1 contract addresses, naming it if absent.
-pub(in crate::it) fn l1_contract(address: Option<&str>, what: &str) -> eyre::Result<Address> {
+pub fn l1_contract(address: Option<&str>, what: &str) -> eyre::Result<Address> {
     Ok(address
         .ok_or_else(|| eyre!("full-stack devnet missing {what}"))?
         .parse()?)
@@ -82,7 +106,7 @@ pub(in crate::it) fn l1_contract(address: Option<&str>, what: &str) -> eyre::Res
 ///
 /// Not erased to `DynProvider`: [`AlloyProofSystemClient`]'s proposer traits need
 /// [`WalletProvider`], which erasure drops.
-pub(in crate::it) fn signing_provider(
+pub fn signing_provider(
     rpc: &str,
     signer: PrivateKeySigner,
 ) -> eyre::Result<impl Provider + WalletProvider + Clone + use<>> {
@@ -91,11 +115,28 @@ pub(in crate::it) fn signing_provider(
         .connect_http(Url::parse(rpc)?))
 }
 
-/// Funds a fresh random account via `anvil_setBalance` and returns it with a signing provider.
+/// Funds the address originated from the provided private key with ETH and returns the related provider.
+pub async fn fund_address(
+    l1_rpc: &str,
+    private_key: &str,
+) -> eyre::Result<impl Provider + WalletProvider + Clone + use<>> {
+    let signer = PrivateKeySigner::from_str(private_key)?;
+    let address = signer.address();
+    ProviderBuilder::new()
+        .connect_http(Url::parse(l1_rpc)?)
+        .anvil_set_balance(address, U256::from(THROWAWAY_ACCOUNT_BALANCE_WEI))
+        .await?;
+
+    let provider = signing_provider(l1_rpc, signer)?;
+    Ok(provider)
+}
+
+/// Funds a fresh random account with L1 gas and mock tokens deposited into the active bond vault.
 ///
 /// Cheating balance in leaves the shared devnet genesis untouched for every other test.
-pub(in crate::it) async fn funded_throwaway_provider(
+pub async fn funded_throwaway_provider(
     l1_rpc: &str,
+    factory_address: Address,
 ) -> eyre::Result<(Address, impl Provider + WalletProvider + Clone + use<>)> {
     let signer = PrivateKeySigner::random();
     let address = signer.address();
@@ -104,10 +145,59 @@ pub(in crate::it) async fn funded_throwaway_provider(
         .anvil_set_balance(address, U256::from(THROWAWAY_ACCOUNT_BALANCE_WEI))
         .await?;
 
-    Ok((address, signing_provider(l1_rpc, signer)?))
+    let provider = signing_provider(l1_rpc, signer)?;
+    let factory =
+        IDisputeGameFactory::IDisputeGameFactoryInstance::new(factory_address, provider.clone());
+    let vault_address = read_registered_bond_vault(&provider, &factory).await?;
+    let vault =
+        IERC20StakingVault::IERC20StakingVaultInstance::new(vault_address, provider.clone());
+    let bond_token_address = vault.token().call().await?;
+    let mock_bond_token = IMockBondToken::new(bond_token_address, provider.clone());
+    let amount = U256::from(THROWAWAY_ACCOUNT_BOND_TOKEN_BALANCE);
+
+    ensure!(
+        mock_bond_token
+            .mint(address, amount)
+            .send()
+            .await?
+            .get_receipt()
+            .await?
+            .status(),
+        "minting throwaway mock bond tokens reverted"
+    );
+    ensure!(
+        mock_bond_token
+            .approve(vault_address, amount)
+            .send()
+            .await?
+            .get_receipt()
+            .await?
+            .status(),
+        "approving throwaway mock bond tokens reverted"
+    );
+    ensure!(
+        vault
+            .deposit(address, amount)
+            .send()
+            .await?
+            .get_receipt()
+            .await?
+            .status(),
+        "depositing throwaway mock bond tokens reverted"
+    );
+    ensure!(
+        mock_bond_token
+            .allowance(address, vault_address)
+            .call()
+            .await?
+            .is_zero(),
+        "deposit left a bond-token allowance for the throwaway account"
+    );
+
+    Ok((address, provider))
 }
 
-pub(in crate::it) async fn proof_system_client<P>(
+pub async fn proof_system_client<P>(
     provider: P,
     factory_address: Address,
 ) -> eyre::Result<AlloyProofSystemClient<P>>
@@ -123,17 +213,14 @@ where
     .await?)
 }
 
-pub(in crate::it) fn game_at<P>(
-    address: Address,
-    provider: P,
-) -> IMultiProofGame::IMultiProofGameInstance<P>
+pub fn game_at<P>(address: Address, provider: P) -> IMultiProofGame::IMultiProofGameInstance<P>
 where
     P: Provider,
 {
     IMultiProofGame::IMultiProofGameInstance::new(address, provider)
 }
 
-pub(in crate::it) fn anchor_at<P>(
+pub fn anchor_at<P>(
     address: Address,
     provider: P,
 ) -> IAnchorStateRegistry::IAnchorStateRegistryInstance<P>
@@ -143,21 +230,25 @@ where
     IAnchorStateRegistry::IAnchorStateRegistryInstance::new(address, provider)
 }
 
-pub(in crate::it) fn weth_at<P>(
+pub fn vault_at<P>(
     address: Address,
     provider: P,
-) -> IDelayedWETH::IDelayedWETHInstance<P>
+) -> IERC20StakingVault::IERC20StakingVaultInstance<P>
 where
     P: Provider,
 {
-    IDelayedWETH::IDelayedWETHInstance::new(address, provider)
+    IERC20StakingVault::IERC20StakingVaultInstance::new(address, provider)
 }
 
-/// Polls `probe` until it yields a value, giving up after [`GAME_WAIT_TIMEOUT`].
+/// Polls `probe` until it yields a value, giving up after `timeout`.
 ///
 /// `Ok(None)` means keep waiting; an `Err` aborts immediately, which is how callers fail fast on
-/// terminal states. `what` completes "timed out after 300s waiting for …".
-async fn poll_until<F, Fut, T>(what: &str, mut probe: F) -> eyre::Result<T>
+/// terminal states.
+async fn poll_until_with_timeout<F, Fut, T>(
+    what: &str,
+    mut probe: F,
+    timeout: Duration,
+) -> eyre::Result<T>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = eyre::Result<Option<T>>>,
@@ -167,14 +258,22 @@ where
         if let Some(value) = probe().await? {
             return Ok(value);
         }
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
-            bail!("timed out after {GAME_WAIT_TIMEOUT:?} waiting for {what}");
+        if started.elapsed() >= timeout {
+            bail!("timed out after {timeout:?} waiting for {what}");
         }
         tokio::time::sleep(GAME_POLL_INTERVAL).await;
     }
 }
 
-pub(in crate::it) async fn latest_timestamp<P>(provider: &P) -> eyre::Result<u64>
+async fn poll_until<F, Fut, T>(what: &str, probe: F) -> eyre::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = eyre::Result<Option<T>>>,
+{
+    poll_until_with_timeout(what, probe, GAME_WAIT_TIMEOUT).await
+}
+
+pub async fn latest_timestamp<P>(provider: &P) -> eyre::Result<u64>
 where
     P: Provider,
 {
@@ -187,7 +286,7 @@ where
 }
 
 /// Warps Anvil's clock forward to `target` and mines a block so it is observable on-chain.
-pub(in crate::it) async fn advance_to_timestamp<P>(provider: &P, target: u64) -> eyre::Result<()>
+pub async fn advance_to_timestamp<P>(provider: &P, target: u64) -> eyre::Result<()>
 where
     P: Provider,
 {
@@ -199,12 +298,11 @@ where
     Ok(())
 }
 
-/// Waits for the newest WIP-1006 game at or beyond `min_l2_block`, returning its factory index,
-/// address, and L2 sequence number. Pass `0` for any game at all.
-pub(in crate::it) async fn wait_for_multi_proof_game<P>(
+pub async fn wait_for_multi_proof_game_with_timeout<P>(
     provider: P,
     factory_address: Address,
     min_l2_block: u64,
+    timeout: Duration,
 ) -> eyre::Result<(u64, Address, u64)>
 where
     P: Provider + Clone,
@@ -227,7 +325,7 @@ where
             }
         }
 
-        if started.elapsed() >= GAME_WAIT_TIMEOUT {
+        if started.elapsed() >= timeout {
             bail!(
                 "timed out waiting for a respected WIP-1006 game at or beyond L2 block {min_l2_block}"
             );
@@ -236,30 +334,103 @@ where
     }
 }
 
+/// Waits for the newest WIP-1006 game at or beyond `min_l2_block`, returning its factory index,
+/// address, and L2 sequence number. Pass `0` for any game at all.
+pub async fn wait_for_multi_proof_game<P>(
+    provider: P,
+    factory_address: Address,
+    min_l2_block: u64,
+) -> eyre::Result<(u64, Address, u64)>
+where
+    P: Provider + Clone,
+{
+    wait_for_multi_proof_game_with_timeout(
+        provider,
+        factory_address,
+        min_l2_block,
+        GAME_WAIT_TIMEOUT,
+    )
+    .await
+}
+
+/// Waits for a WIP-1006 game matching `parent_ref`, `l2_block`, and `attempt`.
+pub async fn wait_for_multi_proof_game_attempt<P>(
+    provider: P,
+    factory_address: Address,
+    parent_ref: Address,
+    l2_block: u64,
+    attempt: u64,
+) -> eyre::Result<Address>
+where
+    P: Provider + Clone,
+{
+    let factory =
+        IDisputeGameFactory::IDisputeGameFactoryInstance::new(factory_address, provider.clone());
+    let started = Instant::now();
+
+    loop {
+        let game_count: u64 = factory.gameCount().call().await?.try_into()?;
+        for index in (0..game_count).rev() {
+            let entry = factory.gameAtIndex(U256::from(index)).call().await?;
+            if entry.gameType != MULTI_PROOF_GAME_TYPE {
+                continue;
+            }
+            let game = game_at(entry.proxy, provider.clone());
+            let game_l2_block: u64 = game.l2SequenceNumber().call().await?.try_into()?;
+            let game_attempt: u64 = game.attempt().call().await?.try_into()?;
+            let game_parent = game.parentRef().call().await?;
+            if game_l2_block == l2_block && game_attempt == attempt && game_parent == parent_ref {
+                return Ok(entry.proxy);
+            }
+        }
+
+        if started.elapsed() >= GAME_WAIT_TIMEOUT {
+            bail!(
+                "timed out waiting for WIP-1006 game parent={parent_ref} l2={l2_block} attempt={attempt}"
+            );
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
 /// Waits for `game` to be challenged, returning the challenger's address.
-pub(in crate::it) async fn wait_for_challenge<P>(
+pub async fn wait_for_challenge_with_timeout<P>(
     game: &IMultiProofGame::IMultiProofGameInstance<P>,
+    timeout: Duration,
 ) -> eyre::Result<Address>
 where
     P: Provider,
 {
     let address = *game.address();
-    poll_until(&format!("game {address} to be challenged"), || async {
-        let challenger = game.challenger().call().await?;
-        if challenger != Address::ZERO {
-            return Ok(Some(challenger));
-        }
-        ensure!(
-            game.status().call().await? == GAME_IN_PROGRESS,
-            "game {address} resolved before it was ever challenged"
-        );
-        Ok(None)
-    })
+    poll_until_with_timeout(
+        &format!("game {address} to be challenged"),
+        || async {
+            let challenger = game.challenger().call().await?;
+            if challenger != Address::ZERO {
+                return Ok(Some(challenger));
+            }
+            ensure!(
+                game.status().call().await? == GAME_IN_PROGRESS,
+                "game {address} resolved before it was ever challenged"
+            );
+            Ok(None)
+        },
+        timeout,
+    )
     .await
 }
 
+pub async fn wait_for_challenge<P>(
+    game: &IMultiProofGame::IMultiProofGameInstance<P>,
+) -> eyre::Result<Address>
+where
+    P: Provider,
+{
+    wait_for_challenge_with_timeout(game, GAME_WAIT_TIMEOUT).await
+}
+
 /// Waits for at least one proof lane to land on `game`.
-pub(in crate::it) async fn wait_for_proof_lane<P>(
+pub async fn wait_for_proof_lane<P>(
     game: &IMultiProofGame::IMultiProofGameInstance<P>,
 ) -> eyre::Result<()>
 where
@@ -280,7 +451,7 @@ where
 }
 
 /// Waits for `game` to resolve to `expected`, failing fast if it resolves to anything else.
-pub(in crate::it) async fn wait_for_status<P>(
+pub async fn wait_for_status<P>(
     game: &IMultiProofGame::IMultiProofGameInstance<P>,
     expected: u8,
 ) -> eyre::Result<()>
@@ -309,7 +480,7 @@ where
 ///
 /// Needed where no service is watching the game; it would sit `InProgress` forever otherwise. The
 /// final status must still be `expected`.
-pub(in crate::it) async fn wait_for_status_or_resolve<P>(
+pub async fn wait_for_status_or_resolve<P>(
     game: &IMultiProofGame::IMultiProofGameInstance<P>,
     expected: u8,
 ) -> eyre::Result<()>
@@ -338,7 +509,7 @@ where
 }
 
 /// Calls `resolve()` unless another actor already did; only the final outcome matters.
-pub(in crate::it) async fn resolve_if_still_in_progress<P>(
+pub async fn resolve_if_still_in_progress<P>(
     game: &IMultiProofGame::IMultiProofGameInstance<P>,
 ) -> eyre::Result<()>
 where
@@ -352,7 +523,7 @@ where
 }
 
 /// Waits for `game_address` to clear the `AnchorStateRegistry`'s finality airgap.
-pub(in crate::it) async fn wait_for_game_finality<P>(
+pub async fn wait_for_game_finality<P>(
     anchor: &IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     game_address: Address,
 ) -> eyre::Result<()>
@@ -373,7 +544,7 @@ where
 }
 
 /// Waits for the `AnchorStateRegistry` anchor to advance to at least `game_l2_block`.
-pub(in crate::it) async fn wait_for_anchor_at_or_beyond<P>(
+pub async fn wait_for_anchor_at_or_beyond<P>(
     anchor: &IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     game_l2_block: u64,
 ) -> eyre::Result<()>
@@ -390,48 +561,20 @@ where
     .await
 }
 
-/// Waits for `proposer`'s bond on `game_address` to be credited in `DelayedWETH`, returning the
-/// timestamp at which the withdrawal delay expires.
-pub(in crate::it) async fn wait_for_bond_unlock<P>(
-    weth: &IDelayedWETH::IDelayedWETHInstance<P>,
+/// Waits for the complete bond pot of `game_address` to be settled into reusable vault balances.
+pub async fn wait_for_game_settlement<P>(
+    vault: &IERC20StakingVault::IERC20StakingVaultInstance<P>,
     game_address: Address,
-    proposer: Address,
-) -> eyre::Result<u64>
-where
-    P: Provider,
-{
-    let delay = weth.delay().call().await?;
-    poll_until("proposer bond credit to unlock", || async {
-        let pending = weth.withdrawals(game_address, proposer).call().await?;
-        if pending.amount.is_zero() {
-            return Ok(None);
-        }
-        let unlock_at: u64 = pending
-            .timestamp
-            .checked_add(delay)
-            .ok_or_eyre("DelayedWETH unlock timestamp overflow")?
-            .try_into()?;
-        Ok(Some(unlock_at))
-    })
-    .await
-}
-
-/// Waits for `proposer`'s bond on `game_address` to be fully withdrawn from `DelayedWETH`.
-pub(in crate::it) async fn wait_for_bond_withdrawal<P>(
-    weth: &IDelayedWETH::IDelayedWETHInstance<P>,
-    game_address: Address,
-    proposer: Address,
 ) -> eyre::Result<()>
 where
     P: Provider,
 {
-    poll_until("proposer bond withdrawal", || async {
-        Ok(weth
-            .withdrawals(game_address, proposer)
+    poll_until("game bond settlement", || async {
+        Ok(vault
+            .gameBonds(game_address)
             .call()
             .await?
-            .amount
-            .is_zero()
+            .settled
             .then_some(()))
     })
     .await

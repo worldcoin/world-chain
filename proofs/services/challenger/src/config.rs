@@ -13,7 +13,7 @@ pub const DEFAULT_GAME_SCAN_LOOKBACK: u64 = 100;
 pub const DEFAULT_RESOLUTION_POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// Default maximum number of resolution transactions submitted per pass.
 pub const DEFAULT_MAX_RESOLUTIONS_PER_TICK: usize = 1;
-/// Default delay between challenger-bond discovery and withdrawal passes.
+/// Default delay between challenger-bond discovery and settlement passes.
 pub const DEFAULT_BOND_MANAGER_POLL_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// Default number of recent factory games inspected for challenger ownership.
 pub const DEFAULT_BOND_MANAGER_INITIAL_SCAN_LIMIT: u64 = 1_000;
@@ -104,7 +104,7 @@ impl Default for ResolutionManagerConfig {
 /// Configuration for asynchronous challenger-bond management.
 #[derive(Debug, Clone)]
 pub struct BondManagerConfig {
-    /// Delay between factory scans and withdrawal attempts.
+    /// Delay between factory scans and settlement attempts.
     pub poll_interval: Duration,
     /// Number of most recently created games scanned on startup.
     pub initial_scan_limit: u64,

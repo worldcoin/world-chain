@@ -1,7 +1,7 @@
 [package]
 name = "world-chain-proof-nitro-register"
 description = "Host-side on-chain registration of a Nitro enclave's ephemeral signing key"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

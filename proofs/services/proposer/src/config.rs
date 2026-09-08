@@ -11,10 +11,13 @@ pub const DEFAULT_BOND_MANAGER_INITIAL_SCAN_LIMIT: u64 = 1_000;
 /// Configuration for asynchronous proposer-bond management.
 #[derive(Debug, Clone)]
 pub struct BondManagerConfig {
-    /// Delay between factory scans and withdrawal attempts.
+    /// Delay between factory scans and settlement attempts.
     pub poll_interval: Duration,
     /// Number of most recently created games scanned on startup.
     pub initial_scan_limit: u64,
+    /// Maximum superseded proof-timeout resolution attempts per settlement pass.
+    /// Zero disables this cleanup without disabling existing settlement behavior.
+    pub max_retry_resolutions_per_tick: usize,
 }
 
 impl BondManagerConfig {
@@ -38,15 +41,15 @@ impl Default for BondManagerConfig {
         Self {
             poll_interval: DEFAULT_BOND_MANAGER_POLL_INTERVAL,
             initial_scan_limit: DEFAULT_BOND_MANAGER_INITIAL_SCAN_LIMIT,
+            max_retry_resolutions_per_tick: 1,
         }
     }
 }
 
 /// Configuration for the proposer loop.
 ///
-/// The proposal bond is deliberately absent: `DisputeGameFactory.create` reverts unless
-/// `msg.value` matches `initBonds(gameType)` exactly, so it is read per submission rather than
-/// captured at startup where an owner update would silently break every proposal.
+/// The proposal bond is deliberately absent: the vault reads it from the active implementation
+/// when creating a game and locking its proposer bond.
 #[derive(Debug, Clone)]
 pub struct ProposerConfig {
     /// Delay between periodic proposal attempts.

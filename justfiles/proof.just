@@ -19,17 +19,22 @@
 # Workflow phases owned by this repo:
 #   Phase 0a  proof-rollup-config-hash   – Compute rollup config hash from an L2 RPC
 #   Phase 1   proof-deploy-nitro         – Deploy Nitro attestation contracts
-#   Phase 1b  proof-deploy-mocks         – Deploy proof-lane test doubles (devnet only)
-#   Phase 2   proof-deploy-system        – Deploy proof system contracts
+#   Phase 1b  proof-deploy-mock-bond-token – Deploy a mintable bond token (devnet only)
+#   Phase 1c  proof-deploy-mocks         – Deploy proof-lane test doubles (devnet only)
+#   Phase 2   proof-deploy-system        – Deploy proof system implementation and vault
+#   Phase 2b  proof-fund-mock-bonds      – Fund persistent devnet bond accounts (devnet only)
 #   Phase 3a  proof-certmanager-prewarm  – Pre-warm CertManager with CA certs
 #   Phase 3b  proof-approve-pcrs         – Approve a PCR set on the verifier
-#   —         proof-activate-system      – Activate the registered WIP-1006 game
+#   —         proof-activate-system      – Validate, register, and activate WIP-1006
 #
 # Required env vars (varies by target):
 #   PRIVATE_KEY, OWNER, OWNER_KEY, L1_RPC_URL,
 #   WORLD_CHAIN_L2_CHAIN_ID, ROLLUP_CONFIG_HASH,
 #   AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT, TEE_IMAGE_ID,
-#   CERT_MANAGER_ADDRESS, NITRO_ATTESTATION_VERIFIER
+#   CERT_MANAGER_ADDRESS, NITRO_ATTESTATION_VERIFIER,
+#   DISPUTE_GAME_FACTORY, ANCHOR_STATE_REGISTRY, SYSTEM_CONFIG,
+#   OP_CHAIN_PROXY_ADMIN, BOND_TOKEN, DGF_OWNER_KEY,
+#   GUARDIAN_KEY (when switching the respected game type)
 #
 # PCR0/PCR1/PCR2 are inputs here, not discovered: measure the running enclave
 # with `just proof-pcrs <env>` in the infrastructure repo.
@@ -149,6 +154,27 @@ proof-deploy-nitro env="alphanet":
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
+# Phase 1b (devnet only) – Deploy only the mintable token for a real-verifier devnet.
+[doc("Phase 1b (devnet only) - Deploy a mintable ERC-20 proof bond token.")]
+[group('proof')]
+proof-deploy-mock-bond-token env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    if [ -n "$BROADCAST_FLAG" ]; then
+        export MOCK_BOND_TOKEN_DEPLOYMENT_OUT="deployments/{{env}}-mock-bond-token.json"
+    else
+        export MOCK_BOND_TOKEN_DEPLOYMENT_OUT="deployments/{{env}}-mock-bond-token.dryrun.json"
+    fi
+    echo "WARNING: deploying an unrestricted mintable mock bond token for '{{env}}'." >&2
+    cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployMockBondToken.s.sol:DeployMockBondToken \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
+
 # Writes deployments/<env>-proof-mocks.json for proof-deploy-system to consume.
 # MockRootIdVerifier accepts every proof: never run this against a chain whose
 # withdrawals matter.
@@ -170,18 +196,19 @@ proof-deploy-mocks env="alphanet":
     else
         export PROOF_MOCKS_DEPLOYMENT_OUT="deployments/{{env}}-proof-mocks.dryrun.json"
     fi
-    echo "WARNING: deploying MOCK proof verifiers (accept any proof) for '{{env}}'." >&2
+    echo "WARNING: deploying MOCK proof-system dependencies (accept-any verifiers and a mintable bond token) for '{{env}}'." >&2
     echo "Deploying proof mocks (deployment → $PROOF_MOCKS_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofMocks.s.sol:DeployProofMocks \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
-# The three proof-lane verifiers and the staking registry are required inputs — this
+# The three proof-lane verifiers are required inputs — this
 # script never deploys them, and rejects addresses that hold no code or that repeat
 # across lanes. Reuse the SP1 verifier when only the game-pinned vkeys change; rotate
 # its address only if the verifier gateway or proof interface changes. For a devnet,
 # run `proof-deploy-mocks` first and read the four addresses out of
-# deployments/<env>-proof-mocks.json.
-# Phase 2 – Deploy the proof system contracts and register game type 1006.
+# deployments/<env>-proof-mocks.json. An existing deployment record supplies the singleton
+# ERC-20 vault automatically during rotations unless ERC20_STAKING_VAULT is set explicitly.
+# Phase 2 – Deploy the proof system implementation and vault.
 [group('proof')]
 proof-deploy-system env="alphanet":
     #!/usr/bin/env bash
@@ -197,19 +224,25 @@ proof-deploy-system env="alphanet":
     : "${ANCHOR_STATE_REGISTRY:?ANCHOR_STATE_REGISTRY is required (op-deployer AnchorStateRegistryProxy)}"
     : "${SYSTEM_CONFIG:?SYSTEM_CONFIG is required (op-deployer SystemConfigProxy)}"
     : "${OP_CHAIN_PROXY_ADMIN:?OP_CHAIN_PROXY_ADMIN is required (op-deployer ProxyAdmin)}"
-    : "${OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY:?OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY is required}"
-    : "${DGF_OWNER_KEY:?DGF_OWNER_KEY is required}"
-    : "${PROTOCOL_FEE_RECIPIENT:?PROTOCOL_FEE_RECIPIENT is required (challenge-fee proceeds)}"
+    : "${BOND_TOKEN:?BOND_TOKEN is required}"
+    : "${PROTOCOL_FEE_RECIPIENT:?PROTOCOL_FEE_RECIPIENT is required (proof-timeout forfeitures)}"
     : "${VALIDITY_PROOF_VERIFIER:?VALIDITY_PROOF_VERIFIER is required (e.g. SP1ValidityVerifier; devnet: proof-deploy-mocks)}"
     : "${TEE_VERIFIER:?TEE_VERIFIER is required (e.g. NitroProofVerifier from proof-deploy-nitro)}"
     : "${SECURITY_COUNCIL_VERIFIER:?SECURITY_COUNCIL_VERIFIER is required (council attestation verifier)}"
     export CHALLENGE_PERIOD="${CHALLENGE_PERIOD:-86400}"
     export PROOF_PERIOD="${PROOF_PERIOD:-604800}"
     export PROPOSER_BOND="${PROPOSER_BOND:-10000000000000000}"
-    export CHALLENGER_BOND="${CHALLENGER_BOND:-1000000000000000}"
-    export CHALLENGE_FEE="${CHALLENGE_FEE:-100000000000000}"
+    export CHALLENGER_BOND="${CHALLENGER_BOND:-10000000000000000}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
-    export DELAYED_WETH_DELAY="${DELAYED_WETH_DELAY:-300}"
+    export ERC20_WITHDRAWAL_DELAY="${ERC20_WITHDRAWAL_DELAY:-300}"
+    DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-proof-system.json"
+    if [ -z "${ERC20_STAKING_VAULT:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
+        ERC20_STAKING_VAULT=$(jq -r '.erc20StakingVault // empty' "$DEPLOYMENTS_FILE")
+        export ERC20_STAKING_VAULT
+    fi
+    if [ -z "${ERC20_STAKING_VAULT:-}" ]; then
+        : "${OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY:?OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY is required for the first vault deployment}"
+    fi
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
@@ -217,14 +250,14 @@ proof-deploy-system env="alphanet":
     echo "Proof-system parameters:" >&2
     echo "  challenge period: $CHALLENGE_PERIOD seconds" >&2
     echo "  proof period: $PROOF_PERIOD seconds" >&2
-    echo "  proposer bond: $PROPOSER_BOND wei" >&2
-    echo "  challenger bond: $CHALLENGER_BOND wei" >&2
-    echo "  challenge fee: $CHALLENGE_FEE wei" >&2
+    echo "  proposer bond: $PROPOSER_BOND bond-token base units" >&2
+    echo "  challenger bond: $CHALLENGER_BOND bond-token base units" >&2
+    echo "  ERC-20 vault: ${ERC20_STAKING_VAULT:-new singleton}" >&2
     echo "  aggregation vkey: $AGGREGATION_VKEY" >&2
     echo "  range vkey commitment: $RANGE_VKEY_COMMITMENT" >&2
     echo "  TEE image ID: $TEE_IMAGE_ID" >&2
     # A dry run must never overwrite the record of a live deployment: the simulated game and
-    # WETH addresses are never deployed, so writing them to the real path silently replaces a
+    # contract addresses are never deployed, so writing them to the real path silently replaces a
     # true record with fictional addresses.
     if [ -n "$BROADCAST_FLAG" ]; then
         export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.json"
@@ -235,9 +268,38 @@ proof-deploy-system env="alphanet":
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
-# Activate the registered WIP-1006 implementation after validating its wiring and current anchor.
+# Phase 2b (devnet only) – Mint mock bond tokens and top up proof-system bond accounts.
+# The vault's deposit API credits selected accounts, so the funding operator does not need service
+# keys. Targets make the operation idempotent and account for tokens already returned by settled games.
+# Run this after deploying the vault and before starting the proposer or challenger.
+[doc("Phase 2b (devnet only) - Fund mock-token vault balances for proof-system bond accounts.")]
+[group('proof')]
+proof-fund-mock-bonds env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    : "${BOND_ACCOUNTS:?BOND_ACCOUNTS is required (comma-separated addresses)}"
+    SYSTEM_FILE="pkg/contracts/deployments/{{env}}-proof-system.json"
+    if [ -z "${ERC20_STAKING_VAULT:-}" ] && [ -f "$SYSTEM_FILE" ]; then
+        ERC20_STAKING_VAULT=$(jq -r '.erc20StakingVault // empty' "$SYSTEM_FILE")
+        export ERC20_STAKING_VAULT
+    fi
+    : "${ERC20_STAKING_VAULT:?ERC20_STAKING_VAULT is required (or deploy the proof system first)}"
+    export VAULT_BALANCE_TARGET="${VAULT_BALANCE_TARGET:-10000000000000000000000}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    echo "WARNING: minting unrestricted mock bond tokens for proof-system accounts on '{{env}}'." >&2
+    echo "  accounts: $BOND_ACCOUNTS" >&2
+    echo "  available vault balance target: $VAULT_BALANCE_TARGET base units per account" >&2
+    cd pkg/contracts && forge script scripts/devnet/FundProofBondAccounts.s.sol:FundProofBondAccounts \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
+
+# Register and activate the WIP-1006 implementation after validating its wiring and current anchor.
 # Set REQUIRE_FRESH_ANCHOR=true during a clean chain bootstrap.
-[doc("Activate the registered WIP-1006 implementation after validating its wiring.")]
+[doc("Validate, register, and activate a WIP-1006 implementation.")]
 [group('proof')]
 proof-activate-system env="alphanet":
     #!/usr/bin/env bash
@@ -246,15 +308,23 @@ proof-activate-system env="alphanet":
     : "${DISPUTE_GAME_FACTORY:?DISPUTE_GAME_FACTORY is required}"
     : "${ANCHOR_STATE_REGISTRY:?ANCHOR_STATE_REGISTRY is required}"
     : "${SYSTEM_CONFIG:?SYSTEM_CONFIG is required}"
-    : "${GUARDIAN_KEY:?GUARDIAN_KEY is required}"
+    : "${OP_CHAIN_PROXY_ADMIN:?OP_CHAIN_PROXY_ADMIN is required}"
+    : "${BOND_TOKEN:?BOND_TOKEN is required}"
+    : "${DGF_OWNER_KEY:?DGF_OWNER_KEY is required}"
+    DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-proof-system.json"
+    if [ -z "${GAME_IMPLEMENTATION:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
+        GAME_IMPLEMENTATION=$(jq -r '.gameImplementation // empty' "$DEPLOYMENTS_FILE")
+        export GAME_IMPLEMENTATION
+    fi
+    : "${GAME_IMPLEMENTATION:?GAME_IMPLEMENTATION is required (or deploy first)}"
     export REQUIRE_FRESH_ANCHOR="${REQUIRE_FRESH_ANCHOR:-false}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
     fi
-    echo "Activating WIP-1006 (require fresh anchor: $REQUIRE_FRESH_ANCHOR)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
+    echo "Registering and activating WIP-1006 implementation $GAME_IMPLEMENTATION (require fresh anchor: $REQUIRE_FRESH_ANCHOR)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
     cd pkg/contracts && forge script scripts/devnet/ActivateProofSystem.s.sol:ActivateProofSystem \
-        --rpc-url "$L1_RPC_URL" --private-key "$GUARDIAN_KEY" $BROADCAST_FLAG --slow
+        --rpc-url "$L1_RPC_URL" --private-key "$DGF_OWNER_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
 #

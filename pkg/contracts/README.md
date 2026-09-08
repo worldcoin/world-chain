@@ -10,11 +10,11 @@ This repository contains smart contracts for World Chain, including PBH (Priorit
 
 ## Proof System Bond Claims
 
-`MultiProofGame.resolve()` records the game outcome and assigns pull-based bond credit in the game type's OP Stack `DelayedWETH` contract. It does not transfer ETH during resolution.
+WIP-1006 proposal and challenge bonds use a deployment-selected token held one-to-one in the upgradeable `ERC20StakingVault`; World Chain configures WLD as that bond token. Participants deposit the token once, without leaving a standing allowance. The stock `DisputeGameFactory` remains unchanged and its type-1006 ETH initialization bond is zero. A proposer calls the stock factory directly; during `initialize` the vault authenticates the clone against the factory's deterministic deployment address and locks the bond from `gameCreator`'s available balance.
 
-`credit(recipient)` returns the amount assigned to `recipient`. `claimCredit(recipient)` is permissionless and always pays `recipient`: its first call unlocks the credit in `DelayedWETH`, and a call after the withdrawal delay transfers the funds. Automation must retain resolved games until both phases complete.
+`MultiProofGame.resolve()` records the outcome and payout credits without moving funds. After ASR finality, `closeGame()` selects normal or refund mode and atomically credits the complete game pot to recipients' reusable vault balances. Each account may later request a token withdrawal and transfer it after the vault delay; new requests reset the delay for the full pending amount.
 
-Every accepted challenge deducts the implementation's immutable `challengeFee` from the challenger bond and credits it to the immutable `protocolFeeRecipient`. The fee remains charged in both normal and refund settlement modes, preventing a proposer and challenger under common control from recycling the full bond while forcing an additional proof. The proposer bond must exceed the challenge fee, making a successful challenge gross-profitable before transaction costs.
+The vault is WIP-1006-only and supports old registered game implementations after upgrades. It exposes no administrative path for moving participant balances or extracting backing tokens directly. The DisputeGameFactory owner and vault ProxyAdmin owner must remain the same governance authority; new bond locks fail closed if they diverge.
 
 ## OP Stack Withdrawal Boundary
 
@@ -33,7 +33,7 @@ Blacklisting an individual game immediately makes it improper for Portal proofs.
 
 The full-stack withdrawal E2E test uses the real OP-deployer Portal, factory, and registry. It proves against an in-progress WIP-1006 game, verifies the proof-maturity and registry-finality delays, finalizes after `DEFENDER_WINS`, and checks that a blacklisted game is rejected.
 
-The devnet deployment registers `MultiProofGame` as game type `1006`, configures its bond and `DelayedWETH`, and changes the stock registry's respected game type. It deploys mock verifier and staking contracts and is not a production deployment procedure. A production activation must use real audited verifier dependencies and the audited OP governance process for registering and respecting the new game type; it does not upgrade or replace the factory or registry.
+The first devnet deployment creates the `MultiProofGame` implementation and its ERC-20 staking vault. The separate activation validates the complete wiring, sets the factory ETH bond to zero, registers game type `1006`, and changes the stock registry's respected game type when needed. Later game-implementation rotations must reuse the existing vault, preserving one capital pool across versions. The scripts deploy mock verifier contracts and are not a production deployment procedure. A production activation must use the intended canonical bond token, real audited verifier dependencies, and the audited OP governance process for registering and respecting the new game type; it does not upgrade or replace the factory or registry.
 
 ## PBH Contracts
 

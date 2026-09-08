@@ -311,8 +311,8 @@ thiserror = "2"
 strum = { version = "0.28", features = ["derive"] }
 cfg-if = "1"
 bytemuck = "1"
-semaphore-rs = { version = "0.5", features = ["depth_30"] }
-semaphore-rs-proof = "0.5"
+semaphore-rs = { version = "0.6", features = ["depth_30"] }
+semaphore-rs-proof = "0.6"
 clap = { version = "4", features = ["derive", "env"] }
 eyre = { version = "0.6", package = "color-eyre" }
 serde = { version = "1", features = ["derive"] }

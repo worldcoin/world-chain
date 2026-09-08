@@ -1,9 +1,8 @@
-use alloy_primitives::U256;
 use tracing::{info, warn};
 
 use crate::{BondManagerClient, BondManagerConfig, ChallengerError, OwnedGames};
 
-/// Discovers challenger-owned games and withdraws their resolved bond credits.
+/// Discovers challenger-owned games and settles their resolved bond pots.
 #[derive(Debug)]
 pub struct BondManager<E> {
     config: BondManagerConfig,
@@ -13,7 +12,7 @@ pub struct BondManager<E> {
 }
 
 impl<E> BondManager<E> {
-    /// Creates an empty bond manager. Its bounded recovery window is scanned on the first pass.
+    /// Creates an empty bond manager. Its bounded lookback window is scanned on the first pass.
     pub const fn new(
         config: BondManagerConfig,
         execution_provider: E,
@@ -75,55 +74,33 @@ where
         Ok(())
     }
 
-    /// Advances the two-phase bond claim on owned games and prunes fully settled ones.
-    ///
-    /// `MultiProofGame.claimCredit` first unlocks the credit in `DelayedWETH` and only
-    /// transfers it on a second call after the WETH delay, so a game stays owned until its
-    /// pending withdrawal is drained. Dropping it after the unlock would strand the bond.
-    pub async fn withdraw_credits(&self) -> Result<(), ChallengerError> {
+    /// Settles finalized owned games and prunes games whose complete pot is settled.
+    pub async fn settle_games(&self) -> Result<(), ChallengerError> {
         let games = self.owned_games.snapshot();
-        let now = self.execution_provider.latest_l1_timestamp().await?;
 
         for game in games {
             let result: Result<bool, ChallengerError> = async {
+                if self.execution_provider.is_game_settled(game).await? {
+                    world_chain_proof_metrics::increment_games_closed(
+                        "challenger",
+                        "already_settled",
+                    );
+                    return Ok(true);
+                }
                 let status = self.execution_provider.resolution_status(game).await?;
                 if !status.is_resolved() {
                     return Ok(false);
                 }
-                // `claimCredit` calls `closeGame`, which reverts until the registry's finality
-                // airgap has elapsed.
                 if !self.execution_provider.is_game_finalized(game).await? {
                     return Ok(false);
                 }
 
-                let credit = self.execution_provider.credit(game).await?;
-                if credit > U256::ZERO {
-                    let submission = self.execution_provider.claim_credit(game).await?;
-                    info!(
-                        game_address = %game,
-                        tx_hash = ?submission.tx_hash,
-                        amount = ?submission.amount,
-                        "unlocked challenger bond credits in DelayedWETH"
-                    );
-                    // Keep tracking: the unlocked amount still needs the second claim.
-                    return Ok(false);
-                }
-
-                let pending = self.execution_provider.pending_withdrawal(game).await?;
-                if pending.amount.is_zero() {
-                    // Nothing owed on this game; stop tracking it.
-                    return Ok(true);
-                }
-                if now < pending.unlock_at {
-                    return Ok(false);
-                }
-
-                let submission = self.execution_provider.claim_credit(game).await?;
+                let submission = self.execution_provider.close_game(game).await?;
+                world_chain_proof_metrics::increment_games_closed("challenger", "submitted");
                 info!(
                     game_address = %game,
                     tx_hash = ?submission.tx_hash,
-                    amount = ?submission.amount,
-                    "withdrew challenger bond credits"
+                    "settled challenger-owned game into reusable vault balances"
                 );
                 Ok(true)
             }
@@ -133,7 +110,7 @@ where
                 Ok(true) => self.owned_games.remove(game),
                 Ok(false) => {}
                 Err(error) => {
-                    warn!(%error, game_address = %game, "failed to process challenger bond credits");
+                    warn!(%error, game_address = %game, "failed to process challenger bond settlement");
                 }
             }
         }
@@ -141,7 +118,7 @@ where
         Ok(())
     }
 
-    /// Runs recent-game discovery and withdrawals forever.
+    /// Runs recent-game discovery and settlement forever.
     pub async fn run_forever(&mut self) -> Result<(), ChallengerError> {
         self.config.validate()?;
 
@@ -151,8 +128,8 @@ where
             if let Err(error) = self.scan_games().await {
                 warn!(%error, "bond-manager game scan failed; retrying on next tick");
             }
-            if let Err(error) = self.withdraw_credits().await {
-                warn!(%error, "bond-manager withdrawal pass failed; retrying on next tick");
+            if let Err(error) = self.settle_games().await {
+                warn!(%error, "bond-manager settlement pass failed; retrying on next tick");
             }
         }
     }

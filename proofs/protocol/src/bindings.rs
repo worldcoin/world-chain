@@ -63,7 +63,7 @@ sol! {
         function protocolFeeRecipient() external view returns (address);
         function disputeGameFactory() external view returns (address);
         function anchorStateRegistry() external view returns (address);
-        function weth() external view returns (address);
+        function bondVault() external view returns (address);
 
         // Proposal context.
         function rootId() external view returns (bytes32);
@@ -102,19 +102,31 @@ sol! {
             returns (bool resolvable, uint8 outcome, uint8 reason);
 
         // Mutating entry points.
-        function challenge() external payable returns (uint8 proposalStatus);
+        function challenge() external returns (uint8 proposalStatus);
         /// `proof` is the compact payload built by `encode_compact_proof`.
         function submitProofLane(bytes calldata proof) external returns (uint8 proposalStatus);
         function resolve() external returns (uint8 status);
         function closeGame() external;
-        function claimCredit(address recipient) external;
 
         // Bond settlement.
         function bondDistributionMode() external view returns (uint8);
         function totalBonds() external view returns (uint256);
         function normalModeCredit(address recipient) external view returns (uint256);
         function refundModeCredit(address recipient) external view returns (uint256);
-        function credit(address recipient) external view returns (uint256);
+    }
+
+    /// Singleton ERC-20 vault that locks and settles WIP-1006 proposal and challenge bonds.
+    #[sol(rpc)]
+    interface IERC20StakingVault {
+        event ProposerBondLocked(address indexed game, address indexed proposer, uint256 amount);
+        function disputeGameFactory() external view returns (address);
+        function token() external view returns (address);
+        function availableBalance(address account) external view returns (uint256 amount);
+        function gameBonds(address game)
+            external
+            view
+            returns (uint256 proposerBond, uint256 challengerBond, bool settled);
+        function deposit(address account, uint256 amount) external;
     }
 
     /// Stock OP Stack `AnchorStateRegistry`.
@@ -132,15 +144,5 @@ sol! {
         function isGameClaimValid(address game) external view returns (bool);
         function setAnchorState(address game) external;
         function paused() external view returns (bool);
-    }
-
-    /// Stock OP Stack `DelayedWETH`, the bond custody contract behind every game.
-    #[sol(rpc)]
-    interface IDelayedWETH {
-        function delay() external view returns (uint256);
-        function withdrawals(address owner, address recipient)
-            external
-            view
-            returns (uint256 amount, uint256 timestamp);
     }
 }

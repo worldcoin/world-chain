@@ -8,6 +8,7 @@ use anyhow::Context;
 use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
 use world_chain_proof_kona_host::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
+    is_witness_generation_timeout,
 };
 use world_chain_proof_protocol::ProofGameProvider;
 use world_chain_proof_sp1_host::{
@@ -563,7 +564,8 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
         end_block: u64,
         request: &ProofRequest,
     ) -> anyhow::Result<RangeProofRequest> {
-        let input = build_range_input(
+        let witness_collection_started_at = std::time::Instant::now();
+        let input = match build_range_input(
             &self.host,
             RangeWitnessRequest {
                 start_block,
@@ -573,7 +575,29 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
             },
         )
         .await
-        .context("failed to build SP1 range witness")?;
+        {
+            Ok(input) => {
+                world_chain_proof_metrics::record_witness_collection(
+                    "sp1",
+                    "success",
+                    witness_collection_started_at.elapsed(),
+                );
+                input
+            }
+            Err(error) => {
+                let outcome = if is_witness_generation_timeout(&error) {
+                    "timeout"
+                } else {
+                    "error"
+                };
+                world_chain_proof_metrics::record_witness_collection(
+                    "sp1",
+                    outcome,
+                    witness_collection_started_at.elapsed(),
+                );
+                return Err(error).context("failed to build SP1 range witness");
+            }
+        };
 
         let range_request = RangeProofRequest::from_witness_data(&input.witness)
             .context("failed to serialize SP1 range witness")?;

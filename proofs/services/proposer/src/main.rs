@@ -62,7 +62,7 @@ struct Cli {
     #[arg(long, env = "MAX_RESOLUTIONS_PER_TICK", default_value_t = 1)]
     max_resolutions_per_tick: usize,
 
-    /// Seconds between proposer-bond discovery and withdrawal passes.
+    /// Seconds between proposer-bond discovery and settlement passes.
     #[arg(
         long,
         env = "BOND_MANAGER_POLL_INTERVAL_SECONDS",
@@ -73,6 +73,14 @@ struct Cli {
     /// Number of recent factory games scanned when the bond manager starts.
     #[arg(long, env = "BOND_MANAGER_INITIAL_SCAN_LIMIT", default_value_t = 1_000)]
     bond_manager_initial_scan_limit: u64,
+
+    /// Maximum superseded proof-timeout resolution attempts per bond-manager pass; zero disables them.
+    #[arg(
+        long,
+        env = "BOND_MANAGER_MAX_RETRY_RESOLUTIONS_PER_TICK",
+        default_value_t = 1
+    )]
+    bond_manager_max_retry_resolutions_per_tick: usize,
 
     /// Number of confirmations to require after sending a tx onchain.
     #[arg(long, env = "CONFIRMATIONS", default_value_t = 5)]
@@ -137,9 +145,11 @@ async fn main() -> Result<()> {
     )
     .await
     .context("failed to bind the World Chain proof system")?;
+    contracts.refresh_vault_balance().await;
     let bond_manager_config = BondManagerConfig {
         poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
         initial_scan_limit: cli.bond_manager_initial_scan_limit,
+        max_retry_resolutions_per_tick: cli.bond_manager_max_retry_resolutions_per_tick,
     };
     let mut bond_manager = BondManager::new(bond_manager_config, contracts.clone());
     let output_roots = VerifyingConsensusProvider::new(
@@ -149,6 +159,7 @@ async fn main() -> Result<()> {
             .map(OptimismConsensusClient::new),
     );
     let registered = contracts.registered_lineage_config();
+    let bond_vault = contracts.bond_vault_address();
     let config = ProposerConfig {
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_resolutions_per_tick: cli.max_resolutions_per_tick,
@@ -161,6 +172,7 @@ async fn main() -> Result<()> {
         verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         dispute_game_factory = %cli.factory_address,
         anchor = %registered.anchor_registry,
+        bond_vault = %bond_vault,
         proposer = %proposer_address,
         domain_hash = %registered.domain_hash,
         block_interval = registered.block_interval,
