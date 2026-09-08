@@ -148,7 +148,7 @@ jobs:
           semaphore_build_script="$(find "${CARGO_HOME:-$HOME/.cargo}/registry/src" -path '*/semaphore-rs-0.5.4/build.rs' -print -quit)"
           test -n "$semaphore_build_script"
           perl -0pi -e 's#reqwest::blocking::get\(url\)#reqwest::blocking::Client::builder().danger_accept_invalid_certs(true).build().expect("Failed to create HTTP client").get(url).send()#' "$semaphore_build_script"
-          rg -q 'danger_accept_invalid_certs\(true\)' "$semaphore_build_script"
+          grep -Fq 'danger_accept_invalid_certs(true)' "$semaphore_build_script"
 
       - name: Build acceptance tests
         id: build
