@@ -1,5 +1,6 @@
 mod already_challenged_game_is_ignored;
 mod bad_proposal_is_challenged_and_invalidated;
+mod challenge_valid_game;
 mod invalid_game_with_invalid_parent;
 mod valid_game_with_invalid_parent;
 mod withdrawal;
