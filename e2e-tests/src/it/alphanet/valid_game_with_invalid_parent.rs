@@ -1,5 +1,6 @@
 use crate::it::utils::devnet::{
-    GAME_CHALLENGER_WINS, proof_system_client, wait_for_challenge_with_timeout,
+    GAME_CHALLENGER_WINS, INVALIDATION_REASON_INVALID_PARENT, INVALIDATION_REASON_PROOF_TIMEOUT,
+    proof_system_client, wait_for_challenge_with_timeout,
 };
 use alloy_eips::BlockId;
 use alloy_network::EthereumWallet;
@@ -109,17 +110,8 @@ async fn wait_for_challenger() {
     // assert defender is not defending this game
     let proof_bitmap = game_instance.proofBitmap().call().await.unwrap();
     assert_eq!(proof_bitmap, 0);
-    // wait for the 2nd game to be challenged
-    let timeout = Duration::from_secs(10);
-    let second_game_addr = proposal_submissions[1].game_address;
-    let game_instance = IMultiProofGameInstance::new(second_game_addr, &l1_provider);
-    let challenger_addr = wait_for_challenge_with_timeout(&game_instance, timeout)
-        .await
-        .unwrap();
-    println!("challenger address of 2nd game: {challenger_addr}");
-    // assert defender is not defending this game
-    let proof_bitmap = game_instance.proofBitmap().call().await.unwrap();
-    assert_eq!(proof_bitmap, 0);
+    // note that the 2nd child game won't be challenged because it contains a valid root claim.
+    // It will still end up invalidated with `INVALID_PARENT` as invalidation reason.
 }
 
 #[tokio::test]
@@ -158,7 +150,19 @@ async fn wait_for_challenger_wins() {
     let first_game_instance = IMultiProofGameInstance::new(first_game_addr, &l1_provider);
     let status = first_game_instance.status().call().await.unwrap();
     assert_eq!(status, GAME_CHALLENGER_WINS);
+    let invalidation_reason = first_game_instance
+        .invalidationReason()
+        .call()
+        .await
+        .unwrap();
+    assert_eq!(invalidation_reason, INVALIDATION_REASON_PROOF_TIMEOUT);
     // assert that the 2nd game has resolved `CHALLENGER_WINS`
     let status = second_game_instance.status().call().await.unwrap();
     assert_eq!(status, GAME_CHALLENGER_WINS);
+    let invalidation_reason = second_game_instance
+        .invalidationReason()
+        .call()
+        .await
+        .unwrap();
+    assert_eq!(invalidation_reason, INVALIDATION_REASON_INVALID_PARENT);
 }
