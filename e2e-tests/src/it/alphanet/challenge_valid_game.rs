@@ -1,5 +1,6 @@
 //! A valid game that gets challenged should still be able to end up `DEFENDER_WINS`.
 
+use crate::it::utils::devnet::{GAME_DEFENDER_WINS, GAME_IN_PROGRESS};
 use alloy_network::EthereumWallet;
 use alloy_primitives::Address;
 use alloy_provider::ProviderBuilder;
@@ -9,11 +10,6 @@ use std::str::FromStr;
 use world_chain_proof_protocol::{
     ConsensusProvider, IDisputeGameFactory::IDisputeGameFactoryInstance,
     IMultiProofGame::IMultiProofGameInstance, OptimismConsensusClient,
-};
-
-use crate::it::utils::{
-    bindings::IFaultDisputeGame::GameStatus::{DEFENDER_WINS, IN_PROGRESS},
-    devnet::{GAME_DEFENDER_WINS, GAME_IN_PROGRESS},
 };
 
 #[tokio::test]
