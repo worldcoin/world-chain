@@ -1,7 +1,7 @@
 //! Range proofs are produced in `Compressed` mode so the aggregation guest can recursively
 //! verify them; the aggregation proof mode is configurable (Groth16 for on-chain verification).
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{SuccinctProverError, WorldSuccinctProver};
 use alloy_primitives::{B256, U256};
@@ -16,8 +16,11 @@ use sp1_sdk::{
         signer::NetworkSigner,
     },
 };
+use tokio::time::MissedTickBehavior;
 use world_chain_proof_core::types::AggregationInputs;
 use world_chain_proof_sp1_types::{AggregationProofRequest, RangeProofRequest, Sp1ProofRequest};
+
+const LOCAL_LIMIT_ESTIMATION_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
 /// [`WorldSuccinctProver`] network implementation over the sp1-sdk network prover.
 pub struct NetworkSuccinctProver {
@@ -204,6 +207,7 @@ impl NetworkSuccinctProver {
     }
 
     async fn request_range_proof(&self, request: RangeProofRequest) -> anyhow::Result<String> {
+        let witness_bytes = request.witness_rkyv.len();
         let mut stdin = SP1Stdin::new();
         stdin.write_vec(request.witness_rkyv);
 
@@ -221,10 +225,41 @@ impl NetworkSuccinctProver {
             proof_request = proof_request.timeout(proof_timeout);
         }
 
-        let backend_session_id = proof_request
-            .request()
-            .await
-            .context("request range proving failed")?;
+        let (backend_session_id, limit_estimation_elapsed) = if self.limits.is_none() {
+            tracing::info!(
+                witness_bytes,
+                heartbeat_interval_seconds = LOCAL_LIMIT_ESTIMATION_HEARTBEAT_INTERVAL.as_secs(),
+                "starting local SP1 range limit simulation"
+            );
+            let started_at = Instant::now();
+            let request_future = proof_request.request();
+            tokio::pin!(request_future);
+            let mut heartbeat = tokio::time::interval(LOCAL_LIMIT_ESTIMATION_HEARTBEAT_INTERVAL);
+            heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            heartbeat.tick().await;
+
+            let result = loop {
+                tokio::select! {
+                    result = &mut request_future => break result,
+                    _ = heartbeat.tick() => tracing::info!(
+                        witness_bytes,
+                        elapsed_seconds = started_at.elapsed().as_secs(),
+                        "local SP1 range limit simulation still running"
+                    ),
+                }
+            };
+            (result, Some(started_at.elapsed()))
+        } else {
+            (proof_request.request().await, None)
+        };
+        let backend_session_id = backend_session_id.context("request range proving failed")?;
+        if let Some(elapsed) = limit_estimation_elapsed {
+            tracing::info!(
+                witness_bytes,
+                elapsed_seconds = elapsed.as_secs(),
+                "local SP1 range limit-estimation request completed"
+            );
+        }
 
         Ok(backend_session_id.to_string())
     }
@@ -233,6 +268,7 @@ impl NetworkSuccinctProver {
         &self,
         request: AggregationProofRequest,
     ) -> anyhow::Result<String> {
+        let range_count = request.inputs.transition_public_values.len();
         let mut stdin = SP1Stdin::new();
         let range_vk = self.range_pk.verifying_key().vk.clone();
         for proof_bytes in &request.range_proofs {
@@ -263,10 +299,41 @@ impl NetworkSuccinctProver {
             proof_request = proof_request.timeout(proof_timeout);
         }
 
-        let backend_session_id = proof_request
-            .request()
-            .await
-            .context("aggregation proving failed")?;
+        let (backend_session_id, limit_estimation_elapsed) = if self.limits.is_none() {
+            tracing::info!(
+                range_count,
+                heartbeat_interval_seconds = LOCAL_LIMIT_ESTIMATION_HEARTBEAT_INTERVAL.as_secs(),
+                "starting local SP1 aggregation limit simulation"
+            );
+            let started_at = Instant::now();
+            let request_future = proof_request.request();
+            tokio::pin!(request_future);
+            let mut heartbeat = tokio::time::interval(LOCAL_LIMIT_ESTIMATION_HEARTBEAT_INTERVAL);
+            heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            heartbeat.tick().await;
+
+            let result = loop {
+                tokio::select! {
+                    result = &mut request_future => break result,
+                    _ = heartbeat.tick() => tracing::info!(
+                        range_count,
+                        elapsed_seconds = started_at.elapsed().as_secs(),
+                        "local SP1 aggregation limit simulation still running"
+                    ),
+                }
+            };
+            (result, Some(started_at.elapsed()))
+        } else {
+            (proof_request.request().await, None)
+        };
+        let backend_session_id = backend_session_id.context("aggregation proving failed")?;
+        if let Some(elapsed) = limit_estimation_elapsed {
+            tracing::info!(
+                range_count,
+                elapsed_seconds = elapsed.as_secs(),
+                "local SP1 aggregation limit-estimation request completed"
+            );
+        }
 
         Ok(backend_session_id.to_string())
     }

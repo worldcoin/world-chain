@@ -22,6 +22,8 @@
 
 #![cfg(target_os = "linux")]
 
+use std::time::Instant;
+
 use alloy_primitives::{B256, Bytes, keccak256};
 use alloy_sol_types::SolValue;
 use anyhow::{Context, bail};
@@ -109,13 +111,12 @@ where
         let prover = NitroProver::new(endpoint, self.config.expected_pcrs);
 
         info!(
+            proof_id = %request.id(),
             start_block,
             end_block = request.l2_block_number,
-            l1_rpc = %self.config.online.l1_rpc,
-            l2_rpc = %self.config.online.l2_rpc,
             "collecting witness data for range"
         );
-        let witness_collection_started_at = std::time::Instant::now();
+        let witness_collection_started_at = Instant::now();
         let input = match build_range_input(
             &self.config.online,
             RangeWitnessRequest {
@@ -154,6 +155,7 @@ where
             .context("witness serialize")?;
 
         info!(
+            proof_id = %request.id(),
             start_block,
             end_block = request.l2_block_number,
             duration_secs = witness_collection_started_at.elapsed().as_secs_f64(),
@@ -161,10 +163,50 @@ where
             "witness data collection complete"
         );
 
-        let artifact = prover
-            .prove_range(nitro_request)
-            .await
-            .context("nitro enclave proving failed")?;
+        info!(
+            proof_id = %request.id(),
+            start_block,
+            end_block = request.l2_block_number,
+            "requesting Nitro enclave range proof"
+        );
+        let enclave_proving_started_at = Instant::now();
+        let artifact = match prover.prove_range(nitro_request).await {
+            Ok(artifact) => {
+                let duration = enclave_proving_started_at.elapsed();
+                world_chain_proof_metrics::record_proof_phase_duration(
+                    "nitro",
+                    "enclave_proving",
+                    "success",
+                    duration,
+                );
+                tracing::info!(
+                    proof_id = %request.id(),
+                    start_block,
+                    end_block = request.l2_block_number,
+                    duration_secs = duration.as_secs_f64(),
+                    "Nitro enclave range proof complete"
+                );
+                artifact
+            }
+            Err(error) => {
+                let duration = enclave_proving_started_at.elapsed();
+                world_chain_proof_metrics::record_proof_phase_duration(
+                    "nitro",
+                    "enclave_proving",
+                    "error",
+                    duration,
+                );
+                tracing::error!(
+                    proof_id = %request.id(),
+                    start_block,
+                    end_block = request.l2_block_number,
+                    duration_secs = duration.as_secs_f64(),
+                    error = %error,
+                    "Nitro enclave range proof failed"
+                );
+                return Err(error).context("nitro enclave proving failed");
+            }
+        };
 
         if artifact.transition_public_values.l2PostRoot != request.root_claim {
             bail!(
