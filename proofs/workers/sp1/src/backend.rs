@@ -1,6 +1,9 @@
 //! SP1 validity-proof backend for the defender's [`ProofWorker`].
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use alloy_primitives::B256;
 use alloy_sol_types::SolValue;
@@ -225,9 +228,16 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
         if let Some(stark_session) = self.get_session(job, SessionType::Stark).await? {
             let plan = RangePlan::decode(&stark_session.backend_session_id, start_block, end_block);
             if plan.covers(start_block, end_block) {
-                tracing::debug!(
+                let submitted_ranges = plan
+                    .ranges
+                    .iter()
+                    .filter(|range| range.session_id.is_some())
+                    .count();
+                tracing::info!(
                     proof_id = %request.id(),
                     ranges = plan.ranges.len(),
+                    submitted_ranges,
+                    pending_ranges = plan.ranges.len() - submitted_ranges,
                     "resuming recorded SP1 range plan"
                 );
                 return Ok(plan);
@@ -283,17 +293,111 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
                 if plan.ranges[index].session_id.is_some() {
                     continue;
                 }
-                let (range_start, range_end) =
-                    (plan.ranges[index].start_block, plan.ranges[index].end_block);
-                let range_request = self
+                let range = &plan.ranges[index];
+                let (range_start, range_end) = (range.start_block, range.end_block);
+                let splits = range.splits;
+                tracing::info!(
+                    proof_id = %request.id(),
+                    start_block = range_start,
+                    end_block = range_end,
+                    splits,
+                    "building SP1 range witness"
+                );
+                let witness_started_at = Instant::now();
+                let range_request = match self
                     .build_range_request(range_start, range_end, request)
                     .await
-                    .context("failed to build range proof request")?;
-                let session_id = self
+                {
+                    Ok(range_request) => {
+                        let duration = witness_started_at.elapsed();
+                        world_chain_proof_metrics::record_witness_collection(
+                            "sp1", "success", duration,
+                        );
+                        tracing::info!(
+                            proof_id = %request.id(),
+                            start_block = range_start,
+                            end_block = range_end,
+                            splits,
+                            witness_bytes = range_request.witness_rkyv.len(),
+                            duration_secs = duration.as_secs_f64(),
+                            "SP1 range witness complete"
+                        );
+                        range_request
+                    }
+                    Err(error) => {
+                        let duration = witness_started_at.elapsed();
+                        let outcome = if is_witness_generation_timeout(&error) {
+                            "timeout"
+                        } else {
+                            "error"
+                        };
+                        world_chain_proof_metrics::record_witness_collection(
+                            "sp1", outcome, duration,
+                        );
+                        tracing::error!(
+                            proof_id = %request.id(),
+                            start_block = range_start,
+                            end_block = range_end,
+                            splits,
+                            duration_secs = duration.as_secs_f64(),
+                            error = %error,
+                            "SP1 range witness failed"
+                        );
+                        return Err(error).context("failed to build range proof request");
+                    }
+                };
+                tracing::info!(
+                    proof_id = %request.id(),
+                    start_block = range_start,
+                    end_block = range_end,
+                    splits,
+                    "submitting SP1 range proof request"
+                );
+                let submission_started_at = Instant::now();
+                let session_id = match self
                     .prover
                     .submit(Sp1ProofRequest::Range(range_request))
                     .await
-                    .context("failed to submit range proof")?;
+                {
+                    Ok(session_id) => {
+                        let duration = submission_started_at.elapsed();
+                        world_chain_proof_metrics::record_proof_phase_duration(
+                            "sp1",
+                            "range_submission",
+                            "success",
+                            duration,
+                        );
+                        tracing::info!(
+                            proof_id = %request.id(),
+                            start_block = range_start,
+                            end_block = range_end,
+                            splits,
+                            backend_session_id = %session_id,
+                            duration_secs = duration.as_secs_f64(),
+                            "SP1 range proof request submitted"
+                        );
+                        session_id
+                    }
+                    Err(error) => {
+                        let duration = submission_started_at.elapsed();
+                        world_chain_proof_metrics::record_proof_phase_duration(
+                            "sp1",
+                            "range_submission",
+                            "error",
+                            duration,
+                        );
+                        tracing::error!(
+                            proof_id = %request.id(),
+                            start_block = range_start,
+                            end_block = range_end,
+                            splits,
+                            duration_secs = duration.as_secs_f64(),
+                            error = %error,
+                            "SP1 range proof request failed"
+                        );
+                        return Err(error).context("failed to submit range proof");
+                    }
+                };
                 plan.ranges[index].session_id = Some(session_id);
                 self.persist_plan(job, plan, BackendSessionStatus::Running, None)
                     .await?;
@@ -314,12 +418,56 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
                 .clone()
                 .context("planned range lost its session id before waiting")?;
 
+            tracing::info!(
+                proof_id = %request.id(),
+                start_block = range.start_block,
+                end_block = range.end_block,
+                splits = range.splits,
+                backend_session_id = %session_id,
+                "waiting for SP1 range proof"
+            );
+            let wait_started_at = Instant::now();
             let error = match self.prover.wait(&session_id).await {
                 Ok(proof) => {
+                    let duration = wait_started_at.elapsed();
+                    world_chain_proof_metrics::record_proof_phase_duration(
+                        "sp1",
+                        "range_wait",
+                        "success",
+                        duration,
+                    );
+                    tracing::info!(
+                        proof_id = %request.id(),
+                        start_block = range.start_block,
+                        end_block = range.end_block,
+                        splits = range.splits,
+                        backend_session_id = %session_id,
+                        duration_secs = duration.as_secs_f64(),
+                        "SP1 range proof fulfilled"
+                    );
                     artifacts.insert(key, range_artifact_from_sp1_proof(&proof)?);
                     continue;
                 }
-                Err(error) => error,
+                Err(error) => {
+                    let duration = wait_started_at.elapsed();
+                    world_chain_proof_metrics::record_proof_phase_duration(
+                        "sp1",
+                        "range_wait",
+                        "error",
+                        duration,
+                    );
+                    tracing::warn!(
+                        proof_id = %request.id(),
+                        start_block = range.start_block,
+                        end_block = range.end_block,
+                        splits = range.splits,
+                        backend_session_id = %session_id,
+                        duration_secs = duration.as_secs_f64(),
+                        error = %error,
+                        "SP1 range proof wait failed"
+                    );
+                    error
+                }
             };
             match error.downcast_ref::<SuccinctProverError>() {
                 Some(session_error) if session_error.should_resubmit() => {
@@ -432,8 +580,27 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
         session_id: String,
     ) -> anyhow::Result<Option<AggregationProofArtifact>> {
         let session_type = SessionType::Snark;
+        tracing::info!(
+            proof_id = %job.request.id(),
+            backend_session_id = %session_id,
+            "waiting for SP1 aggregation proof"
+        );
+        let wait_started_at = Instant::now();
         match self.prover.wait(&session_id).await {
             Ok(proof) => {
+                let duration = wait_started_at.elapsed();
+                world_chain_proof_metrics::record_proof_phase_duration(
+                    "sp1",
+                    "aggregation_wait",
+                    "success",
+                    duration,
+                );
+                tracing::info!(
+                    proof_id = %job.request.id(),
+                    backend_session_id = %session_id,
+                    duration_secs = duration.as_secs_f64(),
+                    "SP1 aggregation proof fulfilled"
+                );
                 let artifact = aggregation_artifact_from_sp1_proof(&proof)?;
                 self.record_session(
                     job,
@@ -446,6 +613,20 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
                 Ok(Some(artifact))
             }
             Err(error) => {
+                let duration = wait_started_at.elapsed();
+                world_chain_proof_metrics::record_proof_phase_duration(
+                    "sp1",
+                    "aggregation_wait",
+                    "error",
+                    duration,
+                );
+                tracing::warn!(
+                    proof_id = %job.request.id(),
+                    backend_session_id = %session_id,
+                    duration_secs = duration.as_secs_f64(),
+                    error = %error,
+                    "SP1 aggregation proof wait failed"
+                );
                 self.handle_wait_error(job, session_type, &session_id, error)
                     .await?;
                 Ok(None)
@@ -502,13 +683,58 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
                 self.wait_before_resubmission(SessionType::Snark, resubmission, delay)
                     .await;
             }
-            let session_id = self
+            tracing::info!(
+                proof_id = %job.request.id(),
+                ranges = request.range_proofs.len(),
+                resubmission,
+                "submitting SP1 aggregation proof request"
+            );
+            let submission_started_at = Instant::now();
+            let session_id = match self
                 .submit_session(
                     job,
                     SessionType::Snark,
                     Sp1ProofRequest::Aggregation(request.clone()),
                 )
-                .await?;
+                .await
+            {
+                Ok(session_id) => {
+                    let duration = submission_started_at.elapsed();
+                    world_chain_proof_metrics::record_proof_phase_duration(
+                        "sp1",
+                        "aggregation_submission",
+                        "success",
+                        duration,
+                    );
+                    tracing::info!(
+                        proof_id = %job.request.id(),
+                        ranges = request.range_proofs.len(),
+                        resubmission,
+                        backend_session_id = %session_id,
+                        duration_secs = duration.as_secs_f64(),
+                        "SP1 aggregation proof request submitted"
+                    );
+                    session_id
+                }
+                Err(error) => {
+                    let duration = submission_started_at.elapsed();
+                    world_chain_proof_metrics::record_proof_phase_duration(
+                        "sp1",
+                        "aggregation_submission",
+                        "error",
+                        duration,
+                    );
+                    tracing::error!(
+                        proof_id = %job.request.id(),
+                        ranges = request.range_proofs.len(),
+                        resubmission,
+                        duration_secs = duration.as_secs_f64(),
+                        error = %error,
+                        "SP1 aggregation proof request failed"
+                    );
+                    return Err(error);
+                }
+            };
             if let Some(artifact) = self.wait_for_aggregation(job, session_id).await? {
                 return Ok(artifact);
             }
