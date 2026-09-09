@@ -310,9 +310,6 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
                 {
                     Ok(range_request) => {
                         let duration = witness_started_at.elapsed();
-                        world_chain_proof_metrics::record_witness_collection(
-                            "sp1", "success", duration,
-                        );
                         tracing::info!(
                             proof_id = %request.id(),
                             start_block = range_start,
@@ -326,14 +323,6 @@ impl<P: WorldSuccinctProver + Send + Sync, G: ProofGameProvider> Sp1Backend<P, G
                     }
                     Err(error) => {
                         let duration = witness_started_at.elapsed();
-                        let outcome = if is_witness_generation_timeout(&error) {
-                            "timeout"
-                        } else {
-                            "error"
-                        };
-                        world_chain_proof_metrics::record_witness_collection(
-                            "sp1", outcome, duration,
-                        );
                         tracing::error!(
                             proof_id = %request.id(),
                             start_block = range_start,
