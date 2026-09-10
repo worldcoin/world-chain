@@ -15,6 +15,3 @@ Workers stop local work on their next heartbeat; already submitted remote provin
 cancelled at the backend. A new defender request can resume a cancelled proof using existing backend
 sessions without consuming a failure retry, for example after a supported game is challenged or
 an L1 reorg.
-
-Deploy the updated defender before enabling cleanup: it understands the new `Cancelled` request
-status. Database migrations run automatically when prover-service starts.
