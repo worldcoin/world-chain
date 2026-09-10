@@ -1,6 +1,9 @@
 use alphanet_withdrawal::cli::Cli;
 use clap::Parser;
 
-fn main() {
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
     let cli = Cli::parse();
+    cli.run().await?;
+    Ok(())
 }

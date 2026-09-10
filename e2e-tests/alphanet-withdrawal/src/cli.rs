@@ -11,7 +11,7 @@ pub struct Cli {
 
 impl Cli {
     /// Run the cli binary to completion.
-    pub fn run(&self) -> eyre::Result<()> {
-        self.command.run()
+    pub async fn run(&self) -> eyre::Result<()> {
+        self.command.run().await
     }
 }

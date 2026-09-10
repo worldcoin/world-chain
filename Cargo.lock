@@ -1334,9 +1334,17 @@ dependencies = [
 name = "alphanet-withdrawal"
 version = "2.4.3"
 dependencies = [
+ "alloy-contract",
+ "alloy-network 2.1.1",
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer-local 2.1.1",
+ "alloy-sol-types",
  "clap",
  "color-eyre",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

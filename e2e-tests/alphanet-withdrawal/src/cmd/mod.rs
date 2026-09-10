@@ -1,6 +1,10 @@
 use crate::args::{FinalizeArgs, InitArgs, ProveArgs};
 use clap::Subcommand;
 
+mod finalize;
+mod init;
+mod prove;
+
 /// Commands for an end-to-end L2->L1 withdrawal flow.
 ///
 /// The workflow is:
@@ -25,18 +29,11 @@ pub enum Command {
 
 impl Command {
     /// Run the command to completion.
-    pub fn run(&self) -> eyre::Result<()> {
+    pub async fn run(&self) -> eyre::Result<()> {
         match self {
-            Self::Init(init_args) => {
-                
-            }
-            Self::Prove(prove_args) => {
-
-            }
-            Self::Finalize(finalize_args) => {
-
-            }
+            Self::Init(args) => init::run(args).await,
+            Self::Prove(args) => prove::run(args).await,
+            Self::Finalize(args) => finalize::run(args).await,
         }
-        Ok(())
     }
 }

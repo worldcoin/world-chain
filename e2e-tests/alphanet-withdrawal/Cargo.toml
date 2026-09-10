@@ -13,7 +13,15 @@ workspace = true
 [dependencies]
 # alloy
 alloy-primitives.workspace = true
+alloy-provider.workspace = true
+alloy-signer-local.workspace = true
+alloy-network.workspace = true
+alloy-sol-types.workspace = true
+alloy-contract.workspace = true
 
 # misc
 clap.workspace = true
 eyre.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
