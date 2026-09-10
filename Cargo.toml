@@ -254,7 +254,10 @@ alloy-trie = { version = "0.9.4", default-features = false, features = [
 aws-config = { version = "1", default-features = false, features = [
     "rt-tokio",
     "rustls",
+    "credentials-process",
+    "sso",
 ] }
+aws-credential-types = { version = "1", default-features = false }
 aws-sdk-kms = { version = "1", default-features = false, features = [
     "rt-tokio",
     "rustls",
@@ -262,6 +265,8 @@ aws-sdk-kms = { version = "1", default-features = false, features = [
 aws-sdk-s3 = { version = "1", default-features = false, features = [
     "rt-tokio",
     "rustls",
+    "default-https-client",
+    "http-1x",
 ] }
 
 # revm

@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use eyre::eyre::{OptionExt, bail, eyre};
+use aws_credential_types::provider::ProvideCredentials;
+use eyre::eyre::{Context, OptionExt, bail};
 use serde::{Serialize, de::DeserializeOwned};
 
 /// Byte-oriented blob store used for withdrawal handoff JSON.
@@ -39,12 +40,12 @@ impl BlobStore for S3Store {
             .key(key)
             .send()
             .await
-            .map_err(|err| eyre!("failed to get s3://{}/{}: {err}", self.bucket, key))?;
+            .wrap_err_with(|| format!("failed to get s3://{}/{}", self.bucket, key))?;
         let bytes = object
             .body
             .collect()
             .await
-            .map_err(|err| eyre!("failed to read s3://{}/{} body: {err}", self.bucket, key))?
+            .wrap_err_with(|| format!("failed to read s3://{}/{} body", self.bucket, key))?
             .into_bytes()
             .to_vec();
         Ok(bytes)
@@ -59,7 +60,7 @@ impl BlobStore for S3Store {
             .body(bytes.to_vec().into())
             .send()
             .await
-            .map_err(|err| eyre!("failed to put s3://{}/{}: {err}", self.bucket, key))?;
+            .wrap_err_with(|| format!("failed to put s3://{}/{}", self.bucket, key))?;
         Ok(())
     }
 }
@@ -82,6 +83,21 @@ pub async fn open(location: &str) -> eyre::Result<(Box<dyn BlobStore>, String)> 
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .load()
             .await;
+        if config.region().is_none() {
+            bail!(
+                "AWS region not configured; set AWS_REGION or AWS_DEFAULT_REGION \
+                 (needed for s3:// locations)"
+            );
+        }
+        // Resolve credentials early so missing AWS_PROFILE / expired SSO is obvious,
+        // instead of a later opaque "dispatch failure" from IMDS fallback.
+        if let Some(provider) = config.credentials_provider() {
+            provider.provide_credentials().await.wrap_err(
+                "AWS credentials unavailable; set AWS_PROFILE to an SSO profile \
+                 (e.g. tfh-crypto-dev-poweruseraccess) and run \
+                 `aws sso login --profile <profile>`",
+            )?;
+        }
         let store = S3Store {
             client: aws_sdk_s3::Client::new(&config),
             bucket: bucket.to_string(),
