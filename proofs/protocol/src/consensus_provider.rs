@@ -59,6 +59,7 @@ impl ConsensusError {
 pub struct OptimismConsensusClient {
     client: reqwest::Client,
     rpc_url: String,
+    endpoint: &'static str,
 }
 
 impl OptimismConsensusClient {
@@ -67,7 +68,14 @@ impl OptimismConsensusClient {
         Self {
             client: reqwest::Client::new(),
             rpc_url: rpc_url.into(),
+            endpoint: RPC_ENDPOINT_PRIMARY,
         }
+    }
+
+    /// Assigns the stable metric role for this endpoint.
+    pub const fn with_endpoint(mut self, endpoint: &'static str) -> Self {
+        self.endpoint = endpoint;
+        self
     }
 
     async fn request<T>(
@@ -82,7 +90,7 @@ impl OptimismConsensusClient {
         let result = self.request_inner(method, params, missing_result).await;
         record_rpc_request(
             RPC_TARGET_L2_CONSENSUS,
-            RPC_ENDPOINT_PRIMARY,
+            self.endpoint,
             method,
             result.is_ok(),
         );

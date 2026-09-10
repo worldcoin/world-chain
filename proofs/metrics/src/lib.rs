@@ -23,6 +23,8 @@ pub const RPC_TARGET_L2_CONSENSUS: &str = "l2_consensus";
 pub const RPC_ENDPOINT_PRIMARY: &str = "primary";
 /// Fallback RPC endpoint role label.
 pub const RPC_ENDPOINT_FALLBACK: &str = "fallback";
+/// Verifying RPC endpoint role label.
+pub const RPC_ENDPOINT_VERIFYING: &str = "verifying";
 
 /// Current transaction-sending wallet balance in ETH.
 pub const METRICS_WALLET_BALANCE_ETH: &str = "wallet.balance_eth";

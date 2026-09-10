@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use clap::{ArgGroup, Parser};
 use tracing::info;
 use url::Url;
+use world_chain_proof_metrics::RPC_ENDPOINT_VERIFYING;
 use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
 use world_chain_proof_tx_signer::build_transaction_signer;
 use world_chain_proposer::{
@@ -167,7 +168,7 @@ async fn main() -> Result<()> {
         OptimismConsensusClient::new(cli.output_root_rpc.clone()),
         cli.verifying_output_root_rpc
             .clone()
-            .map(OptimismConsensusClient::new),
+            .map(|url| OptimismConsensusClient::new(url).with_endpoint(RPC_ENDPOINT_VERIFYING)),
     );
     let registered = contracts.registered_lineage_config();
     let bond_vault = contracts.bond_vault_address();

@@ -17,6 +17,7 @@ use url::Url;
 use world_chain_defender::{
     AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig, WorldChainDefender,
 };
+use world_chain_proof_metrics::RPC_ENDPOINT_VERIFYING;
 use world_chain_proof_protocol::{
     IDisputeGameFactory, IERC20StakingVault, OptimismConsensusClient, VerifyingConsensusProvider,
     read_registered_bond_vault,
@@ -181,7 +182,7 @@ async fn main() -> Result<()> {
         OptimismConsensusClient::new(cli.output_root_rpc.clone()),
         cli.verifying_output_root_rpc
             .clone()
-            .map(OptimismConsensusClient::new),
+            .map(|url| OptimismConsensusClient::new(url).with_endpoint(RPC_ENDPOINT_VERIFYING)),
     );
     let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;

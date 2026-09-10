@@ -19,6 +19,7 @@ use world_chain_challenger::{
     DEFAULT_GAME_SCAN_LOOKBACK, DEFAULT_L1_TX_CONFIRMATIONS, OwnedGames, ResolutionManager,
     ResolutionManagerConfig, WorldChainChallenger,
 };
+use world_chain_proof_metrics::RPC_ENDPOINT_VERIFYING;
 use world_chain_proof_protocol::{OptimismConsensusClient, VerifyingConsensusProvider};
 use world_chain_proof_tx_signer::build_transaction_signer;
 
@@ -198,7 +199,7 @@ async fn main() -> Result<()> {
         OptimismConsensusClient::new(cli.output_root_rpc.clone()),
         cli.verifying_output_root_rpc
             .clone()
-            .map(OptimismConsensusClient::new),
+            .map(|url| OptimismConsensusClient::new(url).with_endpoint(RPC_ENDPOINT_VERIFYING)),
     );
     let config = ChallengerConfig {
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
