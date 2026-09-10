@@ -1,5 +1,5 @@
-use alphanet_withdrawal::cli::Cli;
 use clap::Parser;
+use e2e_withdrawal::cli::Cli;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {

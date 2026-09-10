@@ -1331,25 +1331,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alphanet-withdrawal"
-version = "2.4.3"
-dependencies = [
- "alloy-consensus 2.1.1",
- "alloy-contract",
- "alloy-eips 2.1.1",
- "alloy-network 2.1.1",
- "alloy-primitives",
- "alloy-provider",
- "alloy-signer-local 2.1.1",
- "alloy-sol-types",
- "clap",
- "color-eyre",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "ambassador"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4679,6 +4660,25 @@ dependencies = [
  "dynasm",
  "fnv",
  "memmap2",
+]
+
+[[package]]
+name = "e2e-withdrawal"
+version = "2.4.3"
+dependencies = [
+ "alloy-consensus 2.1.1",
+ "alloy-contract",
+ "alloy-eips 2.1.1",
+ "alloy-network 2.1.1",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer-local 2.1.1",
+ "alloy-sol-types",
+ "clap",
+ "color-eyre",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
