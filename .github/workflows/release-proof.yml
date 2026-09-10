@@ -472,6 +472,15 @@ jobs:
           set -euo pipefail
           AGG_VKEY=$(jq -r '.sp1.aggregation_vkey' proofs/measurements.json)
           RANGE_VKEY=$(jq -r '.sp1.range_vkey_commitment' proofs/measurements.json)
+          # Release-asset download URLs need the tag's slash percent-encoded.
+          DL="https://github.com/$IMAGE_NAME/releases/download/${TAG//\//%2F}"
+          DOCKER_ICON='<img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/>'
+          LINUX_ICON='<img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/>'
+          DOCKER_ROWS=$(
+            for img in nitro-enclave nitro-enclave-eif $(jq -r 'keys_unsorted[]' services.json); do
+              echo "| $DOCKER_ICON | Docker | [worldcoin/world-chain-$img](https://github.com/worldcoin/world-chain/pkgs/container/world-chain-$img) |"
+            done
+          )
           body=$(cat <<- ENDBODY
           ## Enclave measurements
 
@@ -493,22 +502,20 @@ jobs:
           | aggregation_vkey | \`$AGG_VKEY\` |
           | range_vkey_commitment | \`$RANGE_VKEY\` |
 
-          ## Images
+          ## Binaries
 
-          - \`ghcr.io/$IMAGE_NAME-nitro-enclave:v$VERSION\` — the measured rootfs
-          - \`ghcr.io/$IMAGE_NAME-nitro-enclave-eif:v$VERSION\` — EIF carrier for the K8s init container
-          - Service images at \`v$VERSION\` (\`-sp1-worker\`, \`-nitro-worker\`, \`-proposer\`,
-            \`-challenger\`, \`-defender\`, \`-prover-service\`) — pinned digests in \`manifest.json\`
+          The manifest is signed with the PGP key: \`C75F BC64 E9D4 8E89 FB60 418B 8949 B352 D042 2E74\`
 
-          ## Verify
+          | System | Architecture | Binary | PGP Signature |
+          |:---:|:---:|:---|:---|
+          | $LINUX_ICON | riscv32im | [world-chain-proof-succinct-range-ethereum]($DL/world-chain-proof-succinct-range-ethereum) | [elfs.sha256]($DL/elfs.sha256) |
+          | $LINUX_ICON | riscv32im | [world-chain-proof-succinct-aggregation]($DL/world-chain-proof-succinct-aggregation) | [elfs.sha256]($DL/elfs.sha256) |
+          | $LINUX_ICON | x86_64 | [manifest.json]($DL/manifest.json) | [manifest.json.asc]($DL/manifest.json.asc) |
+          | | | |
+          | **System** | **Option** | **Resource** |
+          $DOCKER_ROWS
 
-          \`\`\`
-          git checkout $RELEASE_SHA && scripts/build-eif.sh target/eif
-          diff <(jq -S . proofs/measurements.json) <(jq -S . target/eif/measurements.json)
-          just verify-proof-vkeys
-          \`\`\`
-
-          \`manifest.json\` is signed with the PGP key \`C75F BC64 E9D4 8E89 FB60 418B 8949 B352 D042 2E74\`.
+          All images are tagged \`v$VERSION\`; per-image digests are pinned in the signed [manifest.json]($DL/manifest.json).
 
           ## Changes
 
