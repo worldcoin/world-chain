@@ -26,7 +26,7 @@ pub struct ProveArgs {
     pub l2_rpc_endpoint: String,
     /// DisputeGameFactory contract address.
     #[arg(long, env = "DISPUTE_GAME_FACTORY")]
-    pub dipsute_game_factory: Address,
+    pub dispute_game_factory: Address,
     /// OptimismPortal contract address.
     #[arg(long, env = "OPTIMISM_PORTAL")]
     pub optimism_portal: Address,

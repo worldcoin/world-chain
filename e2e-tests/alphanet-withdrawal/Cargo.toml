@@ -18,6 +18,8 @@ alloy-signer-local.workspace = true
 alloy-network.workspace = true
 alloy-sol-types.workspace = true
 alloy-contract.workspace = true
+alloy-eips.workspace = true
+alloy-consensus.workspace = true
 
 # misc
 clap.workspace = true

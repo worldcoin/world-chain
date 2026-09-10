@@ -28,7 +28,7 @@ pub async fn run(args: &InitArgs) -> eyre::Result<()> {
     // save the InitiatedWithdrawal data to a .json file
     std::fs::write(
         "initiated_withdrawal.json",
-        serde_json::to_string_pretty(&initiated_withdrawal).unwrap(),
+        serde_json::to_string_pretty(&initiated_withdrawal)?,
     )?;
     Ok(())
 }

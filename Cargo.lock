@@ -1334,7 +1334,9 @@ dependencies = [
 name = "alphanet-withdrawal"
 version = "2.4.3"
 dependencies = [
+ "alloy-consensus 2.1.1",
  "alloy-contract",
+ "alloy-eips 2.1.1",
  "alloy-network 2.1.1",
  "alloy-primitives",
  "alloy-provider",
