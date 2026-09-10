@@ -54,6 +54,8 @@ pub const METRICS_PROOF_JOB_DURATION_SECONDS: &str = "proof_job.duration_seconds
 pub const METRICS_WITNESS_COLLECTIONS_COMPLETED: &str = "witness_collection.completed";
 /// Witness-collection duration.
 pub const METRICS_WITNESS_COLLECTION_DURATION_SECONDS: &str = "witness_collection.duration_seconds";
+/// Duration of a proof-worker phase.
+pub const METRICS_PROOF_PHASE_DURATION_SECONDS: &str = "proof_phase.duration_seconds";
 /// Whether this worker's enclave signing key is registered on-chain.
 pub const METRICS_ENCLAVE_KEY_REGISTERED: &str = "enclave_key.registered";
 /// Enclave key registration attempts, by outcome.
@@ -136,6 +138,11 @@ pub fn describe_metrics() {
         METRICS_WITNESS_COLLECTION_DURATION_SECONDS,
         metrics::Unit::Seconds,
         "Kona witness-collection duration by backend and outcome."
+    );
+    metrics::describe_histogram!(
+        METRICS_PROOF_PHASE_DURATION_SECONDS,
+        metrics::Unit::Seconds,
+        "Proof-worker phase duration by backend, phase, and outcome."
     );
     metrics::describe_gauge!(
         METRICS_ENCLAVE_KEY_REGISTERED,
@@ -292,6 +299,25 @@ pub fn record_witness_collection(backend: &'static str, outcome: &'static str, d
     metrics::histogram!(
         METRICS_WITNESS_COLLECTION_DURATION_SECONDS,
         "backend" => backend,
+        "outcome" => outcome,
+    )
+    .record(duration.as_secs_f64());
+}
+
+/// Records one proof-worker phase.
+///
+/// Labels are intentionally low-cardinality: backend, phase, and outcome only. Query-specific
+/// identifiers and range bounds remain in structured logs.
+pub fn record_proof_phase_duration(
+    backend: &'static str,
+    phase: &'static str,
+    outcome: &'static str,
+    duration: Duration,
+) {
+    metrics::histogram!(
+        METRICS_PROOF_PHASE_DURATION_SECONDS,
+        "backend" => backend,
+        "phase" => phase,
         "outcome" => outcome,
     )
     .record(duration.as_secs_f64());

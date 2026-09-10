@@ -47,6 +47,7 @@ members = [
     "proofs/debug/bin/prover-cli",
     "proofs/debug/prover",
     "e2e-tests",
+    "e2e-tests/e2e-withdrawal",
     "xtask",
 ]
 
@@ -180,28 +181,28 @@ reth-node-ethereum = { git = "https://github.com/op-rs/reth", rev = "aef8d3ef921
 reth-storage-api = { git = "https://github.com/op-rs/reth", rev = "aef8d3ef92117f91455e16969f0adf5bf7c6e9e1", default-features = false }
 reth-storage-errors = { git = "https://github.com/op-rs/reth", rev = "aef8d3ef92117f91455e16969f0adf5bf7c6e9e1", default-features = false }
 
-# reth-optimism
-reth-optimism-evm = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-node = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-cli = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-rpc = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-consensus = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-chainspec = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-payload-builder = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-forks = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-primitives = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-storage = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-exex = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-flashblocks = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-reth-optimism-trie = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
+# op-reth v2.4.3
+reth-optimism-evm = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-node = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-cli = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-rpc = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-consensus = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-chainspec = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-payload-builder = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-forks = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-primitives = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-storage = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-exex = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-flashblocks = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+reth-optimism-trie = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
 
 # alloy op
-op-alloy-consensus = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-op-alloy-rpc-types = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-op-alloy-rpc-types-engine = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-op-alloy-network = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-alloy-op-hardforks = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
-op-alloy-provider = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
+op-alloy-consensus = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+op-alloy-rpc-types = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+op-alloy-rpc-types-engine = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+op-alloy-network = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+alloy-op-hardforks = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
+op-alloy-provider = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
 
 # alloy
 alloy = { version = "=2.1.1" }
@@ -268,10 +269,10 @@ revm-state = { version = "41.0.0", default-features = false }
 revm-primitives = { version = "41.0.0", default-features = false }
 revm-interpreter = { version = "41.0.0", default-features = false }
 revm-database-interface = { version = "41.0.0", default-features = false }
-op-revm = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
+op-revm = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
 revm-inspectors = "0.41.0"
 
-alloy-op-evm = { git = "https://github.com/ethereum-optimism/optimism", rev = "96ffbb2a94f19886fe7e27c45f3310e64ccd18b3", default-features = false }
+alloy-op-evm = { git = "https://github.com/ethereum-optimism/optimism", rev = "b60a1a6398209ccc47267e77deb6e4bf4c1ede8a", default-features = false }
 alloy-evm = { version = "0.37.0", default-features = false }
 
 # kona
@@ -311,8 +312,8 @@ thiserror = "2"
 strum = { version = "0.28", features = ["derive"] }
 cfg-if = "1"
 bytemuck = "1"
-semaphore-rs = { version = "0.5", features = ["depth_30"] }
-semaphore-rs-proof = "0.5"
+semaphore-rs = { version = "0.6", features = ["depth_30"] }
+semaphore-rs-proof = "0.6"
 clap = { version = "4", features = ["derive", "env"] }
 eyre = { version = "0.6", package = "color-eyre" }
 serde = { version = "1", features = ["derive"] }

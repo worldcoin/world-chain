@@ -34,7 +34,24 @@
       # hashes, so there is no hash to paste in here and none to go stale.
       rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
-      craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+      craneLib = ((crane.mkLib pkgs).overrideToolchain rustToolchain).overrideScope (
+        _final: prev: {
+          # Crane fetches Git dependencies with all submodules by default. Kona needs
+          # only Optimism's Rust sources, so reuse the locked, submodule-free flake
+          # input instead of fetching its unrelated Solidity dependencies. Override
+          # src before extraction; overrideVendorGitCheckout runs after that fetch.
+          downloadCargoPackageFromGit = args:
+            let
+              checkout = prev.downloadCargoPackageFromGit args;
+            in
+            if args.git == "https://github.com/ethereum-optimism/optimism" then
+              assert lib.assertMsg (args.rev == checkedOptimism.rev)
+                "Optimism vendor revision must match the locked flake input";
+              checkout.overrideAttrs (_old: { src = checkedOptimism; })
+            else
+              checkout;
+        }
+      );
 
       # Only the measured sources, and within them only files cargo actually reads. Whole
       # directories would make the derivation hash move when a README or a Dockerfile next to
