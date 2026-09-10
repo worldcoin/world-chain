@@ -4,7 +4,7 @@ use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::Value;
 use thiserror::Error;
 use world_chain_proof_metrics::{
-    RPC_TARGET_L2_CONSENSUS, record_l2_finalized_block, record_rpc_request,
+    RPC_ENDPOINT_PRIMARY, RPC_TARGET_L2_CONSENSUS, record_l2_finalized_block, record_rpc_request,
 };
 
 /// Source for all consensus clients requests.
@@ -59,6 +59,7 @@ impl ConsensusError {
 pub struct OptimismConsensusClient {
     client: reqwest::Client,
     rpc_url: String,
+    endpoint: &'static str,
 }
 
 impl OptimismConsensusClient {
@@ -67,7 +68,14 @@ impl OptimismConsensusClient {
         Self {
             client: reqwest::Client::new(),
             rpc_url: rpc_url.into(),
+            endpoint: RPC_ENDPOINT_PRIMARY,
         }
+    }
+
+    /// Assigns the stable metric role for this endpoint.
+    pub const fn with_endpoint(mut self, endpoint: &'static str) -> Self {
+        self.endpoint = endpoint;
+        self
     }
 
     async fn request<T>(
@@ -80,7 +88,12 @@ impl OptimismConsensusClient {
         T: DeserializeOwned,
     {
         let result = self.request_inner(method, params, missing_result).await;
-        record_rpc_request(RPC_TARGET_L2_CONSENSUS, method, result.is_ok());
+        record_rpc_request(
+            RPC_TARGET_L2_CONSENSUS,
+            self.endpoint,
+            method,
+            result.is_ok(),
+        );
         result
     }
 

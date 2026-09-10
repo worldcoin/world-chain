@@ -17,6 +17,7 @@ use url::Url;
 use world_chain_defender::{
     AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig, WorldChainDefender,
 };
+use world_chain_proof_metrics::RPC_ENDPOINT_VERIFYING;
 use world_chain_proof_protocol::{
     IDisputeGameFactory, IERC20StakingVault, OptimismConsensusClient, VerifyingConsensusProvider,
     read_registered_bond_vault,
@@ -37,6 +38,10 @@ struct Cli {
     /// Ethereum L1 execution RPC URL.
     #[arg(long, env = "L1_RPC_URL")]
     l1_rpc: String,
+
+    /// Optional Ethereum L1 execution RPC URL used after the primary endpoint fails.
+    #[arg(long, env = "L1_FALLBACK_RPC_URL")]
+    l1_fallback_rpc: Option<String>,
 
     /// op-node rollup RPC URL used to read canonical L2 output roots.
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
@@ -119,8 +124,15 @@ async fn main() -> Result<()> {
         .wallet();
     let defender_address = wallet.default_signer().address();
     let reward_recipient = cli.proof_reward_recipient.unwrap_or(defender_address);
+    let l1_fallback_rpc_url = cli
+        .l1_fallback_rpc
+        .as_deref()
+        .map(Url::parse)
+        .transpose()
+        .context("invalid L1 fallback RPC URL")?;
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,
+        l1_fallback_rpc_url,
         world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
         Duration::from_secs(cli.l1_rpc_timeout_seconds),
     )
@@ -170,7 +182,7 @@ async fn main() -> Result<()> {
         OptimismConsensusClient::new(cli.output_root_rpc.clone()),
         cli.verifying_output_root_rpc
             .clone()
-            .map(OptimismConsensusClient::new),
+            .map(|url| OptimismConsensusClient::new(url).with_endpoint(RPC_ENDPOINT_VERIFYING)),
     );
     let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
@@ -182,6 +194,7 @@ async fn main() -> Result<()> {
 
     info!(
         l1_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.l1_rpc),
+        l1_fallback_rpc_configured = cli.l1_fallback_rpc.is_some(),
         output_root_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.output_root_rpc),
         verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         prover_service = %cli.prover_service_url,
