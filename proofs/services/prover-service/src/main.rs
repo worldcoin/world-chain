@@ -26,6 +26,14 @@ struct Cli {
     #[arg(long, env = "L1_RPC_URL")]
     l1_rpc: String,
 
+    /// Optional fallback Ethereum L1 execution RPC URL.
+    #[arg(long, env = "L1_FALLBACK_RPC_URL")]
+    l1_fallback_rpc: Option<String>,
+
+    /// Per-request timeout for L1 RPC calls in seconds.
+    #[arg(long, env = "L1_RPC_TIMEOUT_SECONDS", default_value_t = world_chain_proof_metrics::DEFAULT_RPC_REQUEST_TIMEOUT_SECONDS)]
+    l1_rpc_timeout_seconds: u64,
+
     /// Address the JSON-RPC server binds to.
     #[arg(long, env = "LISTEN_ADDR", default_value = "0.0.0.0:8080")]
     listen_addr: SocketAddr,
@@ -63,10 +71,17 @@ async fn main() -> Result<()> {
     world_chain_proof_metrics::describe_metrics();
 
     let cli = Cli::parse();
+    let l1_fallback_rpc_url = cli
+        .l1_fallback_rpc
+        .as_deref()
+        .map(str::parse)
+        .transpose()
+        .context("invalid L1 fallback RPC URL")?;
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         cli.l1_rpc.parse().context("invalid L1 RPC URL")?,
+        l1_fallback_rpc_url,
         world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
-        Duration::from_secs(30),
+        Duration::from_secs(cli.l1_rpc_timeout_seconds),
     )
     .context("failed to build the L1 RPC client")?;
     let provider = ProviderBuilder::new()
@@ -92,7 +107,12 @@ async fn main() -> Result<()> {
 
     let status_poller = tokio::spawn(run_status_poller(service, provider, status_poller_interval));
 
-    info!(listen_addr = %addr, "world-chain prover-service started");
+    info!(
+        listen_addr = %addr,
+        l1_fallback_rpc_configured = cli.l1_fallback_rpc.is_some(),
+        l1_rpc_timeout_seconds = cli.l1_rpc_timeout_seconds,
+        "world-chain prover-service started"
+    );
 
     tokio::select! {
         _ = handle.clone().stopped() => info!("prover-service RPC server stopped"),
