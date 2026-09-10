@@ -59,7 +59,7 @@ struct Cli {
     backend_poll_interval_seconds: u64,
 
     /// Seconds between scans that cancel obsolete jobs and fail exhausted attempts.
-    #[arg(long, env = "STATUS_POLLER_INTERVAL_SECS", default_value_t = 30)]
+    #[arg(long, env = "STATUS_POLLER_INTERVAL_SECS", default_value_t = world_chain_prover_service::DEFAULT_STATUS_POLLER_INTERVAL.as_secs())]
     status_poller_interval_secs: u64,
 }
 
