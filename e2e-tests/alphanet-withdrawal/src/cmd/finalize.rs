@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use alloy_eips::BlockId;
-use alloy_network::{EthereumWallet, ReceiptResponse};
+use alloy_network::EthereumWallet;
 use alloy_primitives::U256;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
