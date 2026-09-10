@@ -1,4 +1,4 @@
-use alloy_primitives::Address;
+use alloy_primitives::{Address, U256, utils::parse_ether};
 use clap::Args;
 
 /// Arguments for the `init` command.
@@ -10,6 +10,9 @@ pub struct InitArgs {
     /// L2 private key.
     #[arg(long, env = "L2_PRIVATE_KEY")]
     pub l2_private_key: String,
+    /// The amount of ETH you want to withdraw.
+    #[arg(long, env = "ETH_VALUE", value_parser = parse_ether, default_value_t = U256::ZERO)]
+    pub value: U256,
 }
 
 /// Arguments for the `prove` command.

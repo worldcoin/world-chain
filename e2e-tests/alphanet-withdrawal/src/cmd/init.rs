@@ -24,7 +24,7 @@ pub async fn run(args: &InitArgs) -> eyre::Result<()> {
     // target address of the L2 -> L1 withdrawal is the same address that sends the tx on L2
     let target_addr = local_signer_addr;
     // sends the initiate_withdrawal transaction to the L2ToL1MessagePasser contract
-    let initiated_withdrawal = initiate_withdrawal(l2_provider, target_addr).await?;
+    let initiated_withdrawal = initiate_withdrawal(l2_provider, target_addr, args.value).await?;
     // save the InitiatedWithdrawal data to a .json file
     std::fs::write(
         "initiated_withdrawal.json",
@@ -36,6 +36,7 @@ pub async fn run(args: &InitArgs) -> eyre::Result<()> {
 async fn initiate_withdrawal<P>(
     provider: P,
     target_addr: Address,
+    value: U256,
 ) -> eyre::Result<InitiatedWithdrawal>
 where
     P: Provider,
@@ -43,6 +44,7 @@ where
     let receipt = L2ToL1MessagePasser::new(L2_TO_L1_MESSAGE_PASSER, provider)
         .initiateWithdrawal(target_addr, U256::from(100_000), Bytes::new())
         .gas(250_000)
+        .value(value)
         .send()
         .await?
         .get_receipt()
