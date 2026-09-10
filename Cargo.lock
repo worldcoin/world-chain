@@ -4663,6 +4663,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "e2e-withdrawal"
+version = "2.4.3"
+dependencies = [
+ "alloy-consensus 2.1.1",
+ "alloy-contract",
+ "alloy-eips 2.1.1",
+ "alloy-network 2.1.1",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer-local 2.1.1",
+ "alloy-sol-types",
+ "clap",
+ "color-eyre",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "ecdsa"
 version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

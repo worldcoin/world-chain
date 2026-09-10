@@ -47,6 +47,7 @@ members = [
     "proofs/debug/bin/prover-cli",
     "proofs/debug/prover",
     "e2e-tests",
+    "e2e-tests/e2e-withdrawal",
     "xtask",
 ]
 
