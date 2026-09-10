@@ -1331,6 +1331,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "alphanet-withdrawal"
+version = "2.4.3"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "color-eyre",
+]
+
+[[package]]
 name = "ambassador"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
