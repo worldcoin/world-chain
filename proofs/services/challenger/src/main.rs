@@ -146,6 +146,7 @@ async fn main() -> Result<()> {
     let challenger_address = wallet.default_signer().address();
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,
+        None,
         world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
         Duration::from_secs(cli.l1_rpc_timeout_seconds),
     )

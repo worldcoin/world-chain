@@ -8,7 +8,7 @@ use std::{
 use alloy_json_rpc::{RequestPacket, ResponsePacket};
 use alloy_primitives::{Address, utils::format_ether};
 use alloy_provider::Provider;
-use alloy_rpc_client::{ClientBuilder, RpcClient};
+use alloy_rpc_client::RpcClient;
 use alloy_transport::{BoxFuture, TransportError, layers::FallbackService};
 use telemetry_batteries::reexports::metrics;
 use tower::{Layer, Service};
@@ -318,34 +318,19 @@ pub const DEFAULT_RPC_REQUEST_TIMEOUT_SECONDS: u64 = 10;
 ///
 /// `request_timeout` bounds each individual request so a hung connection cannot stall a
 /// service's poll loop indefinitely. It is per request, not per operation: a confirmation wait
-/// polls with fresh requests and so is not capped by this value.
+/// polls with fresh requests and so is not capped by this value. When `fallback_url` is set, read
+/// requests use both endpoints concurrently while transaction submission remains sequential.
 pub fn metered_http_client(
     url: Url,
+    fallback_url: Option<Url>,
     target: &'static str,
     request_timeout: Duration,
 ) -> Result<RpcClient, alloy_transport_http::reqwest::Error> {
     let client = alloy_transport_http::reqwest::Client::builder()
         .timeout(request_timeout)
         .build()?;
-    Ok(ClientBuilder::default()
-        .layer(RpcMetricsLayer { target })
-        .http_with_client(client, url))
-}
-
-/// Builds an Alloy HTTP client that fails over between the provided endpoints.
-///
-/// Read requests are sent concurrently and return the first successful response. Transaction
-/// submission is sequential so concurrent transport attempts cannot duplicate a broadcast.
-pub fn metered_fallback_http_client(
-    urls: impl IntoIterator<Item = Url>,
-    target: &'static str,
-    request_timeout: Duration,
-) -> Result<RpcClient, alloy_transport_http::reqwest::Error> {
-    let client = alloy_transport_http::reqwest::Client::builder()
-        .timeout(request_timeout)
-        .build()?;
-    let transports = urls
-        .into_iter()
+    let transports = std::iter::once(url)
+        .chain(fallback_url)
         .map(|url| {
             RpcMetricsLayer { target }
                 .layer(alloy_transport_http::Http::with_client(client.clone(), url))

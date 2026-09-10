@@ -130,8 +130,9 @@ async fn main() -> Result<()> {
         .map(Url::parse)
         .transpose()
         .context("invalid L1 fallback RPC URL")?;
-    let l1_rpc_client = world_chain_proof_metrics::metered_fallback_http_client(
-        std::iter::once(l1_rpc_url.clone()).chain(l1_fallback_rpc_url),
+    let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
+        l1_rpc_url.clone(),
+        l1_fallback_rpc_url,
         world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
         Duration::from_secs(cli.l1_rpc_timeout_seconds),
     )
