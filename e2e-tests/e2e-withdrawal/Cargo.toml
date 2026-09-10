@@ -21,7 +21,12 @@ alloy-contract.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
 
+# aws
+aws-config.workspace = true
+aws-sdk-s3.workspace = true
+
 # misc
+async-trait.workspace = true
 clap.workspace = true
 eyre.workspace = true
 tokio.workspace = true
