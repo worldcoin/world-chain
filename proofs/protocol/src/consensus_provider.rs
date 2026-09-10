@@ -4,7 +4,7 @@ use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::Value;
 use thiserror::Error;
 use world_chain_proof_metrics::{
-    RPC_TARGET_L2_CONSENSUS, record_l2_finalized_block, record_rpc_request,
+    RPC_ENDPOINT_PRIMARY, RPC_TARGET_L2_CONSENSUS, record_l2_finalized_block, record_rpc_request,
 };
 
 /// Source for all consensus clients requests.
@@ -80,7 +80,12 @@ impl OptimismConsensusClient {
         T: DeserializeOwned,
     {
         let result = self.request_inner(method, params, missing_result).await;
-        record_rpc_request(RPC_TARGET_L2_CONSENSUS, method, result.is_ok());
+        record_rpc_request(
+            RPC_TARGET_L2_CONSENSUS,
+            RPC_ENDPOINT_PRIMARY,
+            method,
+            result.is_ok(),
+        );
         result
     }
 

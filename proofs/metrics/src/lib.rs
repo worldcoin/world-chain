@@ -19,6 +19,10 @@ use url::Url;
 pub const RPC_TARGET_L1_EXECUTION: &str = "l1_execution";
 /// OP consensus-client RPC target label.
 pub const RPC_TARGET_L2_CONSENSUS: &str = "l2_consensus";
+/// Primary RPC endpoint role label.
+pub const RPC_ENDPOINT_PRIMARY: &str = "primary";
+/// Fallback RPC endpoint role label.
+pub const RPC_ENDPOINT_FALLBACK: &str = "fallback";
 
 /// Current transaction-sending wallet balance in ETH.
 pub const METRICS_WALLET_BALANCE_ETH: &str = "wallet.balance_eth";
@@ -74,7 +78,7 @@ pub fn describe_metrics() {
     metrics::describe_counter!(
         METRICS_RPC_CLIENT_REQUESTS,
         metrics::Unit::Count,
-        "Completed outbound RPC requests by target, method, and outcome."
+        "Completed outbound RPC requests by target, endpoint role, method, and outcome."
     );
     metrics::describe_counter!(
         METRICS_CHALLENGES_SUBMITTED,
@@ -329,10 +333,10 @@ pub fn metered_http_client(
     let client = alloy_transport_http::reqwest::Client::builder()
         .timeout(request_timeout)
         .build()?;
-    let transports = std::iter::once(url)
-        .chain(fallback_url)
-        .map(|url| {
-            RpcMetricsLayer { target }
+    let transports = std::iter::once((RPC_ENDPOINT_PRIMARY, url))
+        .chain(fallback_url.map(|url| (RPC_ENDPOINT_FALLBACK, url)))
+        .map(|(endpoint, url)| {
+            RpcMetricsLayer { target, endpoint }
                 .layer(alloy_transport_http::Http::with_client(client.clone(), url))
         })
         .collect();
@@ -365,6 +369,7 @@ pub fn redact_endpoint(url: &str) -> String {
 #[derive(Debug, Clone, Copy)]
 struct RpcMetricsLayer {
     target: &'static str,
+    endpoint: &'static str,
 }
 
 impl<S> Layer<S> for RpcMetricsLayer {
@@ -373,6 +378,7 @@ impl<S> Layer<S> for RpcMetricsLayer {
     fn layer(&self, inner: S) -> Self::Service {
         RpcMetricsService {
             target: self.target,
+            endpoint: self.endpoint,
             inner,
         }
     }
@@ -381,6 +387,7 @@ impl<S> Layer<S> for RpcMetricsLayer {
 #[derive(Debug, Clone)]
 struct RpcMetricsService<S> {
     target: &'static str,
+    endpoint: &'static str,
     inner: S,
 }
 
@@ -403,6 +410,7 @@ where
 
     fn call(&mut self, request: RequestPacket) -> Self::Future {
         let target = self.target;
+        let endpoint = self.endpoint;
         let method = request
             .as_single()
             .map_or_else(|| "batch".to_owned(), |request| request.method().to_owned());
@@ -411,7 +419,7 @@ where
         Box::pin(async move {
             let result = inner.call(request).await;
             let success = matches!(&result, Ok(response) if response.is_success());
-            record_rpc_request(target, method, success);
+            record_rpc_request(target, endpoint, method, success);
             result
         })
     }
@@ -420,12 +428,14 @@ where
 /// Records the outcome of a completed chain RPC request.
 pub fn record_rpc_request(
     target: &'static str,
+    endpoint: &'static str,
     method: impl Into<metrics::SharedString>,
     success: bool,
 ) {
     metrics::counter!(
         METRICS_RPC_CLIENT_REQUESTS,
         "target" => target,
+        "endpoint" => endpoint,
         "method" => method.into(),
         "outcome" => if success { "success" } else { "error" },
     )
