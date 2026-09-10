@@ -19635,6 +19635,9 @@ name = "world-chain-prover-service"
 version = "1.0.0-rc.2"
 dependencies = [
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-sol-types",
+ "alloy-transport",
  "anyhow",
  "async-trait",
  "auto_impl",
@@ -19653,6 +19656,7 @@ dependencies = [
  "tracing",
  "uuid",
  "world-chain-proof-metrics",
+ "world-chain-proof-protocol",
 ]
 
 [[package]]

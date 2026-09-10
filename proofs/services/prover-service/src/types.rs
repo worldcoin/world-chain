@@ -104,6 +104,8 @@ pub enum ProofStatus {
     Succeeded,
     /// Proof generation failed.
     Failed,
+    /// The game no longer needs this proof. A later challenge may require it again.
+    Cancelled,
 }
 
 impl ProofStatus {
@@ -114,6 +116,7 @@ impl ProofStatus {
             Self::Running => "RUNNING",
             Self::Succeeded => "SUCCEEDED",
             Self::Failed => "FAILED",
+            Self::Cancelled => "CANCELLED",
         }
     }
 }
@@ -133,6 +136,7 @@ impl TryFrom<&str> for ProofStatus {
             "RUNNING" => Ok(Self::Running),
             "SUCCEEDED" => Ok(Self::Succeeded),
             "FAILED" => Ok(Self::Failed),
+            "CANCELLED" => Ok(Self::Cancelled),
             other => Err(format!("Unknown proof status: {other}")),
         }
     }

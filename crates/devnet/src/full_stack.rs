@@ -76,7 +76,7 @@ use world_chain_proposer::{
 };
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProverService, ProverServiceConfig, RpcProverServiceClient,
-    start_rpc_server,
+    run_status_poller, start_rpc_server,
 };
 use world_chain_test_utils::DEV_CHAIN_ID;
 
@@ -356,6 +356,7 @@ impl Drop for DefenderTask {
 #[derive(Debug)]
 struct ProverServiceTask {
     handle: ServerHandle,
+    status_poller: JoinHandle<()>,
     _postgres: Option<ContainerAsync<GenericImage>>,
     _postgres_data_dir: Option<TempDir>,
 }
@@ -363,6 +364,7 @@ struct ProverServiceTask {
 impl Drop for ProverServiceTask {
     fn drop(&mut self) {
         let _ = self.handle.stop();
+        self.status_poller.abort();
     }
 }
 
@@ -689,7 +691,7 @@ impl FullStackWorldDevnet {
 
         // Proof workers and the defender share one prover-service.
         let (prover_service, prover_service_url) = if proof_services.is_some() {
-            let (service, url) = start_prover_service().await?;
+            let (service, url) = start_prover_service(&l1_public_rpc).await?;
             (Some(service), Some(url))
         } else {
             (None, None)
@@ -3219,22 +3221,33 @@ fn sp1_worker_prover_kind() -> Result<Option<Sp1ProverKind>> {
 }
 
 /// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
-async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
+async fn start_prover_service(l1_rpc: &str) -> Result<(ProverServiceTask, String)> {
     let (database_url, postgres, postgres_data_dir) = prover_service_database_url().await?;
     let service = Arc::new(
         ProverService::connect(&database_url, ProverServiceConfig::default())
             .await
             .wrap_err("failed to initialize postgres-backed prover-service")?,
     );
-    let (addr, handle) =
-        start_rpc_server("127.0.0.1:0".parse().expect("valid loopback addr"), service)
-            .await
-            .wrap_err("failed to start prover-service RPC server")?;
+    let (addr, handle) = start_rpc_server(
+        "127.0.0.1:0".parse().expect("valid loopback addr"),
+        Arc::clone(&service),
+    )
+    .await
+    .wrap_err("failed to start prover-service RPC server")?;
+    let provider = ProviderBuilder::new()
+        .disable_recommended_fillers()
+        .connect_http(Url::parse(l1_rpc)?);
+    let status_poller = tokio::spawn(run_status_poller(
+        service,
+        provider,
+        ProverServiceConfig::default().status_poller_interval,
+    ));
     let url = format!("http://{addr}");
     info!(prover_service = %url, "started native defender prover-service");
     Ok((
         ProverServiceTask {
             handle,
+            status_poller,
             _postgres: postgres,
             _postgres_data_dir: postgres_data_dir,
         },

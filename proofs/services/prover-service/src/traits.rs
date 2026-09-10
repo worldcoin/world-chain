@@ -20,6 +20,7 @@ pub trait ProofRequester {
     /// Requests are deduplicated by their deterministic id: re-requesting
     /// a proof that is already queued, in progress, or completed is a no-op
     /// returning the same id, while re-requesting a failed proof re-queues it.
+    /// Cancelled proofs can be re-queued without consuming a retry if support is needed again.
     async fn request_proof(
         &self,
         proof_request: ProofRequest,

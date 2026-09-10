@@ -177,10 +177,10 @@ impl ProverServiceStore {
             return Err(ProofRequestError::RequestMismatch(id));
         }
 
-        if proof_status == ProofStatus::Failed {
-            // retry the entire proof job if retry_count is less than the max_retry
+        if matches!(proof_status, ProofStatus::Failed | ProofStatus::Cancelled) {
+            // A later challenge or reorg can require cancelled work again without a proof failure.
             let retry_count: i32 = row.get("retry_count");
-            if retry_count > self.config.max_retries as i32 {
+            if proof_status == ProofStatus::Failed && retry_count > self.config.max_retries as i32 {
                 tx.rollback().await?;
                 return Err(ProofRequestError::TooManyRetries(TooManyRetriesErrorData {
                     proof_id: id,
@@ -193,7 +193,7 @@ impl ProverServiceStore {
                 UPDATE proof_requests
                 SET proof_status = $1,
                     job_status = $2,
-                    retry_count = retry_count + 1,
+                    retry_count = retry_count + $5,
                     l1_head = $3,
                     failure_reason = NULL,
                     proof_data = NULL,
@@ -209,6 +209,7 @@ impl ProverServiceStore {
             .bind(ProofJobStatus::Pending.as_str())
             .bind(proof_request.l1_head.as_slice())
             .bind(&proof_id)
+            .bind(i32::from(proof_status == ProofStatus::Failed))
             .execute(&mut *tx)
             .await?;
 
@@ -219,9 +220,9 @@ impl ProverServiceStore {
                 game_address = %proof_request.game,
                 %backend,
                 l2_block_number = proof_request.l2_block_number,
-                retry_count = retry_count + 1,
+                retry_count = retry_count + i32::from(proof_status == ProofStatus::Failed),
                 max_retries = self.config.max_retries,
-                "re-queued failed proof request"
+                "re-queued proof request"
             );
 
             let request_proof_response = RequestProofResponse {
@@ -277,17 +278,46 @@ impl ProverServiceStore {
                     proof,
                 }))
             }
-            ProofStatus::Failed => Ok(ProofResponse::Failed(FailedProofResponse {
-                id: proof_id,
-                reason: row
-                    .get::<Option<String>, _>("failure_reason")
-                    .unwrap_or_else(|| "proof job failed".to_string()),
-            })),
+            ProofStatus::Failed | ProofStatus::Cancelled => {
+                Ok(ProofResponse::Failed(FailedProofResponse {
+                    id: proof_id,
+                    reason: row
+                        .get::<Option<String>, _>("failure_reason")
+                        .unwrap_or_else(|| "proof job failed".to_string()),
+                }))
+            }
             status => Ok(ProofResponse::Pending(PendingProofResponse {
                 id: proof_id,
                 status,
             })),
         }
+    }
+
+    pub(crate) async fn active_games(&self) -> Result<Vec<Address>, ProofJobQueueError> {
+        let games: Vec<Vec<u8>> = sqlx::query_scalar(
+            "SELECT DISTINCT game FROM proof_requests WHERE proof_status IN ('CREATED', 'RUNNING')",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        games.into_iter().map(address_from_bytes).collect()
+    }
+
+    pub(crate) async fn cancel_game_proofs(&self, game: Address) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            r#"
+            UPDATE proof_requests
+            SET proof_status = 'CANCELLED', job_status = 'FAILED',
+                failure_reason = 'game no longer requires proof support',
+                worker_id = NULL, lock_id = NULL, lock_expires_at = NULL,
+                updated_at = $2, finished_at = $2
+            WHERE game = $1 AND proof_status IN ('CREATED', 'RUNNING')
+            "#,
+        )
+        .bind(game.as_slice())
+        .bind(Utc::now())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 
     pub(crate) async fn mark_exhausted_proof_requests_failed(&self) -> Result<u64, sqlx::Error> {
