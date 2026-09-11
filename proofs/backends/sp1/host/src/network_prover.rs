@@ -210,6 +210,7 @@ impl NetworkSuccinctProver {
         let witness_bytes = request.witness_rkyv.len();
         let mut stdin = SP1Stdin::new();
         stdin.write_vec(request.witness_rkyv);
+        let simulation_stdin = stdin.clone();
 
         let mut proof_request = self.client.prove(&self.range_pk, stdin).compressed();
         if let Some(limits) = self.limits {
@@ -232,15 +233,17 @@ impl NetworkSuccinctProver {
                 "starting local SP1 range limit simulation"
             );
             let started_at = Instant::now();
-            let request_future = proof_request.request();
-            tokio::pin!(request_future);
+            let execution = self
+                .client
+                .execute(self.range_pk.elf().clone(), simulation_stdin)
+                .into_future();
+            tokio::pin!(execution);
             let mut heartbeat = tokio::time::interval(LOCAL_LIMIT_ESTIMATION_HEARTBEAT_INTERVAL);
             heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
             heartbeat.tick().await;
-
             let result = loop {
                 tokio::select! {
-                    result = &mut request_future => break result,
+                    result = &mut execution => break result,
                     _ = heartbeat.tick() => tracing::info!(
                         witness_bytes,
                         elapsed_seconds = started_at.elapsed().as_secs(),
@@ -248,7 +251,28 @@ impl NetworkSuccinctProver {
                     ),
                 }
             };
-            (result, Some(started_at.elapsed()))
+            let (_public_values, report) = result.context("SP1 range limit simulation failed")?;
+            let cycle_limit = report.total_instruction_count();
+            let gas_limit = report
+                .gas()
+                .context("SP1 range simulation did not calculate gas")?;
+            let elapsed = started_at.elapsed();
+            tracing::info!(
+                witness_bytes,
+                cycle_limit,
+                gas_limit,
+                elapsed_seconds = elapsed.as_secs_f64(),
+                "local SP1 range limit simulation completed"
+            );
+            (
+                proof_request
+                    .cycle_limit(cycle_limit)
+                    .gas_limit(gas_limit)
+                    .skip_simulation(true)
+                    .request()
+                    .await,
+                Some(elapsed),
+            )
         } else {
             (proof_request.request().await, None)
         };
