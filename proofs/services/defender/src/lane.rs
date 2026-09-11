@@ -127,7 +127,9 @@ where
         match status {
             ProofStatus::Created | ProofStatus::Running => state,
             ProofStatus::Succeeded => self.submit_succeeded_lane(metadata, lane, id, state).await,
-            ProofStatus::Failed => self.retry_failed_lane(metadata, lane, backend, state).await,
+            ProofStatus::Failed | ProofStatus::Cancelled => {
+                self.retry_lane(metadata, lane, backend, state).await
+            }
         }
     }
 
@@ -204,7 +206,7 @@ where
         }
     }
 
-    async fn retry_failed_lane(
+    async fn retry_lane(
         &self,
         metadata: &GameMetadata,
         lane: ProofLane,
@@ -212,8 +214,8 @@ where
         state: LaneState,
     ) -> LaneState {
         let game = metadata.address;
-        // Re-requesting a failed proof re-queues the same deterministic proof id. The
-        // prover-service owns the durable retry counter and rejects exhausted requests.
+        // Re-requesting uses the same deterministic id. The prover-service counts failure
+        // retries, while cancelled jobs can restart if on-chain support is needed again.
         match self
             .proof_requester
             .request_proof(proof_request(metadata, backend))
@@ -227,7 +229,7 @@ where
                     proof_id = %request_proof_response.proof_id,
                     ?backend,
                     ?lane,
-                    "proof failed; re-requested proof"
+                    "re-requested inactive proof"
                 );
                 LaneState::Requested {
                     id: request_proof_response.proof_id,

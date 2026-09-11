@@ -264,7 +264,13 @@ impl DefenderClient for MockClient {
             .games
             .get(&game)
             .map(|record| ClaimData {
-                status: record.state.proposal_status(record.proof_bitmap != 0),
+                status: record.state.proposal_status(
+                    if record.state == GameLifecycle::Challenged {
+                        proof_count(record.proof_bitmap) >= record.metadata.proof_threshold
+                    } else {
+                        record.proof_bitmap != 0
+                    },
+                ),
                 challenger: Address::ZERO,
                 deadline: record.metadata.proof_deadline,
                 proof_bitmap: record.proof_bitmap,
@@ -322,6 +328,7 @@ fn output_roots(entries: &[(u64, B256)], finalized: u64) -> MockOutputRoots {
 #[derive(Debug, Clone, Default)]
 struct MockProver {
     fail: bool,
+    status: Option<ProofStatus>,
     max_requests_per_proof: Option<u32>,
     requests: Arc<Mutex<Vec<ProofRequest>>>,
     request_counts: Arc<Mutex<HashMap<ProofRequestId, u32>>>,
@@ -379,6 +386,9 @@ impl ProofRequester for MockProver {
         &self,
         _proof_id: ProofRequestId,
     ) -> Result<ProofStatus, ProofRequestError> {
+        if let Some(status) = self.status {
+            return Ok(status);
+        }
         Ok(if self.fail {
             ProofStatus::Failed
         } else {
@@ -551,6 +561,44 @@ async fn selected_challenged_game_with_council_support_only_requests_tee() {
 
     defender.tick().await.unwrap();
     assert!(defender.active_defenses().is_empty());
+}
+
+#[tokio::test]
+async fn cancelled_proof_is_requested_again_when_a_supported_game_is_challenged() {
+    let root = B256::repeat_byte(0x20);
+    let client = MockClient::new();
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, GameLifecycle::Proposed);
+    let prover = MockProver {
+        status: Some(ProofStatus::Cancelled),
+        ..Default::default()
+    };
+    let mut defender = WorldChainDefender::new(
+        config(),
+        client.clone(),
+        output_roots(&[(L2_BLOCK, root)], L2_BLOCK),
+        prover.clone(),
+    );
+    defender.tick().await.unwrap();
+    assert_eq!(prover.requests().len(), 1);
+
+    client.set_bitmap(GAME_1, ProofLane::SecurityCouncil.mask());
+    defender.tick().await.unwrap();
+    assert!(defender.active_defenses().is_empty());
+    assert_eq!(prover.requests().len(), 1);
+
+    client.set_state(GAME_1, GameLifecycle::Challenged, InvalidationReason::None);
+    defender.tick().await.unwrap();
+    defender.tick().await.unwrap();
+    assert_eq!(prover.requests().len(), 3);
+    assert!(defender.active_defenses().contains(&GAME_1));
+
+    client.set_bitmap(
+        GAME_1,
+        ProofLane::SecurityCouncil.mask() | ProofLane::TeeAttestation.mask(),
+    );
+    defender.tick().await.unwrap();
+    assert!(defender.active_defenses().is_empty());
+    assert_eq!(prover.requests().len(), 3);
 }
 
 #[tokio::test]

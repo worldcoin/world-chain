@@ -1402,7 +1402,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1413,7 +1413,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2283,6 +2283,7 @@ dependencies = [
  "aws-credential-types",
  "aws-sigv4",
  "aws-smithy-async",
+ "aws-smithy-eventstream",
  "aws-smithy-http",
  "aws-smithy-runtime",
  "aws-smithy-runtime-api",
@@ -2291,7 +2292,9 @@ dependencies = [
  "bytes",
  "bytes-utils",
  "fastrand",
+ "http 0.2.12",
  "http 1.5.0",
+ "http-body 0.4.6",
  "http-body 1.1.0",
  "percent-encoding",
  "pin-project-lite",
@@ -2323,6 +2326,43 @@ dependencies = [
  "http 1.5.0",
  "regex-lite",
  "tracing",
+]
+
+[[package]]
+name = "aws-sdk-s3"
+version = "1.141.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9f9420d3a2467eed22ed3635ca653653162c386a0b0f65c78189f9bd3c1379e"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-sigv4",
+ "aws-smithy-async",
+ "aws-smithy-checksums",
+ "aws-smithy-eventstream",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-smithy-xml",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "hex",
+ "hmac 0.13.0",
+ "http 0.2.12",
+ "http 1.5.0",
+ "http-body 1.1.0",
+ "lru 0.16.4",
+ "percent-encoding",
+ "regex-lite",
+ "sha2 0.11.0",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -2411,6 +2451,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "723c2234ad7511ceef63eab016b7ba6ff7c55590fefb96fa8467af014a07309f"
 dependencies = [
  "aws-credential-types",
+ "aws-smithy-eventstream",
  "aws-smithy-http",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -2438,11 +2479,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-smithy-checksums"
+version = "0.65.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b67ecd999972b58e67cab052f5129906c08c25883bd0788ceefc55ef97d61307"
+dependencies = [
+ "aws-smithy-http",
+ "aws-smithy-types",
+ "bytes",
+ "crc-fast",
+ "hex",
+ "http 1.5.0",
+ "http-body 1.1.0",
+ "http-body-util",
+ "md-5 0.11.0",
+ "pin-project-lite",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
+ "tracing",
+]
+
+[[package]]
+name = "aws-smithy-eventstream"
+version = "0.61.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a9381123ab62d20c13082b151f30f962a3b112b727345394536dfa39a482944"
+dependencies = [
+ "aws-smithy-types",
+ "bytes",
+ "crc32fast",
+]
+
+[[package]]
 name = "aws-smithy-http"
 version = "0.64.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37843d9add67c3aff5856f409c6dc315d3cdff60f9c0cb5b670dab1e9920306d"
 dependencies = [
+ "aws-smithy-eventstream",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "bytes",
@@ -2884,7 +2958,7 @@ dependencies = [
  "bitflags 2.13.1",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -3894,6 +3968,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
 
 [[package]]
+name = "crc-fast"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5"
+dependencies = [
+ "digest 0.10.7",
+ "spin 0.10.1",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4311,7 +4395,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c54e03a951783e8b327515db3f2a2fd0e3bed362a96b066f341ce66ed49b4ead"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -4674,6 +4758,10 @@ dependencies = [
  "alloy-provider",
  "alloy-signer-local 2.1.1",
  "alloy-sol-types",
+ "async-trait",
+ "aws-config",
+ "aws-credential-types",
+ "aws-sdk-s3",
  "clap",
  "color-eyre",
  "serde",
@@ -4875,7 +4963,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6063,7 +6151,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -8115,7 +8203,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9784,7 +9872,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck",
- "itertools 0.12.1",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "once_cell",
@@ -9804,7 +9892,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -9817,7 +9905,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -9895,7 +9983,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.43",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -9934,9 +10022,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13956,7 +14044,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -14057,7 +14145,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.9",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -15437,7 +15525,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -16641,7 +16729,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -18198,7 +18286,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -19635,6 +19723,9 @@ name = "world-chain-prover-service"
 version = "1.0.0-rc.2"
 dependencies = [
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-sol-types",
+ "alloy-transport",
  "anyhow",
  "async-trait",
  "auto_impl",
@@ -19653,6 +19744,7 @@ dependencies = [
  "tracing",
  "uuid",
  "world-chain-proof-metrics",
+ "world-chain-proof-protocol",
 ]
 
 [[package]]

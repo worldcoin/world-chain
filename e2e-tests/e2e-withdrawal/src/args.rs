@@ -13,6 +13,13 @@ pub struct InitArgs {
     /// The amount of ETH you want to withdraw.
     #[arg(long, env = "ETH_VALUE", value_parser = parse_ether, default_value_t = U256::ZERO)]
     pub value: U256,
+    /// Output location for the initiated withdrawal JSON (local path or `s3://bucket/key`).
+    #[arg(
+        long,
+        env = "WITHDRAWAL_OUTPUT",
+        default_value = "initiated_withdrawal.json"
+    )]
+    pub output: String,
 }
 
 /// Arguments for the `prove` command.
@@ -33,6 +40,20 @@ pub struct ProveArgs {
     /// OptimismPortal contract address.
     #[arg(long, env = "OPTIMISM_PORTAL")]
     pub optimism_portal: Address,
+    /// Input location for the initiated withdrawal JSON (local path or `s3://bucket/key`).
+    #[arg(
+        long,
+        env = "WITHDRAWAL_INPUT",
+        default_value = "initiated_withdrawal.json"
+    )]
+    pub input: String,
+    /// Output location for the proven withdrawal JSON (local path or `s3://bucket/key`).
+    #[arg(
+        long,
+        env = "WITHDRAWAL_OUTPUT",
+        default_value = "prove_withdrawal.json"
+    )]
+    pub output: String,
 }
 
 /// Arguments for the `finalize` command.
@@ -50,4 +71,11 @@ pub struct FinalizeArgs {
     /// OptimismPortal contract address.
     #[arg(long, env = "OPTIMISM_PORTAL")]
     pub optimism_portal: Address,
+    /// Input location for the proven withdrawal JSON (local path or `s3://bucket/key`).
+    #[arg(
+        long,
+        env = "WITHDRAWAL_INPUT",
+        default_value = "prove_withdrawal.json"
+    )]
+    pub input: String,
 }
