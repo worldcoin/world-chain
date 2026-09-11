@@ -27,7 +27,7 @@ pub async fn run(args: &InitArgs) -> eyre::Result<()> {
     // sends the initiate_withdrawal transaction to the L2ToL1MessagePasser contract
     let initiated_withdrawal = initiate_withdrawal(l2_provider, target_addr, args.value).await?;
     // save the InitiatedWithdrawal data (local path or s3://bucket/key)
-    storage::write_json(&args.output, &initiated_withdrawal).await?;
+    storage::write_json(&args.initiated, &initiated_withdrawal).await?;
     Ok(())
 }
 

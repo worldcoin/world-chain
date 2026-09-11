@@ -6,8 +6,14 @@ use serde::{Serialize, de::DeserializeOwned};
 /// Byte-oriented blob store used for withdrawal handoff JSON.
 #[async_trait]
 pub trait BlobStore: Send + Sync {
+    /// Read the blob at `key`.
     async fn get(&self, key: &str) -> eyre::Result<Vec<u8>>;
+    /// Write `bytes` to `key`.
     async fn put(&self, key: &str, bytes: &[u8]) -> eyre::Result<()>;
+    /// Return whether `key` exists.
+    async fn exists(&self, key: &str) -> eyre::Result<bool>;
+    /// Delete `key`. Missing keys are ignored.
+    async fn delete(&self, key: &str) -> eyre::Result<()>;
 }
 
 /// Filesystem-backed store. The key is treated as a filesystem path.
@@ -21,6 +27,18 @@ impl BlobStore for LocalStore {
 
     async fn put(&self, key: &str, bytes: &[u8]) -> eyre::Result<()> {
         Ok(std::fs::write(key, bytes)?)
+    }
+
+    async fn exists(&self, key: &str) -> eyre::Result<bool> {
+        Ok(std::path::Path::new(key).exists())
+    }
+
+    async fn delete(&self, key: &str) -> eyre::Result<()> {
+        match std::fs::remove_file(key) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
     }
 }
 
@@ -61,6 +79,38 @@ impl BlobStore for S3Store {
             .send()
             .await
             .wrap_err_with(|| format!("failed to put s3://{}/{}", self.bucket, key))?;
+        Ok(())
+    }
+
+    async fn exists(&self, key: &str) -> eyre::Result<bool> {
+        match self
+            .client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(err) => {
+                if err.as_service_error().is_some_and(|e| e.is_not_found()) {
+                    Ok(false)
+                } else {
+                    Err(err)
+                        .wrap_err_with(|| format!("failed to head s3://{}/{}", self.bucket, key))
+                }
+            }
+        }
+    }
+
+    async fn delete(&self, key: &str) -> eyre::Result<()> {
+        self.client
+            .delete_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await
+            .wrap_err_with(|| format!("failed to delete s3://{}/{}", self.bucket, key))?;
         Ok(())
     }
 }
@@ -118,4 +168,16 @@ pub async fn read_json<T: DeserializeOwned>(location: &str) -> eyre::Result<T> {
 pub async fn write_json<T: Serialize>(location: &str, value: &T) -> eyre::Result<()> {
     let (store, key) = open(location).await?;
     store.put(&key, &serde_json::to_vec_pretty(value)?).await
+}
+
+/// Return whether a local path or `s3://bucket/key` exists.
+pub async fn exists(location: &str) -> eyre::Result<bool> {
+    let (store, key) = open(location).await?;
+    store.exists(&key).await
+}
+
+/// Delete a local path or `s3://bucket/key`. Missing objects are ignored.
+pub async fn delete(location: &str) -> eyre::Result<()> {
+    let (store, key) = open(location).await?;
+    store.delete(&key).await
 }
