@@ -27,7 +27,7 @@ pub enum Command {
     /// Finalize the withdrawal.
     Finalize(FinalizeArgs),
     /// Run the next stage of the withdrawal workflow based on stored state.
-    Step(StepArgs)
+    Step(StepArgs),
 }
 
 impl Command {

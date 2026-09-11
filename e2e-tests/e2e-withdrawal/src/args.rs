@@ -110,10 +110,18 @@ pub struct StepArgs {
     #[arg(long, env = "ANCHOR_STATE_REGISTRY")]
     pub anchor_state_registry: Address,
     /// Durable location for the initiated-withdrawal JSON.
-    #[arg(long, env = "WITHDRAWAL_INITIATED", default_value = "initiated_withdrawal.json")]
+    #[arg(
+        long,
+        env = "WITHDRAWAL_INITIATED",
+        default_value = "initiated_withdrawal.json"
+    )]
     pub initiated: String,
     /// Durable location for the proven-withdrawal JSON.
-    #[arg(long, env = "WITHDRAWAL_PROVEN", default_value = "prove_withdrawal.json")]
+    #[arg(
+        long,
+        env = "WITHDRAWAL_PROVEN",
+        default_value = "prove_withdrawal.json"
+    )]
     pub proven: String,
 }
 
