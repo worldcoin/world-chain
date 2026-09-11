@@ -32,3 +32,11 @@ tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
 world-chain-proof-core = { path = "../core", default-features = false }
 world-chain-proof-kona-client = { path = "../kona-client" }
 world-chain-proof-succinct-range-utils = { path = "range-utils", default-features = false }
+
+# Cargo only applies patches from the workspace root. Keep SP1 crypto acceleration
+# here so it reaches Kona's dependencies without changing the host or Nitro builds.
+[patch.crates-io]
+sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", tag = "patch-sha2-0.10.9-sp1-6.0.0" }
+sha3 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", tag = "patch-sha3-0.11.0-sp1-6.0.0" }
+k256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-k256-13.4-sp1-6.0.0" }
+p256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-p256-13.2-sp1-6.0.0" }
