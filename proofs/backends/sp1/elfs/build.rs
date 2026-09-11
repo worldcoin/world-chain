@@ -34,6 +34,8 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=SP1_SKIP_PROGRAM_BUILD");
     println!("cargo:rerun-if-env-changed=SP1_BUILD_DOCKER");
+    // sp1-build watches package manifests, but profiles live in the workspace manifest.
+    println!("cargo:rerun-if-changed=../../../measured/sp1-programs/Cargo.toml");
 
     // Under `cargo clippy` the build script receives `CARGO_CFG_CLIPPY=1`.
     // The `#[cfg(clippy)]` guards in `src/lib.rs` prevent `include_elf!()`

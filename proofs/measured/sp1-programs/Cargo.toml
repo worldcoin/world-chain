@@ -33,6 +33,11 @@ world-chain-proof-core = { path = "../core", default-features = false }
 world-chain-proof-kona-client = { path = "../kona-client" }
 world-chain-proof-succinct-range-utils = { path = "range-utils", default-features = false }
 
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = "fat"
+
 # Use SP1-accelerated hashing and curve arithmetic to reduce guest RISC-V cycles.
 # Cargo requires these patches at the guest workspace root to apply them to Kona.
 [patch.crates-io]
