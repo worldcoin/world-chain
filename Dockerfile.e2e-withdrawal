@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1.10
+# Build from the repo root:
+#   docker build -f Dockerfile.e2e-withdrawal -t e2e-withdrawal .
+FROM public.ecr.aws/docker/library/rust:1.98.1-bookworm AS base
+
+# cmake is required to build aws-lc-sys (TLS via rustls / AWS SDK).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends cmake \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+  --mount=type=cache,target=/usr/local/cargo/git \
+  cargo install --locked cargo-chef --version ^0.1
+
+FROM base AS planner
+WORKDIR /app
+
+COPY . .
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM base AS builder
+WORKDIR /app
+
+COPY --from=planner /app/recipe.json recipe.json
+
+# Measured crates are excluded from the root workspace; cook needs their sources
+# to resolve workspace path dependencies referenced by the chef recipe.
+COPY proofs/measured proofs/measured
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo chef cook --locked --release -p e2e-withdrawal --bin e2e-withdrawal --recipe-path recipe.json
+
+COPY . .
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --locked --release -p e2e-withdrawal --bin e2e-withdrawal
+
+FROM public.ecr.aws/docker/library/debian:bookworm-slim
+
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends ca-certificates && \
+  apt-get clean && \
+  rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/release/e2e-withdrawal /usr/local/bin/e2e-withdrawal
+
+ENTRYPOINT ["/usr/local/bin/e2e-withdrawal"]
