@@ -230,6 +230,7 @@ async fn run(cli: Cli) -> Result<()> {
                 let response = client.get_proof(id).await;
                 bail!("proof request {id} failed: {response:?}");
             }
+            ProofStatus::Cancelled => bail!("proof request {id} was cancelled"),
             ProofStatus::Created | ProofStatus::Running => {
                 if tokio::time::Instant::now() >= deadline {
                     bail!(
