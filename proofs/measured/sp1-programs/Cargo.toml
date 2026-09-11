@@ -33,8 +33,8 @@ world-chain-proof-core = { path = "../core", default-features = false }
 world-chain-proof-kona-client = { path = "../kona-client" }
 world-chain-proof-succinct-range-utils = { path = "range-utils", default-features = false }
 
-# Cargo only applies patches from the workspace root. Keep SP1 crypto acceleration
-# here so it reaches Kona's dependencies without changing the host or Nitro builds.
+# Use SP1-accelerated hashing and curve arithmetic to reduce guest RISC-V cycles.
+# Cargo requires these patches at the guest workspace root to apply them to Kona.
 [patch.crates-io]
 sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", tag = "patch-sha2-0.10.9-sp1-6.0.0" }
 sha3 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", tag = "patch-sha3-0.11.0-sp1-6.0.0" }
