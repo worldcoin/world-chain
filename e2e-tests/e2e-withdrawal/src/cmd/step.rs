@@ -27,17 +27,16 @@ pub async fn run(args: &StepArgs) -> eyre::Result<()> {
     }
 }
 
-/// Delete both handoffs, attempting each even if the other fails.
+/// Delete handoffs in order: initiated first, then proven.
+///
+/// If initiated delete fails, keep proven so the next tick still sees both
+/// handoffs and retries finalize (idempotent) + cleanup instead of re-proving.
 async fn delete_handoffs(args: &StepArgs) -> eyre::Result<()> {
-    let initiated = storage::delete(&args.initiated)
+    storage::delete(&args.initiated)
         .await
-        .wrap_err_with(|| format!("failed to delete initiated handoff at `{}`", args.initiated));
-    let proven = storage::delete(&args.proven)
+        .wrap_err_with(|| format!("failed to delete initiated handoff at `{}`", args.initiated))?;
+    storage::delete(&args.proven)
         .await
-        .wrap_err_with(|| format!("failed to delete proven handoff at `{}`", args.proven));
-    match (initiated, proven) {
-        (Ok(()), Ok(())) => Ok(()),
-        (Err(e), Ok(())) | (Ok(()), Err(e)) => Err(e),
-        (Err(e1), Err(e2)) => Err(e1.wrap_err(e2)),
-    }
+        .wrap_err_with(|| format!("failed to delete proven handoff at `{}`", args.proven))?;
+    Ok(())
 }
