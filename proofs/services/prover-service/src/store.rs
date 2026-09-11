@@ -303,16 +303,20 @@ impl ProverServiceStore {
     }
 
     pub(crate) async fn cancel_game_proofs(&self, game: Address) -> Result<u64, sqlx::Error> {
+        const FAILURE_REASON: &str = "game no longer requires proof support";
         let result = sqlx::query(
             r#"
             UPDATE proof_requests
-            SET proof_status = 'CANCELLED', job_status = 'FAILED',
-                failure_reason = 'game no longer requires proof support',
+            SET proof_status = $1, job_status = $2,
+                failure_reason = $3,
                 worker_id = NULL, lock_id = NULL, lock_expires_at = NULL,
-                updated_at = $2, finished_at = $2
-            WHERE game = $1 AND proof_status IN ('CREATED', 'RUNNING')
+                updated_at = $5, finished_at = $5
+            WHERE game = $4 AND proof_status IN ('CREATED', 'RUNNING')
             "#,
         )
+        .bind(ProofStatus::Cancelled.as_str())
+        .bind(ProofJobStatus::Failed.as_str())
+        .bind(FAILURE_REASON)
         .bind(game.as_slice())
         .bind(Utc::now())
         .execute(&self.pool)
