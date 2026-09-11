@@ -14,7 +14,7 @@ pub const DEFAULT_MAX_RETRIES: u32 = 3;
 pub const DEFAULT_BACKEND_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Default delay between status-poller scans.
-pub const DEFAULT_STATUS_POLLER_INTERVAL: Duration = Duration::from_mins(5);
+pub const DEFAULT_STATUS_POLLER_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Configuration for the `prover-service`.
 #[derive(Debug, Clone)]
