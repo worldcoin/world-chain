@@ -35,7 +35,7 @@ pub async fn run(args: &ProveArgs) -> eyre::Result<()> {
         .connect(&args.l2_rpc_endpoint)
         .await?;
     // read InitiatedWithdrawal data (local path or s3://bucket/key)
-    let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.input).await?;
+    let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.initiated).await?;
     // wait for a covering WIP1006 game with l2SequenceNumber >= initiated_withdrawal.l2_block
     let (game_index, game_addr, game_l2_block) = check_multi_proof_game(
         &l1_provider,
@@ -81,7 +81,7 @@ pub async fn run(args: &ProveArgs) -> eyre::Result<()> {
         game_addr,
         proven_at: l1_timestamp,
     };
-    storage::write_json(&args.output, &prove_withdrawal).await?;
+    storage::write_json(&args.proven, &prove_withdrawal).await?;
     Ok(())
 }
 

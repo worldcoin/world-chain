@@ -24,13 +24,13 @@ pub struct InitArgs {
     /// The amount of ETH you want to withdraw.
     #[arg(long, env = "ETH_VALUE", value_parser = parse_ether, default_value_t = U256::ZERO)]
     pub value: U256,
-    /// Output location for the initiated withdrawal JSON (local path or `s3://bucket/key`).
+    /// Location for the initiated withdrawal JSON (local path or `s3://bucket/key`).
     #[arg(
         long,
-        env = "WITHDRAWAL_OUTPUT",
+        env = "WITHDRAWAL_INITIATED",
         default_value = "initiated_withdrawal.json"
     )]
-    pub output: String,
+    pub initiated: String,
 }
 
 /// Arguments for the `prove` command.
@@ -48,20 +48,20 @@ pub struct ProveArgs {
     /// OptimismPortal contract address.
     #[arg(long, env = "OPTIMISM_PORTAL")]
     pub optimism_portal: Address,
-    /// Input location for the initiated withdrawal JSON (local path or `s3://bucket/key`).
+    /// Location for the initiated withdrawal JSON (local path or `s3://bucket/key`).
     #[arg(
         long,
-        env = "WITHDRAWAL_INPUT",
+        env = "WITHDRAWAL_INITIATED",
         default_value = "initiated_withdrawal.json"
     )]
-    pub input: String,
-    /// Output location for the proven withdrawal JSON (local path or `s3://bucket/key`).
+    pub initiated: String,
+    /// Location for the proven withdrawal JSON (local path or `s3://bucket/key`).
     #[arg(
         long,
-        env = "WITHDRAWAL_OUTPUT",
+        env = "WITHDRAWAL_PROVEN",
         default_value = "prove_withdrawal.json"
     )]
-    pub output: String,
+    pub proven: String,
 }
 
 /// Arguments for the `finalize` command.
@@ -76,13 +76,13 @@ pub struct FinalizeArgs {
     /// OptimismPortal contract address.
     #[arg(long, env = "OPTIMISM_PORTAL")]
     pub optimism_portal: Address,
-    /// Input location for the proven withdrawal JSON (local path or `s3://bucket/key`).
+    /// Location for the proven withdrawal JSON (local path or `s3://bucket/key`).
     #[arg(
         long,
-        env = "WITHDRAWAL_INPUT",
+        env = "WITHDRAWAL_PROVEN",
         default_value = "prove_withdrawal.json"
     )]
-    pub input: String,
+    pub proven: String,
 }
 
 /// Arguments for the `step` command.
@@ -132,7 +132,7 @@ impl StepArgs {
             l2_rpc_endpoint: self.l2_rpc_endpoint.clone(),
             l2_private_key: self.l2_private_key.clone(),
             value: self.value,
-            output: self.initiated.clone(),
+            initiated: self.initiated.clone(),
         }
     }
 
@@ -143,8 +143,8 @@ impl StepArgs {
             l2_rpc_endpoint: self.l2_rpc_endpoint.clone(),
             dispute_game_factory: self.dispute_game_factory,
             optimism_portal: self.optimism_portal,
-            input: self.initiated.clone(),
-            output: self.proven.clone(),
+            initiated: self.initiated.clone(),
+            proven: self.proven.clone(),
         }
     }
 
@@ -154,7 +154,7 @@ impl StepArgs {
             l1_args: self.l1_args.clone(),
             anchor_state_registry: self.anchor_state_registry,
             optimism_portal: self.optimism_portal,
-            input: self.proven.clone(),
+            proven: self.proven.clone(),
         }
     }
 }

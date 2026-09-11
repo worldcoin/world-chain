@@ -23,7 +23,7 @@ pub async fn run(args: &FinalizeArgs) -> eyre::Result<()> {
         .connect(&args.l1_args.l1_rpc_endpoint)
         .await?;
     // read ProveWithdrawal data (local path or s3://bucket/key)
-    let prove_withdrawal: ProveWithdrawal = storage::read_json(&args.input).await?;
+    let prove_withdrawal: ProveWithdrawal = storage::read_json(&args.proven).await?;
     // check whether the withdrawal is finalizable:
     // 1. now - proven.timestamp > OptimismPortal::proofMaturityDelaySeconds()
     let optimism_portal = OptimismPortalInstance::new(args.optimism_portal, &l1_provider);
