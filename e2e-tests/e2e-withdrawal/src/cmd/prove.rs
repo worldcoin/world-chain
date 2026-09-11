@@ -25,10 +25,10 @@ const L2_TO_L1_MESSAGE_PASSER: Address = address!("42000000000000000000000000000
 /// Run the `prove` command.
 pub async fn run(args: &ProveArgs) -> eyre::Result<()> {
     // create L1 signer provider
-    let local_signer = PrivateKeySigner::from_str(&args.l1_private_key)?;
+    let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key)?;
     let l1_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
-        .connect(&args.l1_rpc_endpoint)
+        .connect(&args.l1_args.l1_rpc_endpoint)
         .await?;
     // create L2 provider
     let l2_provider = ProviderBuilder::new()

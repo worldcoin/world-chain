@@ -17,10 +17,10 @@ use std::str::FromStr;
 /// Run the `finalize` command.
 pub async fn run(args: &FinalizeArgs) -> eyre::Result<()> {
     // create L1 signer provider
-    let local_signer = PrivateKeySigner::from_str(&args.l1_private_key)?;
+    let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key)?;
     let l1_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
-        .connect(&args.l1_rpc_endpoint)
+        .connect(&args.l1_args.l1_rpc_endpoint)
         .await?;
     // read ProveWithdrawal data (local path or s3://bucket/key)
     let prove_withdrawal: ProveWithdrawal = storage::read_json(&args.input).await?;
