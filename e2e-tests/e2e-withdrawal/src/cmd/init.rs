@@ -1,6 +1,7 @@
 use crate::{
     args::InitArgs,
     bindings::{InitiatedWithdrawal, L2ToL1MessagePasser, WithdrawalTransaction},
+    storage,
 };
 use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, Bytes, U256, address};
@@ -25,11 +26,8 @@ pub async fn run(args: &InitArgs) -> eyre::Result<()> {
     let target_addr = local_signer_addr;
     // sends the initiate_withdrawal transaction to the L2ToL1MessagePasser contract
     let initiated_withdrawal = initiate_withdrawal(l2_provider, target_addr, args.value).await?;
-    // save the InitiatedWithdrawal data to a .json file
-    std::fs::write(
-        "initiated_withdrawal.json",
-        serde_json::to_string_pretty(&initiated_withdrawal)?,
-    )?;
+    // save the InitiatedWithdrawal data (local path or s3://bucket/key)
+    storage::write_json(&args.output, &initiated_withdrawal).await?;
     Ok(())
 }
 

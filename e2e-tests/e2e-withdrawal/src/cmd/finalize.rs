@@ -4,6 +4,7 @@ use crate::{
         AnchorStateRegistry::AnchorStateRegistryInstance, OptimismPortal::OptimismPortalInstance,
         ProveWithdrawal,
     },
+    storage,
 };
 use alloy_eips::BlockId;
 use alloy_network::EthereumWallet;
@@ -21,9 +22,8 @@ pub async fn run(args: &FinalizeArgs) -> eyre::Result<()> {
         .wallet(EthereumWallet::from(local_signer))
         .connect(&args.l1_rpc_endpoint)
         .await?;
-    // read ProveWithdrawl data from .json file
-    let prove_withdrawal: ProveWithdrawal =
-        serde_json::from_slice(&std::fs::read("prove_withdrawal.json")?)?;
+    // read ProveWithdrawal data (local path or s3://bucket/key)
+    let prove_withdrawal: ProveWithdrawal = storage::read_json(&args.input).await?;
     // check whether the withdrawal is finalizable:
     // 1. now - proven.timestamp > OptimismPortal::proofMaturityDelaySeconds()
     let optimism_portal = OptimismPortalInstance::new(args.optimism_portal, &l1_provider);
