@@ -65,6 +65,9 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+bn = ["revm/bn"]
+
 [dependencies]
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
