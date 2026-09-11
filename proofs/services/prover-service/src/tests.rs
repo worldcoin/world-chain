@@ -106,6 +106,183 @@ fn worker_id() -> String {
     "test-worker".to_string()
 }
 
+#[tokio::test]
+async fn cancellation_revokes_leases_preserves_completed_proofs_and_can_restart() {
+    let ctx = service(test_config()).await.expect("Postgres is required");
+    let service = &ctx.service;
+    let running = request(ProofBackend::Sp1, 50);
+    let pending = request(ProofBackend::Nitro, 50);
+    let mut completed = request(ProofBackend::Nitro, 51);
+    completed.game = running.game;
+    let unrelated = request(ProofBackend::Sp1, 52);
+    for req in [&running, &pending, &completed, &unrelated] {
+        service.request_proof(req.clone()).await.unwrap();
+    }
+    let completed_lock = service
+        .get_next_proof(get_next_proof_request_for(&completed))
+        .await
+        .unwrap()
+        .locked_request
+        .unwrap();
+    service
+        .submit_proof(submit_proof_request(
+            proof_for(&completed),
+            completed_lock.lock_id,
+        ))
+        .await
+        .unwrap();
+    let lock = service
+        .get_next_proof(get_next_proof_request_for(&running))
+        .await
+        .unwrap()
+        .locked_request
+        .unwrap();
+    service
+        .record_proof_session(record_proof_session_request(
+            running.id(),
+            SessionType::Stark,
+            lock.lock_id,
+            backend_session_id(50),
+            BackendSessionStatus::Running,
+            None,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(service.cancel_game_proofs(running.game).await.unwrap(), 2);
+    assert_eq!(service.cancel_game_proofs(running.game).await.unwrap(), 0);
+    for req in [&running, &pending] {
+        assert_eq!(
+            service.proof_status(req.id()).await.unwrap(),
+            ProofStatus::Cancelled
+        );
+        assert!(
+            service
+                .get_next_proof(get_next_proof_request_for(req))
+                .await
+                .unwrap()
+                .locked_request
+                .is_none()
+        );
+        assert!(matches!(
+            service.get_proof(req.id()).await.unwrap(),
+            ProofResponse::Failed(_)
+        ));
+    }
+    assert_eq!(
+        service.get_proof(completed.id()).await.unwrap(),
+        ProofResponse::Succeeded(proof_for(&completed))
+    );
+    assert_eq!(
+        service.proof_status(unrelated.id()).await.unwrap(),
+        ProofStatus::Created
+    );
+    assert!(matches!(
+        service
+            .heartbeat(crate::HeartbeatRequest {
+                proof_id: running.id(),
+                worker_id: worker_id(),
+                lock_id: lock.lock_id,
+            })
+            .await,
+        Err(ProofJobQueueError::AlreadyTerminal(_))
+    ));
+    assert!(
+        service
+            .submit_proof(submit_proof_request(proof_for(&running), lock.lock_id))
+            .await
+            .is_err()
+    );
+    assert!(
+        service
+            .record_proof_session(record_proof_session_request(
+                running.id(),
+                SessionType::Stark,
+                lock.lock_id,
+                backend_session_id(50),
+                BackendSessionStatus::Completed,
+                None,
+            ))
+            .await
+            .is_err()
+    );
+    let session_status: String =
+        sqlx::query_scalar("SELECT status FROM proof_sessions WHERE proof_id = $1")
+            .bind(running.id().0.as_slice())
+            .fetch_one(service.pool())
+            .await
+            .unwrap();
+    assert_eq!(session_status, "RUNNING");
+
+    service.request_proof(running.clone()).await.unwrap();
+    let retries: i32 =
+        sqlx::query_scalar("SELECT retry_count FROM proof_requests WHERE proof_id = $1")
+            .bind(running.id().0.as_slice())
+            .fetch_one(service.pool())
+            .await
+            .unwrap();
+    assert_eq!(retries, 0);
+    let restarted = service
+        .get_next_proof(get_next_proof_request_for(&running))
+        .await
+        .unwrap()
+        .locked_request
+        .unwrap();
+    assert_ne!(lock.lock_id, restarted.lock_id);
+    let resumed_session = service
+        .get_proof_session(get_proof_session_request(running.id(), SessionType::Stark))
+        .await
+        .unwrap()
+        .session
+        .unwrap();
+    assert_eq!(resumed_session.backend_session_id, backend_session_id(50));
+    assert_eq!(resumed_session.status, BackendSessionStatus::Running);
+    assert!(
+        service
+            .submit_proof(submit_proof_request(proof_for(&running), lock.lock_id))
+            .await
+            .is_err()
+    );
+    service
+        .submit_proof(submit_proof_request(proof_for(&running), restarted.lock_id))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn cleanup_retains_needed_jobs_and_cancels_after_council_support() {
+    use crate::status_poller::{cancel_obsolete_proofs, tests::push_game_state};
+    use alloy_provider::ProviderBuilder;
+    use alloy_transport::mock::Asserter;
+
+    let ctx = service(test_config()).await.expect("Postgres is required");
+    let service = &ctx.service;
+    let req = request(ProofBackend::Sp1, 60);
+    service.request_proof(req.clone()).await.unwrap();
+    let asserter = Asserter::new();
+    let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
+
+    asserter.push_failure_msg("L1 unavailable");
+    cancel_obsolete_proofs(service, &provider).await.unwrap();
+    assert_eq!(
+        service.proof_status(req.id()).await.unwrap(),
+        ProofStatus::Created
+    );
+    push_game_state(&asserter, 0, 1, 4);
+    cancel_obsolete_proofs(service, &provider).await.unwrap();
+    assert_eq!(
+        service.proof_status(req.id()).await.unwrap(),
+        ProofStatus::Created
+    );
+    push_game_state(&asserter, 0, 3, 6);
+    cancel_obsolete_proofs(service, &provider).await.unwrap();
+    assert_eq!(
+        service.proof_status(req.id()).await.unwrap(),
+        ProofStatus::Cancelled
+    );
+    assert!(service.active_games().await.unwrap().is_empty());
+}
+
 fn get_next_proof_request_for(request: &ProofRequest) -> GetNextProofRequest {
     GetNextProofRequest {
         backend: request.backend,

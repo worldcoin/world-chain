@@ -85,6 +85,16 @@ pub enum ProposalStatus {
 }
 
 impl ProposalStatus {
+    /// Whether the contract has accepted enough proof lanes for the current proposal state.
+    /// A later challenge can reset this, requiring additional support.
+    #[must_use]
+    pub const fn has_sufficient_proof_support(self) -> bool {
+        matches!(
+            self,
+            Self::UnchallengedAndValidProofProvided | Self::ChallengedAndValidProofProvided
+        )
+    }
+
     /// Whether a challenger can still dispute this proposal.
     ///
     /// A proven proposal stays challengeable until its window closes: an accepted lane only
