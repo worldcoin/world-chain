@@ -13,3 +13,17 @@ Only asynchronous proof progress is retained between ticks. Each tick reconstruc
 drops proof workflows for games that are no longer selected. A proof-timeout retry therefore moves
 the defender to the replacement attempt. Descendants of the invalidated attempt need no further
 proof support: the proposer bond manager resolves them as `INVALID_PARENT` and claims their refunds.
+
+## Private proof submission
+
+Set `L1_SUBMISSION_RPC_URL` to a private relay RPC for proof estimation and submission,
+with no public fallback. Reads and receipt checks use the existing L1 RPCs.
+If unset, submissions use the normal L1 RPC.
+
+Private submission mitigates reward theft. Residual relay/builder trust and reorg risks
+are acknowledged and accepted.
+
+After a submission attempt, a different accepted lane recipient emits
+`proof_reward_recipient_mismatch` (possible frontrun or competing prover). Checks retry on RPC
+errors and run before game cleanup; tracking lasts for the current process and ends after the
+recipient is checked. This is not a persistent reorg monitor.

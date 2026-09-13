@@ -4,11 +4,12 @@ use crate::{
     types::{DefenderSubmission, GameMetadata},
 };
 use alloy_primitives::{Address, Bytes, U256};
-use alloy_provider::Provider;
+use alloy_provider::{PendingTransactionBuilder, Provider};
 use alloy_sol_types::SolInterface;
 use async_trait::async_trait;
-use std::{sync::Arc, time::Duration};
-use tokio::sync::Semaphore;
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use tokio::sync::{Mutex, Semaphore};
+use tracing::warn;
 use world_chain_proof_protocol::{
     ClaimData, IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, PROOF_LANE_COUNT, ProofLane,
@@ -31,6 +32,8 @@ pub struct AlloyDefenderClient<P> {
     reward_recipient: Address,
     semaphore: Arc<Semaphore>,
     provider: P,
+    submission_provider: P,
+    attempted_lanes: Arc<Mutex<HashMap<Address, u8>>>,
 }
 
 impl<P> AlloyDefenderClient<P>
@@ -64,8 +67,17 @@ where
             receipt_timeout,
             reward_recipient,
             semaphore,
+            submission_provider: provider.clone(),
+            attempted_lanes: Arc::default(),
             provider,
         })
+    }
+
+    /// Uses a separate provider for proof estimation and submission, without read-RPC fallback.
+    /// It must use the same chain and signer as the read provider.
+    pub fn with_submission_provider(mut self, provider: P) -> Self {
+        self.submission_provider = provider;
+        self
     }
 
     fn game(&self, address: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
@@ -106,6 +118,55 @@ impl<P> DefenderClient for AlloyDefenderClient<P>
 where
     P: Provider + Clone + Send + Sync + 'static,
 {
+    async fn check_submissions(&self) {
+        let attempts = self.attempted_lanes.lock().await.clone();
+        for (address, attempted) in attempts {
+            let game = self.game(address);
+            let claim = match game.claimData().call().await {
+                Ok(claim) => claim,
+                Err(error) => {
+                    warn!(game_address = %address, %error, "failed to check proof reward recipients; retrying next tick");
+                    continue;
+                }
+            };
+            let mut checked = 0;
+            for (lane, _) in crate::lane::DEFENDED_LANES {
+                if attempted & claim.proofBitmap & lane.mask() == 0 {
+                    continue;
+                }
+                match game.laneRecipient(lane as u8).call().await {
+                    Ok(recipient) => {
+                        if recipient != self.reward_recipient {
+                            warn!(
+                                lifecycle_event = "proof_reward_recipient_mismatch",
+                                game_address = %address,
+                                ?lane,
+                                expected_recipient = %self.reward_recipient,
+                                actual_recipient = %recipient,
+                                "accepted proof credits another recipient; possible frontrun or competing prover"
+                            );
+                        }
+                        checked |= lane.mask();
+                    }
+                    Err(error) => {
+                        warn!(game_address = %address, ?lane, %error, "failed to read proof reward recipient; retrying next tick")
+                    }
+                }
+            }
+            if claim.status == world_chain_proof_protocol::ProposalStatus::Resolved as u8 {
+                // Resolved games cannot accept the remaining unproven lanes.
+                checked |= attempted & !claim.proofBitmap;
+            }
+            let mut attempts = self.attempted_lanes.lock().await;
+            if let Some(lanes) = attempts.get_mut(&address) {
+                *lanes &= !checked;
+                if *lanes == 0 {
+                    attempts.remove(&address);
+                }
+            }
+        }
+    }
+
     async fn game_metadata(&self, address: Address) -> Result<GameMetadata, DefenderError> {
         let game = self.game(address);
         let (
@@ -180,21 +241,23 @@ where
         proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
         let _permit = self.semaphore.acquire().await?;
+        *self.attempted_lanes.lock().await.entry(game).or_default() |= lane.mask();
         let compact = encode_compact_proof(lane, self.reward_recipient, &proof);
-        let pending = self
-            .game(game)
-            .submitProofLane(compact)
-            .send()
-            .await
-            .map_err(|error| {
-                if is_duplicate_lane(&error) {
-                    DefenderError::LaneAlreadyProven { game, lane }
-                } else {
-                    error.into()
-                }
-            })?;
+        // Gas estimation also carries the proof, so it must use the submission provider.
+        let pending =
+            IMultiProofGame::IMultiProofGameInstance::new(game, self.submission_provider.clone())
+                .submitProofLane(compact)
+                .send()
+                .await
+                .map_err(|error| {
+                    if is_duplicate_lane(&error) {
+                        DefenderError::LaneAlreadyProven { game, lane }
+                    } else {
+                        error.into()
+                    }
+                })?;
         let tx_hash = *pending.tx_hash();
-        let receipt = pending
+        let receipt = PendingTransactionBuilder::new(self.provider.root().clone(), tx_hash)
             .with_required_confirmations(self.confirmations)
             .with_timeout(Some(self.receipt_timeout))
             .get_receipt()
@@ -224,4 +287,209 @@ fn is_duplicate_lane(error: &alloy_contract::Error) -> bool {
             ))
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+    use alloy_provider::ProviderBuilder;
+    use alloy_sol_types::SolValue;
+    use alloy_transport::mock::Asserter;
+
+    #[derive(Clone, Default)]
+    struct LogWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn push_claim(reads: &Asserter, status: u8, bitmap: u8) {
+        reads.push_success(&Bytes::from(
+            (
+                U256::from(status),
+                Address::ZERO,
+                U256::from(100),
+                U256::from(bitmap),
+                U256::ZERO,
+            )
+                .abi_encode(),
+        ));
+    }
+
+    #[tokio::test]
+    async fn recipient_mismatch_warns_once_after_submission_and_survives_read_failure() {
+        let logs = LogWriter::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let reads = Asserter::new();
+        let submissions = Asserter::new();
+        submissions.push_failure_msg("relay unavailable");
+        let provider = |asserter| {
+            ProviderBuilder::new()
+                .disable_recommended_fillers()
+                .connect_mocked_client(asserter)
+        };
+        let client =
+            client(provider(reads.clone())).with_submission_provider(provider(submissions));
+        let lane = ProofLane::TeeAttestation;
+        assert!(
+            client
+                .submit_proof(Address::ZERO, lane, Bytes::new())
+                .await
+                .is_err()
+        );
+
+        reads.push_failure_msg("read unavailable");
+        client.check_submissions().await;
+        assert!(!client.attempted_lanes.lock().await.is_empty());
+
+        push_claim(&reads, 0, lane.mask());
+        let other_recipient = Address::repeat_byte(3);
+        reads.push_success(&Bytes::from(other_recipient.abi_encode()));
+        client.check_submissions().await;
+        client.check_submissions().await;
+
+        assert!(client.attempted_lanes.lock().await.is_empty());
+        let output = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(output.matches("proof_reward_recipient_mismatch").count(), 1);
+        assert!(output.contains(&other_recipient.to_string()));
+        assert!(output.contains(&client.reward_recipient.to_string()));
+    }
+
+    #[tokio::test]
+    async fn unaccepted_lane_stays_tracked_until_game_resolves() {
+        let reads = Asserter::new();
+        let client = client(
+            ProviderBuilder::new()
+                .disable_recommended_fillers()
+                .connect_mocked_client(reads.clone()),
+        );
+        client
+            .attempted_lanes
+            .lock()
+            .await
+            .insert(Address::ZERO, ProofLane::TeeAttestation.mask());
+        push_claim(&reads, 0, 0);
+        client.check_submissions().await;
+        assert!(!client.attempted_lanes.lock().await.is_empty());
+        push_claim(
+            &reads,
+            world_chain_proof_protocol::ProposalStatus::Resolved as u8,
+            0,
+        );
+        client.check_submissions().await;
+        assert!(client.attempted_lanes.lock().await.is_empty());
+    }
+
+    fn client<P: Provider + Clone>(provider: P) -> AlloyDefenderClient<P> {
+        AlloyDefenderClient {
+            factory: IDisputeGameFactory::IDisputeGameFactoryInstance::new(
+                Address::ZERO,
+                provider.clone(),
+            ),
+            anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
+                Address::ZERO,
+                provider.clone(),
+            ),
+            registered: RegisteredLineageConfig {
+                domain_hash: B256::ZERO,
+                block_interval: 1,
+                anchor_registry: Address::ZERO,
+            },
+            confirmations: 1,
+            receipt_timeout: Duration::from_secs(1),
+            reward_recipient: Address::repeat_byte(1),
+            semaphore: Arc::new(Semaphore::new(1)),
+            submission_provider: provider.clone(),
+            attempted_lanes: Arc::default(),
+            provider,
+        }
+    }
+
+    #[tokio::test]
+    async fn submission_failure_never_falls_back_to_read_provider() {
+        let reads = Asserter::new();
+        reads.push_failure_msg("public RPC must not receive proof");
+        let submissions = Asserter::new();
+        submissions.push_failure_msg("private submission unavailable");
+        let provider = |asserter| {
+            ProviderBuilder::new()
+                .disable_recommended_fillers()
+                .connect_mocked_client(asserter)
+        };
+        let client =
+            client(provider(reads.clone())).with_submission_provider(provider(submissions.clone()));
+
+        let error = client
+            .submit_proof(Address::ZERO, ProofLane::TeeAttestation, Bytes::new())
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("private submission unavailable"));
+        assert_eq!(reads.read_q().len(), 1);
+        assert!(submissions.read_q().is_empty());
+    }
+
+    #[tokio::test]
+    async fn gas_estimation_failure_never_uses_read_provider() {
+        let reads = Asserter::new();
+        reads.push_failure_msg("public RPC must not receive proof");
+        let submissions = Asserter::new();
+        for _ in 0..4 {
+            submissions.push_failure_msg("private estimation unavailable");
+        }
+        let provider = |asserter| {
+            ProviderBuilder::new()
+                .disable_recommended_fillers()
+                .with_gas_estimation()
+                .connect_mocked_client(asserter)
+        };
+        let client =
+            client(provider(reads.clone())).with_submission_provider(provider(submissions));
+
+        let error = client
+            .submit_proof(Address::ZERO, ProofLane::TeeAttestation, Bytes::new())
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("private estimation unavailable"));
+        assert_eq!(reads.read_q().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn receipt_is_checked_on_read_provider_after_private_submission() {
+        let reads = Asserter::new();
+        reads.push_failure_msg("read RPC receipt check");
+        let submissions = Asserter::new();
+        submissions.push_success(&B256::repeat_byte(2));
+        let provider = |asserter| {
+            ProviderBuilder::new()
+                .disable_recommended_fillers()
+                .connect_mocked_client(asserter)
+        };
+        let client =
+            client(provider(reads.clone())).with_submission_provider(provider(submissions.clone()));
+
+        let error = client
+            .submit_proof(Address::ZERO, ProofLane::TeeAttestation, Bytes::new())
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("read RPC receipt check"));
+        assert!(reads.read_q().is_empty());
+        assert!(submissions.read_q().is_empty());
+    }
 }

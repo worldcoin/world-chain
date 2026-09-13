@@ -337,6 +337,7 @@ where
 
     pub(crate) async fn tick_at(&mut self, now: u64) -> Result<(), DefenderError> {
         self.config.validate()?;
+        self.execution_provider.check_submissions().await;
         let selected = self.selected_lineage().await?;
         self.sync_defenses_with_selected_lineage(selected, now)
             .await?;

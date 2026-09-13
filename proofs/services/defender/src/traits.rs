@@ -8,6 +8,9 @@ use world_chain_proof_protocol::{ClaimData, LineageProvider, ProofLane};
 
 #[async_trait]
 pub trait DefenderClient: LineageProvider {
+    /// Checks previously attempted submissions for unexpected reward recipients.
+    async fn check_submissions(&self) {}
+
     /// Reads the immutable game data needed to monitor and defend its root claim.
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, DefenderError>;
     /// Reads the proposal's mutable state: challenge status and the accepted proof lanes.
