@@ -1,5 +1,5 @@
 use crate::{error::DefenderError, traits::DefenderClient, types::GameMetadata};
-use world_chain_proof_protocol::{GameStatus, InvalidationReason, ProposalStatus, proof_count};
+use world_chain_proof_protocol::{GameStatus, InvalidationReason, ProposalStatus};
 
 /// On-chain state relevant to proof support for one selected game.
 #[derive(Debug, PartialEq, Eq)]
@@ -59,13 +59,13 @@ where
             ProposalStatus::Unchallenged | ProposalStatus::UnchallengedAndValidProofProvided => {
                 GameObservation::Proposed {
                     proof_bitmap,
-                    has_initial_support: proof_bitmap != 0,
+                    has_initial_support: claim.status.has_sufficient_proof_support(),
                 }
             }
             ProposalStatus::Challenged | ProposalStatus::ChallengedAndValidProofProvided => {
                 GameObservation::Challenged {
                     proof_bitmap,
-                    has_required_support: proof_count(proof_bitmap) >= game.proof_threshold,
+                    has_required_support: claim.status.has_sufficient_proof_support(),
                 }
             }
             // The game sets `Resolved` and its `GameStatus` in the same call, so this is only

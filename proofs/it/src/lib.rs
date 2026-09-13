@@ -65,11 +65,15 @@ impl GameLifecycle {
         }
     }
 
-    const fn proposal_status(self, proven: bool) -> ProposalStatus {
+    const fn proposal_status(self, proof_bitmap: u8) -> ProposalStatus {
         match self {
-            Self::Proposed if proven => ProposalStatus::UnchallengedAndValidProofProvided,
+            Self::Proposed if proof_bitmap != 0 => {
+                ProposalStatus::UnchallengedAndValidProofProvided
+            }
             Self::Proposed => ProposalStatus::Unchallenged,
-            Self::Challenged if proven => ProposalStatus::ChallengedAndValidProofProvided,
+            Self::Challenged if has_threshold(proof_bitmap) => {
+                ProposalStatus::ChallengedAndValidProofProvided
+            }
             Self::Challenged => ProposalStatus::Challenged,
             Self::Finalized | Self::Invalidated => ProposalStatus::Resolved,
         }
@@ -553,7 +557,7 @@ impl ChallengerClient for FakeExecution {
             .games_by_address
             .get(&game)
             .map_or(ProposalStatus::Resolved, |record| {
-                record.state.proposal_status(record.proof_bitmap != 0)
+                record.state.proposal_status(record.proof_bitmap)
             }))
     }
 
@@ -616,7 +620,7 @@ impl DefenderClient for FakeExecution {
             .games_by_address
             .get(&game)
             .map(|record| ClaimData {
-                status: record.state.proposal_status(record.proof_bitmap != 0),
+                status: record.state.proposal_status(record.proof_bitmap),
                 challenger: Address::ZERO,
                 deadline: record.proof_deadline,
                 proof_bitmap: record.proof_bitmap,

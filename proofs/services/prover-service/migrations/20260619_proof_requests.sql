@@ -24,7 +24,7 @@ CREATE TABLE proof_requests (
     finished_at         TIMESTAMPTZ NULL,
 
     CONSTRAINT proof_requests_status_check
-        CHECK (proof_status IN ('CREATED', 'RUNNING', 'SUCCEEDED', 'FAILED')),
+        CHECK (proof_status IN ('CREATED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')),
     CONSTRAINT proof_requests_job_status_check
         CHECK (job_status IN ('PENDING', 'CLAIMED', 'SUCCEEDED', 'FAILED'))
    

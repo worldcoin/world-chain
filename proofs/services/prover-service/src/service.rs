@@ -10,6 +10,7 @@ use crate::{
         SubmitProofRequest, SubmitProofResponse,
     },
 };
+use alloy_primitives::Address;
 use async_trait::async_trait;
 use sqlx::{PgPool, migrate::MigrateError};
 
@@ -55,6 +56,14 @@ impl ProverService {
     /// Mark proof requests that exhausted all worker attempts as failed.
     pub(crate) async fn mark_exhausted_proof_requests_failed(&self) -> Result<u64, sqlx::Error> {
         self.store.mark_exhausted_proof_requests_failed().await
+    }
+
+    pub(crate) async fn active_games(&self) -> Result<Vec<Address>, ProofJobQueueError> {
+        self.store.active_games().await
+    }
+
+    pub(crate) async fn cancel_game_proofs(&self, game: Address) -> Result<u64, sqlx::Error> {
+        self.store.cancel_game_proofs(game).await
     }
 }
 

@@ -5,6 +5,7 @@ use crate::{
         InitiatedWithdrawal, OptimismPortal::OptimismPortalInstance, OutputRootProof,
         ProveWithdrawal,
     },
+    storage,
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
@@ -24,18 +25,17 @@ const L2_TO_L1_MESSAGE_PASSER: Address = address!("42000000000000000000000000000
 /// Run the `prove` command.
 pub async fn run(args: &ProveArgs) -> eyre::Result<()> {
     // create L1 signer provider
-    let local_signer = PrivateKeySigner::from_str(&args.l1_private_key)?;
+    let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key)?;
     let l1_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
-        .connect(&args.l1_rpc_endpoint)
+        .connect(&args.l1_args.l1_rpc_endpoint)
         .await?;
     // create L2 provider
     let l2_provider = ProviderBuilder::new()
         .connect(&args.l2_rpc_endpoint)
         .await?;
-    // read InitiatedWithdrawl data from .json file
-    let initiated_withdrawal: InitiatedWithdrawal =
-        serde_json::from_slice(&std::fs::read("initiated_withdrawal.json")?)?;
+    // read InitiatedWithdrawal data (local path or s3://bucket/key)
+    let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.initiated).await?;
     // wait for a covering WIP1006 game with l2SequenceNumber >= initiated_withdrawal.l2_block
     let (game_index, game_addr, game_l2_block) = check_multi_proof_game(
         &l1_provider,
@@ -81,10 +81,7 @@ pub async fn run(args: &ProveArgs) -> eyre::Result<()> {
         game_addr,
         proven_at: l1_timestamp,
     };
-    std::fs::write(
-        "prove_withdrawal.json",
-        serde_json::to_string_pretty(&prove_withdrawal)?,
-    )?;
+    storage::write_json(&args.proven, &prove_withdrawal).await?;
     Ok(())
 }
 
