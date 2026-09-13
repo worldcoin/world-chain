@@ -5,15 +5,15 @@
     "pcr2": "0xe450f74cc921eb79a3a251c086f5ed7eaf08592b764f20c5283a18194a71330123c9e5baf4de52651467692b6c62a260"
   },
   "sp1": {
-    "aggregation_vkey": "0x00fb7ca85d7922967881ab09e6fae7ae8915bafae8b68dbe5916fc85ba713512",
+    "aggregation_vkey": "0x001c8515b50facc18689d36b06a36f1a9cc6fafa0e766590f0886f04855fb2e2",
     "elfs": {
       "world-chain-aggregation": {
-        "sha256": "e3ec744f238c13bb5bcb68d857eaaae8c6aeadfe9dc66b1123245544e66951a4"
+        "sha256": "d9792733f8ec398e39db2789d1227e8455de3865ddf03a6f5868fc14a740ad0a"
       },
       "world-chain-range-ethereum": {
-        "sha256": "dc641f7947115447055b3f920baa096e5c8e6fe60393d28f01d43abcaab0f762"
+        "sha256": "c9e38196c56b2edd51e0703b784a51d7ee49d3a5a98138a76bc99a7cbddc811e"
       }
     },
-    "range_vkey_commitment": "0x064beceb415ae52257dd1c8353d1dd892ff66d136957f14c4783430743a0e94c"
+    "range_vkey_commitment": "0x178129a8506f1ac250d748b27cbab9b4679108f402b57ab901a40f28666bde91"
   }
 }
