@@ -425,11 +425,25 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @notice Checks if the game is factory-registered, was respected when created, and has not
-    ///         been invalidated by blacklisting, retirement, or a challenger win.
+    ///         been invalidated by blacklisting, retirement, or a challenger win — including a
+    ///         local proof-timeout doom from `resolutionStatus` before the game has settled.
     function _isValidGame(IDisputeGame game) internal view returns (bool) {
-        return anchorStateRegistry.isGameRegistered(game) && anchorStateRegistry.isGameRespected(game)
-            && !anchorStateRegistry.isGameBlacklisted(game) && !anchorStateRegistry.isGameRetired(game)
-            && (game.status() != GameStatus.CHALLENGER_WINS);
+        if (
+            !anchorStateRegistry.isGameRegistered(game) || !anchorStateRegistry.isGameRespected(game)
+                || anchorStateRegistry.isGameBlacklisted(game) || anchorStateRegistry.isGameRetired(game)
+        ) {
+            return false;
+        }
+        // Parents of other game types, including an anchor inherited at cutover, only
+        // expose the standard dispute-game status getter.
+        if (game.gameType().raw() != GameTypes.MULTI_PROOF_GAME_TYPE.raw()) {
+            return game.status() != GameStatus.CHALLENGER_WINS;
+        }
+        // `status()` alone is insufficient: an unproven parent whose clock has expired stays
+        // `IN_PROGRESS` until its own parent resolves, but `resolutionStatus` already surfaces
+        // `CHALLENGER_WINS` / `PROOF_TIMEOUT` so keepers (and child creation) can stop on it.
+        (, GameStatus outcome,) = IMultiProofGame(address(game)).resolutionStatus();
+        return outcome != GameStatus.CHALLENGER_WINS;
     }
 
     function _isValidParent(address parentRef_) internal view returns (bool) {
