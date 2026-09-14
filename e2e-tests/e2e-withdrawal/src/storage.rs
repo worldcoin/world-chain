@@ -203,7 +203,7 @@ async fn with_deadline<T>(
     location: &str,
     future: impl std::future::Future<Output = eyre::Result<T>>,
 ) -> eyre::Result<T> {
-    tokio::time::timeout(crate::cmd::DEFAULT_TIMEOUT, future)
+    tokio::time::timeout(crate::cmd::rpc::DEFAULT_TIMEOUT, future)
         .await
         .wrap_err_with(|| {
             format!("storage {operation} timed out after 30 seconds at `{location}`")

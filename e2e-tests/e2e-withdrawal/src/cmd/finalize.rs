@@ -107,7 +107,7 @@ pub async fn run(args: &FinalizeArgs) -> Result<StepOutcome, StepError> {
         .map_err(|err| StepError::Generic(err.into()))?;
     let tx_hash = *pending_tx.tx_hash();
     let receipt =
-        super::receipt_with_deadline(tx_hash, StepStage::Finalize, pending_tx.get_receipt())
+        super::rpc::receipt_with_deadline(tx_hash, StepStage::Finalize, pending_tx.get_receipt())
             .await?;
     if !receipt.status() {
         return Err(StepError::Generic(eyre!(

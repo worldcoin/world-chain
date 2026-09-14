@@ -72,7 +72,7 @@ where
         .await?;
     let tx_hash = *pending.tx_hash();
     let receipt =
-        super::receipt_with_deadline(tx_hash, StepStage::Init, pending.get_receipt()).await?;
+        super::rpc::receipt_with_deadline(tx_hash, StepStage::Init, pending.get_receipt()).await?;
     ensure!(receipt.status(), "L2 withdrawal initiation reverted");
     let tx_hash = receipt.transaction_hash();
     let initiated_withdrawal = initiated_withdrawal_from_receipt(&receipt)?;

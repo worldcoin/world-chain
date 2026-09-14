@@ -3,6 +3,7 @@ use alloy_provider::transport::{TransportError, TransportErrorKind, TransportFut
 use alloy_rpc_client::RpcClient;
 use alloy_transport_http::Http;
 use backoff::{ExponentialBackoff, backoff::Backoff};
+use eyre::eyre::WrapErr;
 use std::{
     task::{Context, Poll},
     time::Duration,
@@ -11,12 +12,32 @@ use tower::Service;
 
 const MAX_ATTEMPTS: u32 = 3;
 
+/// Default deadline for RPC requests, receipt waits and storage attempts.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Bound the entire receipt wait, including any in-flight RPC at the deadline.
+pub async fn receipt_with_deadline<T, E>(
+    transaction_hash: alloy_primitives::B256,
+    stage: crate::types::StepStage,
+    future: impl std::future::Future<Output = Result<T, E>>,
+) -> eyre::Result<T>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    tokio::time::timeout(DEFAULT_TIMEOUT, future)
+        .await
+        .wrap_err_with(|| {
+            format!("{stage} receipt timed out after 30 seconds; transaction {transaction_hash}")
+        })?
+        .wrap_err_with(|| format!("{stage} receipt failed; transaction {transaction_hash}"))
+}
+
 /// Apply retries below the provider so receipt polling and transaction fillers
 /// get the same policy as explicit reads. Submission requests are never retried.
 pub fn client(endpoint: &str, field: &'static str) -> eyre::Result<RpcClient> {
     let url = crate::args::rpc_url(endpoint, field)?;
     let client = reqwest::Client::builder()
-        .timeout(super::DEFAULT_TIMEOUT)
+        .timeout(DEFAULT_TIMEOUT)
         .retry(reqwest::retry::never())
         .build()?;
     let inner = Http::with_client(client, url);

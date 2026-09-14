@@ -78,7 +78,8 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
         .map_err(|err| StepError::Generic(err.into()))?;
     let tx_hash = *pending_tx.tx_hash();
     let receipt =
-        super::receipt_with_deadline(tx_hash, StepStage::Prove, pending_tx.get_receipt()).await?;
+        super::rpc::receipt_with_deadline(tx_hash, StepStage::Prove, pending_tx.get_receipt())
+            .await?;
     if !receipt.status() {
         return Err(StepError::Generic(eyre!(
             "ProveWithdrawalTransaction tx has not succeeded. Tx hash: {}",
