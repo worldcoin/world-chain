@@ -4,9 +4,10 @@ use crate::{
     storage,
     types::{InitiatedOutcome, StepError, StepOutcome, StepStage},
 };
-use alloy_network::EthereumWallet;
+use alloy_network::{EthereumWallet, ReceiptResponse};
 use alloy_primitives::{Address, B256, Bytes, U256, address};
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types::TransactionReceipt;
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::{OptionExt, ensure};
 use std::str::FromStr;
@@ -50,6 +51,20 @@ pub async fn run(args: &InitArgs) -> Result<StepOutcome, StepError> {
     Ok(StepOutcome::Initiated(initiated_outcome))
 }
 
+/// Reconstruct an [`InitiatedWithdrawal`] from a known initiation transaction.
+pub async fn recover_initiated_withdrawal<P: Provider>(
+    provider: P,
+    transaction_hash: B256,
+) -> Result<InitiatedWithdrawal, StepError> {
+    let receipt = provider
+        .get_transaction_receipt(transaction_hash)
+        .await
+        .map_err(|err| StepError::Generic(err.into()))?
+        .ok_or_eyre("init withdrawal receipt missing")
+        .map_err(|err| StepError::Generic(err))?;
+    initiated_withdrawal_from_receipt(&receipt).map_err(StepError::Generic)
+}
+
 async fn initiate_withdrawal<P>(
     provider: P,
     target_addr: Address,
@@ -67,9 +82,16 @@ where
         .get_receipt()
         .await?;
     ensure!(receipt.status(), "L2 withdrawal initiation reverted");
+    let tx_hash = receipt.transaction_hash();
+    let initiated_withdrawal = initiated_withdrawal_from_receipt(&receipt)?;
+    Ok((initiated_withdrawal, tx_hash))
+}
 
+fn initiated_withdrawal_from_receipt(
+    receipt: &TransactionReceipt,
+) -> eyre::Result<InitiatedWithdrawal> {
     let l2_block = receipt
-        .block_number
+        .block_number()
         .ok_or_eyre("withdrawal receipt missing L2 block number")?;
     let message = receipt
         .logs()
@@ -80,21 +102,16 @@ where
         })
         .ok_or_eyre("withdrawal receipt missing MessagePassed event")?;
     let message = message.data();
-    let tx_hash = receipt.transaction_hash;
-
-    Ok((
-        InitiatedWithdrawal {
-            transaction: WithdrawalTransaction {
-                nonce: message.nonce,
-                sender: message.sender,
-                target: message.target,
-                value: message.value,
-                gasLimit: message.gasLimit,
-                data: message.data.clone(),
-            },
-            hash: message.withdrawalHash,
-            l2_block,
+    Ok(InitiatedWithdrawal {
+        transaction: WithdrawalTransaction {
+            nonce: message.nonce,
+            sender: message.sender,
+            target: message.target,
+            value: message.value,
+            gasLimit: message.gasLimit,
+            data: message.data.clone(),
         },
-        tx_hash,
-    ))
+        hash: message.withdrawalHash,
+        l2_block,
+    })
 }

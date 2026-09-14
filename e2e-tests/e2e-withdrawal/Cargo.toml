@@ -20,6 +20,7 @@ alloy-sol-types.workspace = true
 alloy-contract.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
+alloy-rpc-types.workspace = true
 
 # aws
 aws-config.workspace = true

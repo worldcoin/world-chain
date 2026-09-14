@@ -4756,6 +4756,7 @@ dependencies = [
  "alloy-network 2.1.1",
  "alloy-primitives",
  "alloy-provider",
+ "alloy-rpc-types",
  "alloy-signer-local 2.1.1",
  "alloy-sol-types",
  "async-trait",

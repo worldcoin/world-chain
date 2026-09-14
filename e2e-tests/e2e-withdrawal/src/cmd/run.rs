@@ -1,21 +1,12 @@
 use crate::{
     args::StepArgs,
-    bindings::{
-        IDisputeGameFactory::IDisputeGameFactoryInstance, IMultiProofGame::IMultiProofGameInstance,
-        InitiatedWithdrawal, L2ToL1MessagePasser, OptimismPortal, ProveWithdrawal,
-        WithdrawalTransaction,
-    },
-    cmd::step,
+    cmd::{init, prove, step},
     storage,
     types::{StepError, StepOutcome, StepStage},
 };
-use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::BlockId;
-use alloy_primitives::{B256, U256, ruint::FromUintError};
-use alloy_provider::{Provider, ProviderBuilder};
-use alloy_sol_types::SolCall;
+use alloy_primitives::B256;
+use alloy_provider::ProviderBuilder;
 use backoff::{Error as BackoffError, ExponentialBackoff, future::retry_notify};
-use eyre::eyre::OptionExt;
 use serde::Serialize;
 use std::time::Duration;
 
@@ -51,7 +42,7 @@ pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
                 continue;
             }
 
-            // if error is `PersistenceAfterTransaction` we need to gether the tx receipt,
+            // if error is `PersistenceAfterTransaction` we need to gather the tx receipt,
             // recreate the needed data, save it and then continue the loop
             if let StepError::PersistenceAfterTransaction {
                 transaction_hash,
@@ -65,35 +56,9 @@ pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
                             .connect(&args.l2_rpc_endpoint)
                             .await
                             .map_err(|err| StepError::Generic(err.into()))?;
-                        let receipt = l2_provider
-                            .get_transaction_receipt(*transaction_hash)
-                            .await
-                            .map_err(|err| StepError::Generic(err.into()))?
-                            .ok_or_eyre("init withdrawal receipt missing")?;
-                        let l2_block = receipt
-                            .block_number
-                            .ok_or_eyre("withdrawal receipt missing L2 block number")?;
-                        let message = receipt
-                            .logs()
-                            .iter()
-                            .find_map(|log| {
-                                log.log_decode_validate::<L2ToL1MessagePasser::MessagePassed>()
-                                    .ok()
-                            })
-                            .ok_or_eyre("withdrawal receipt missing MessagePassed event")?;
-                        let message = message.data();
-                        let initiated_withdrawal = InitiatedWithdrawal {
-                            transaction: WithdrawalTransaction {
-                                nonce: message.nonce,
-                                sender: message.sender,
-                                target: message.target,
-                                value: message.value,
-                                gasLimit: message.gasLimit,
-                                data: message.data.clone(),
-                            },
-                            hash: message.withdrawalHash,
-                            l2_block,
-                        };
+                        let initiated_withdrawal =
+                            init::recover_initiated_withdrawal(l2_provider, *transaction_hash)
+                                .await?;
                         write_json_with_backoff(
                             &args.initiated,
                             &initiated_withdrawal,
@@ -109,64 +74,16 @@ pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
                             .connect(&args.l1_args.l1_rpc_endpoint)
                             .await
                             .map_err(|err| StepError::Generic(err.into()))?;
-                        // initiated handoff is still present; proven write is what failed
-                        let initiated_withdrawal: InitiatedWithdrawal =
-                            storage::read_json(&args.initiated)
-                                .await
-                                .map_err(|err| StepError::Generic(err.into()))?;
-                        let receipt = l1_provider
-                            .get_transaction_receipt(*transaction_hash)
-                            .await
-                            .map_err(|err| StepError::Generic(err.into()))?
-                            .ok_or_eyre("prove withdrawal receipt missing")?;
-                        let block_number = receipt
-                            .block_number
-                            .ok_or_eyre("prove receipt missing L1 block number")?;
-                        let block = l1_provider
-                            .get_block(BlockId::number(block_number))
-                            .await
-                            .map_err(|err| StepError::Generic(err.into()))?
-                            .ok_or_eyre("prove L1 block not found")?;
-                        let proven_at = block.header.timestamp();
-                        // recover the dispute game index from the prove calldata
-                        let tx = l1_provider
-                            .get_transaction_by_hash(*transaction_hash)
-                            .await
-                            .map_err(|err| StepError::Generic(err.into()))?
-                            .ok_or_eyre("prove transaction missing")?;
-                        let call =
-                            OptimismPortal::proveWithdrawalTransactionCall::abi_decode(tx.input())
-                                .map_err(|err| StepError::Generic(err.into()))?;
-                        let game_index: u64 = call
-                            .disputeGameIndex
-                            .try_into()
-                            .map_err(|err: FromUintError<u64>| StepError::Generic(err.into()))?;
-                        let factory = IDisputeGameFactoryInstance::new(
-                            args.dispute_game_factory,
-                            &l1_provider,
-                        );
-                        let entry = factory
-                            .gameAtIndex(U256::from(game_index))
-                            .call()
+                        let initiated_withdrawal = storage::read_json(&args.initiated)
                             .await
                             .map_err(|err| StepError::Generic(err.into()))?;
-                        let game_addr = entry.proxy;
-                        let game = IMultiProofGameInstance::new(game_addr, &l1_provider);
-                        let game_l2_block: u64 = game
-                            .l2SequenceNumber()
-                            .call()
-                            .await
-                            .map_err(|err| StepError::Generic(err.into()))?
-                            .try_into()
-                            .map_err(|err: FromUintError<u64>| StepError::Generic(err.into()))?;
-                        let prove_withdrawal = ProveWithdrawal {
-                            transaction: initiated_withdrawal.transaction,
-                            hash: initiated_withdrawal.hash,
-                            game_index,
-                            game_l2_block,
-                            game_addr,
-                            proven_at,
-                        };
+                        let prove_withdrawal = prove::recover_prove_withdrawal(
+                            &l1_provider,
+                            args.dispute_game_factory,
+                            *transaction_hash,
+                            initiated_withdrawal,
+                        )
+                        .await?;
                         write_json_with_backoff(
                             &args.proven,
                             &prove_withdrawal,
