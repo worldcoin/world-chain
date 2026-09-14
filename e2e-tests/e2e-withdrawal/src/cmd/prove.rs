@@ -110,6 +110,7 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
         .await
         .map_err(|err| StepError::PersistenceAfterTransaction {
             transaction_hash: receipt.transaction_hash,
+            stage: StepStage::Prove,
             source: err.into(),
         })?;
     Ok(StepOutcome::Proven(ProvenOutcome {

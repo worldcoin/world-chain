@@ -2,7 +2,7 @@ use crate::{
     args::InitArgs,
     bindings::{InitiatedWithdrawal, L2ToL1MessagePasser, WithdrawalTransaction},
     storage,
-    types::{InitiatedOutcome, StepError, StepOutcome},
+    types::{InitiatedOutcome, StepError, StepOutcome, StepStage},
 };
 use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, B256, Bytes, U256, address};
@@ -36,6 +36,7 @@ pub async fn run(args: &InitArgs) -> Result<StepOutcome, StepError> {
         .await
         .map_err(|err| StepError::PersistenceAfterTransaction {
             transaction_hash: tx_hash,
+            stage: StepStage::Init,
             source: err.into(),
         })?;
     // create the StepOutcome

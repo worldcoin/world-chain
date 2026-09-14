@@ -1,10 +1,11 @@
-use alloy_primitives::{B256, BlockNumber};
+use alloy_primitives::{Address, B256, BlockNumber, TxHash};
 
 #[derive(Debug)]
 pub enum StepOutcome {
     Initiated(InitiatedOutcome),
     Proven(ProvenOutcome),
     Waiting(WaitingOutcome),
+    Finalized(FinalizedOutcome),
 }
 
 #[derive(Debug)]
@@ -22,6 +23,17 @@ pub struct ProvenOutcome {
 }
 
 #[derive(Debug)]
+pub enum FinalizedOutcome {
+    AlreadyFinalized {
+        withdrawal_hash: B256,
+    },
+    Finalized {
+        witdrawal_hash: B256,
+        tx_hash: TxHash,
+    },
+}
+
+#[derive(Debug)]
 pub struct WaitingOutcome {
     pub withdrawal_hash: B256,
     pub stage: StepStage,
@@ -36,9 +48,23 @@ pub enum StepStage {
     Cleanup,
 }
 
+impl std::fmt::Display for StepStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            StepStage::Init => "init",
+            StepStage::Prove => "prove",
+            StepStage::Finalize => "finalize",
+            StepStage::Cleanup => "cleanup",
+        };
+        write!(f, "{s}")
+    }
+}
+
 #[derive(Debug)]
 pub enum WaitingReason {
     CoveringGameUnavailable { withdrawal_l2_block: BlockNumber },
+    ProofMaturityNotElapsed { eligible_at: u64 },
+    GameClaimIsNotValid { game_address: Address },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -48,10 +74,11 @@ pub enum StepError {
     Generic(eyre::Report),
     /// Persistence error after transaction has already been sent onchain.
     #[error(
-        "Persistence error after transaction has already been sent onchain. Tx hash: {transaction_hash}, source: {source}"
+        "Persistence error after transaction has already been sent onchain. Tx hash: {transaction_hash}, stage: {stage}, source: {source}"
     )]
     PersistenceAfterTransaction {
         transaction_hash: B256,
+        stage: StepStage,
         source: eyre::Report,
     },
 }
