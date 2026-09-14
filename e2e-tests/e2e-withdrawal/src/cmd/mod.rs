@@ -1,4 +1,7 @@
-use crate::args::{FinalizeArgs, InitArgs, ProveArgs, StepArgs};
+use crate::{
+    args::{FinalizeArgs, InitArgs, ProveArgs, StepArgs},
+    types::{StepError, StepOutcome},
+};
 use clap::Subcommand;
 
 mod finalize;
@@ -32,7 +35,7 @@ pub enum Command {
 
 impl Command {
     /// Run the command to completion.
-    pub async fn run(&self) -> eyre::Result<()> {
+    pub async fn run(&self) -> Result<StepOutcome, StepError> {
         match self {
             Self::Init(args) => init::run(args).await,
             Self::Prove(args) => prove::run(args).await,

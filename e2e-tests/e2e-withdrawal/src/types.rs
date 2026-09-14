@@ -3,6 +3,8 @@ use alloy_primitives::{B256, BlockNumber};
 #[derive(Debug)]
 pub enum StepOutcome {
     Initiated(InitiatedOutcome),
+    Proven(ProvenOutcome),
+    Waiting(WaitingOutcome),
 }
 
 #[derive(Debug)]
@@ -10,6 +12,33 @@ pub struct InitiatedOutcome {
     pub tx_hash: B256,
     pub withdrawal_hash: B256,
     pub l2_block: BlockNumber,
+}
+
+#[derive(Debug)]
+pub struct ProvenOutcome {
+    pub tx_hash: B256,
+    pub withdrawal_hash: B256,
+    pub l2_block: BlockNumber,
+}
+
+#[derive(Debug)]
+pub struct WaitingOutcome {
+    pub withdrawal_hash: B256,
+    pub stage: StepStage,
+    pub waiting_reason: WaitingReason,
+}
+
+#[derive(Debug)]
+pub enum StepStage {
+    Init,
+    Prove,
+    Finalize,
+    Cleanup,
+}
+
+#[derive(Debug)]
+pub enum WaitingReason {
+    CoveringGameUnavailable { withdrawal_l2_block: BlockNumber },
 }
 
 #[derive(Debug, thiserror::Error)]

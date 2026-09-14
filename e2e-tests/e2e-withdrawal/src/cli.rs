@@ -1,4 +1,7 @@
-use crate::cmd::Command;
+use crate::{
+    cmd::Command,
+    types::{StepError, StepOutcome},
+};
 use clap::Parser;
 
 /// Cli struct for the alphanet-withdrawal binary.
@@ -11,7 +14,7 @@ pub struct Cli {
 
 impl Cli {
     /// Run the cli binary to completion.
-    pub async fn run(&self) -> eyre::Result<()> {
+    pub async fn run(&self) -> Result<StepOutcome, StepError> {
         self.command.run().await
     }
 }

@@ -6,11 +6,12 @@ use crate::{
         ProveWithdrawal,
     },
     storage,
+    types::{ProvenOutcome, StepError, StepOutcome, StepStage, WaitingOutcome, WaitingReason},
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::{EthereumWallet, ReceiptResponse};
-use alloy_primitives::{Address, B256, Bytes, U256, address, keccak256};
+use alloy_primitives::{Address, B256, Bytes, U256, address, keccak256, ruint::FromUintError};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::SolValue;
@@ -23,29 +24,45 @@ const MULTI_PROOF_GAME_TYPE: u32 = 1006;
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("4200000000000000000000000000000000000016");
 
 /// Run the `prove` command.
-pub async fn run(args: &ProveArgs) -> eyre::Result<()> {
+pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     // create L1 signer provider
-    let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key)?;
+    let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key)
+        .map_err(|err| StepError::Generic(err.into()))?;
     let l1_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
         .connect(&args.l1_args.l1_rpc_endpoint)
-        .await?;
+        .await
+        .map_err(|err| StepError::Generic(err.into()))?;
     // create L2 provider
     let l2_provider = ProviderBuilder::new()
         .connect(&args.l2_rpc_endpoint)
-        .await?;
+        .await
+        .map_err(|err| StepError::Generic(err.into()))?;
     // read InitiatedWithdrawal data (local path or s3://bucket/key)
-    let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.initiated).await?;
+    let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.initiated)
+        .await
+        .map_err(|err| StepError::Generic(err.into()))?;
     // wait for a covering WIP1006 game with l2SequenceNumber >= initiated_withdrawal.l2_block
-    let (game_index, game_addr, game_l2_block) = check_multi_proof_game(
+    let Some((game_index, game_addr, game_l2_block)) = check_multi_proof_game(
         &l1_provider,
         args.dispute_game_factory,
         initiated_withdrawal.l2_block,
     )
-    .await?;
+    .await?
+    else {
+        return Ok(StepOutcome::Waiting(WaitingOutcome {
+            withdrawal_hash: initiated_withdrawal.hash,
+            stage: StepStage::Prove,
+            waiting_reason: WaitingReason::CoveringGameUnavailable {
+                withdrawal_l2_block: initiated_withdrawal.l2_block,
+            },
+        }));
+    };
     // get the output root proof and the withdrawal proof
     let (output_root_proof, withdrawal_proof) =
-        build_withdrawal_proof(l2_provider, game_l2_block, initiated_withdrawal.hash).await?;
+        build_withdrawal_proof(l2_provider, game_l2_block, initiated_withdrawal.hash)
+            .await
+            .map_err(|err| StepError::Generic(err))?;
     // send the OptimismPortal::proveWithdrawalTransaction
     let optimism_portal = OptimismPortalInstance::new(args.optimism_portal, &l1_provider);
     let pending_tx = optimism_portal
@@ -56,21 +73,29 @@ pub async fn run(args: &ProveArgs) -> eyre::Result<()> {
             withdrawal_proof,
         )
         .send()
-        .await?;
-    let receipt = pending_tx.get_receipt().await?;
-    ensure!(
-        receipt.status(),
-        "ProveWithdrawalTransaction tx has not succeeded. Tx hash: {}",
-        receipt.transaction_hash
-    );
+        .await
+        .map_err(|err| StepError::Generic(err.into()))?;
+    let receipt = pending_tx
+        .get_receipt()
+        .await
+        .map_err(|err| StepError::Generic(err.into()))?;
+    if !receipt.status() {
+        return Err(StepError::Generic(eyre!(
+            "ProveWithdrawalTransaction tx has not succeeded. Tx hash: {}",
+            receipt.transaction_hash
+        )));
+    }
     // get the L1 timestamp of the block that includes this proveWithdrawal
     let block_number = receipt
         .block_number()
-        .ok_or_eyre("Block number not found.")?;
+        .ok_or_eyre("Block number not found.")
+        .map_err(|err| StepError::Generic(err))?;
     let block = l1_provider
         .get_block(BlockId::number(block_number))
-        .await?
-        .ok_or_eyre("Block not found.")?;
+        .await
+        .map_err(|err| StepError::Generic(err.into()))?
+        .ok_or_eyre("Block not found.")
+        .map_err(|err| StepError::Generic(err))?;
     let l1_timestamp = block.header.timestamp;
     // save useful data into a .json file
     let prove_withdrawal = ProveWithdrawal {
@@ -81,34 +106,59 @@ pub async fn run(args: &ProveArgs) -> eyre::Result<()> {
         game_addr,
         proven_at: l1_timestamp,
     };
-    storage::write_json(&args.proven, &prove_withdrawal).await?;
-    Ok(())
+    storage::write_json(&args.proven, &prove_withdrawal)
+        .await
+        .map_err(|err| StepError::PersistenceAfterTransaction {
+            transaction_hash: receipt.transaction_hash,
+            source: err.into(),
+        })?;
+    Ok(StepOutcome::Proven(ProvenOutcome {
+        tx_hash: receipt.transaction_hash,
+        withdrawal_hash: initiated_withdrawal.hash,
+        l2_block: initiated_withdrawal.l2_block,
+    }))
 }
 
 async fn check_multi_proof_game<P>(
     provider: P,
     factory_address: Address,
     min_l2_block: u64,
-) -> eyre::Result<(u64, Address, u64)>
+) -> Result<Option<(u64, Address, u64)>, StepError>
 where
     P: Provider,
 {
     let factory = IDisputeGameFactoryInstance::new(factory_address, &provider);
     // iterate over the last 100 games
-    let game_count: u64 = factory.gameCount().call().await?.try_into()?;
+    let game_count: u64 = factory
+        .gameCount()
+        .call()
+        .await
+        .map_err(|err| StepError::Generic(err.into()))?
+        .try_into()
+        .map_err(|err: FromUintError<u64>| StepError::Generic(err.into()))?;
     let game_count_sub_100 = game_count.saturating_sub(100);
     for index in game_count_sub_100..game_count {
-        let entry = factory.gameAtIndex(U256::from(index)).call().await?;
+        let entry = factory
+            .gameAtIndex(U256::from(index))
+            .call()
+            .await
+            .map_err(|err| StepError::Generic(err.into()))?;
         if entry.gameType != MULTI_PROOF_GAME_TYPE {
             continue;
         }
         let game = IMultiProofGameInstance::new(entry.proxy, &provider);
-        let l2_block: u64 = game.l2SequenceNumber().call().await?.try_into()?;
+        let l2_block: u64 = game
+            .l2SequenceNumber()
+            .call()
+            .await
+            .map_err(|err| StepError::Generic(err.into()))?
+            .try_into()
+            .map_err(|err: FromUintError<u64>| StepError::Generic(err.into()))?;
         if l2_block >= min_l2_block {
-            return Ok((index, entry.proxy, l2_block));
+            return Ok(Some((index, entry.proxy, l2_block)));
         }
     }
-    Err(eyre!("There is no game that covers {} yet", min_l2_block))
+    Ok(None)
 }
 
 async fn build_withdrawal_proof<P>(
