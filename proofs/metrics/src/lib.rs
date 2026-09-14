@@ -50,6 +50,7 @@ pub const METRICS_PROOF_JOBS_CLAIMED: &str = "proof_jobs.claimed";
 pub const METRICS_PROOF_JOBS_COMPLETED: &str = "proof_jobs.completed";
 /// End-to-end worker proof-job attempt duration.
 pub const METRICS_PROOF_JOB_DURATION_SECONDS: &str = "proof_job.duration_seconds";
+pub const METRICS_PROOF_SUBMISSION_INCLUSION_SECONDS: &str = "proof_submission.inclusion_seconds";
 /// Completed witness-collection attempts.
 pub const METRICS_WITNESS_COLLECTIONS_COMPLETED: &str = "witness_collection.completed";
 /// Witness-collection duration.
@@ -128,6 +129,11 @@ pub fn describe_metrics() {
         METRICS_PROOF_JOB_DURATION_SECONDS,
         metrics::Unit::Seconds,
         "End-to-end worker proof-job attempt duration by backend and outcome."
+    );
+    metrics::describe_histogram!(
+        METRICS_PROOF_SUBMISSION_INCLUSION_SECONDS,
+        metrics::Unit::Seconds,
+        "Time from proof submission attempt to first observed inclusion, excluding confirmations."
     );
     metrics::describe_counter!(
         METRICS_WITNESS_COLLECTIONS_COMPLETED,
@@ -264,6 +270,11 @@ pub fn increment_proof_requests_created(backend: &'static str) {
 /// Records a proof job claimed by a worker.
 pub fn increment_proof_jobs_claimed(backend: &'static str) {
     metrics::counter!(METRICS_PROOF_JOBS_CLAIMED, "backend" => backend).increment(1);
+}
+
+/// Records first observed inclusion, including reverted transactions.
+pub fn record_proof_submission_inclusion(duration: Duration) {
+    metrics::histogram!(METRICS_PROOF_SUBMISSION_INCLUSION_SECONDS).record(duration.as_secs_f64());
 }
 
 /// Records a completed worker proof-job attempt and its duration.

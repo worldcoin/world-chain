@@ -23,7 +23,7 @@ If unset, submissions use the normal L1 RPC.
 Private submission mitigates reward theft. Residual relay/builder trust and reorg risks
 are acknowledged and accepted.
 
-After a submission attempt, a different accepted lane recipient emits
-`proof_reward_recipient_mismatch` (possible frontrun or competing prover). Checks retry on RPC
-errors and run before game cleanup; tracking lasts for the current process and ends after the
-recipient is checked. This is not a persistent reorg monitor.
+Already-proven lanes are skipped before submission. Subsequent failures emit
+`proof_submission_failed` for investigation. Inclusion and confirmations may block up to
+`L1_TX_RECEIPT_TIMEOUT_SECONDS` (default 300); errors retry on the next tick.
+`proof_submission.inclusion_seconds` measures time to first observed inclusion, excluding confirmations.
