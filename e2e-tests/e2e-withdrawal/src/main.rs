@@ -8,7 +8,7 @@ use tracing_subscriber::EnvFilter;
 async fn main() -> eyre::Result<ExitCode> {
     let cli = Cli::parse();
     let filter = EnvFilter::builder()
-        .with_default_directive(tracing::Level::WARN.into())
+        .with_default_directive(tracing::Level::INFO.into())
         .from_env()
         .wrap_err("invalid RUST_LOG filter")?;
     tracing_subscriber::fmt()
