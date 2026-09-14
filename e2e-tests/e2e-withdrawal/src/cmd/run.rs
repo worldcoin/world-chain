@@ -12,6 +12,7 @@ const POLL_INTERVAL: Duration = Duration::from_secs(12);
 
 /// Run complete withdrawal cycles until a terminal failure occurs.
 pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
+    args.validate()?;
     run_steps(args, || step::run(args)).await
 }
 
@@ -22,7 +23,12 @@ where
 {
     let mut cleanup_retry = RetryBudget::default();
     loop {
-        match next_step().await {
+        let result = next_step().await;
+        match &result {
+            Ok(outcome) => tracing::info!(?outcome, "withdrawal workflow iteration completed"),
+            Err(_) => tracing::info!("withdrawal workflow iteration failed, handling error"),
+        }
+        match result {
             Ok(_) => cleanup_retry = RetryBudget::default(),
             Err(StepError::PersistenceAfterTransaction {
                 transaction_hash,

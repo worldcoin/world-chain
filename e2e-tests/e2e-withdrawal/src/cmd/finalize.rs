@@ -20,6 +20,7 @@ use std::str::FromStr;
 
 /// Run the `finalize` command.
 pub async fn run(args: &FinalizeArgs) -> Result<StepOutcome, StepError> {
+    args.validate()?;
     // create L1 signer provider
     let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key).map_err(|_| {
         StepError::InvalidConfiguration {
@@ -28,15 +29,10 @@ pub async fn run(args: &FinalizeArgs) -> Result<StepOutcome, StepError> {
     })?;
     let l1_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
-        .connect_reqwest(
-            super::rpc_client()?,
-            args.l1_args
-                .l1_rpc_endpoint
-                .parse()
-                .map_err(|_| StepError::InvalidConfiguration {
-                    field: "L1_RPC_ENDPOINT",
-                })?,
-        );
+        .connect_client(super::rpc::client(
+            &args.l1_args.l1_rpc_endpoint,
+            "L1_RPC_ENDPOINT",
+        )?);
     // read ProveWithdrawal data (local path or s3://bucket/key)
     let prove_withdrawal: ProveWithdrawal = storage::read_json(&args.proven).await?;
     // already finalized on-chain, treat as success so step can retry handoff cleanup.

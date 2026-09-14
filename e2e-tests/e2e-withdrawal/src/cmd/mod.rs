@@ -8,17 +8,12 @@ use eyre::eyre::WrapErr;
 mod finalize;
 mod init;
 mod prove;
+mod rpc;
 mod run;
 mod step;
 
 /// Default deadline for RPC requests, receipt waits and storage attempts.
 pub const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
-fn rpc_client() -> eyre::Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
-        .timeout(DEFAULT_TIMEOUT)
-        .build()?)
-}
 
 /// Bound the entire receipt wait, including any in-flight RPC at the deadline.
 async fn receipt_with_deadline<T, E>(

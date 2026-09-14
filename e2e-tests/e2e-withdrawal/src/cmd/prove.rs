@@ -15,7 +15,7 @@ use alloy_primitives::{Address, B256, Bytes, U256, address, keccak256, ruint::Fr
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::SolValue;
-use eyre::eyre::{OptionExt, ensure, eyre};
+use eyre::eyre::{OptionExt, WrapErr, ensure, eyre};
 use std::str::FromStr;
 
 /// WIP-1006 game type.
@@ -25,6 +25,7 @@ const L2_TO_L1_MESSAGE_PASSER: Address = address!("42000000000000000000000000000
 
 /// Run the `prove` command.
 pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
+    args.validate()?;
     // create L1 signer provider
     let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key).map_err(|_| {
         StepError::InvalidConfiguration {
@@ -33,24 +34,15 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     })?;
     let l1_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
-        .connect_reqwest(
-            super::rpc_client()?,
-            args.l1_args
-                .l1_rpc_endpoint
-                .parse()
-                .map_err(|_| StepError::InvalidConfiguration {
-                    field: "L1_RPC_ENDPOINT",
-                })?,
-        );
+        .connect_client(super::rpc::client(
+            &args.l1_args.l1_rpc_endpoint,
+            "L1_RPC_ENDPOINT",
+        )?);
     // create L2 provider
-    let l2_provider = ProviderBuilder::new().connect_reqwest(
-        super::rpc_client()?,
-        args.l2_rpc_endpoint
-            .parse()
-            .map_err(|_| StepError::InvalidConfiguration {
-                field: "L2_RPC_ENDPOINT",
-            })?,
-    );
+    let l2_provider = ProviderBuilder::new().connect_client(super::rpc::client(
+        &args.l2_rpc_endpoint,
+        "L2_RPC_ENDPOINT",
+    )?);
     // read InitiatedWithdrawal data (local path or s3://bucket/key)
     let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.initiated).await?;
     // wait for a covering WIP1006 game with l2SequenceNumber >= initiated_withdrawal.l2_block
