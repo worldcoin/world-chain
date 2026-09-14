@@ -587,6 +587,9 @@ contract MultiProofGameTest is OPStackFixtures {
 
     function test_Retry_AllowsLocalProofTimeoutWhilePreviousStillInProgress() public {
         MultiProofGame parent = _proposeAtAnchor();
+        // Challenge the parent so its clock extends to the proof deadline; the child's
+        // challenge window can then expire while the parent is still a valid parent.
+        _challenge(parent);
         MultiProofGame child = _proposeChild(0);
 
         vm.warp(child.challengeDeadline().raw());
@@ -596,6 +599,8 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(uint8(reason), uint8(InvalidationReason.PROOF_TIMEOUT));
         assertEq(uint8(child.status()), uint8(GameStatus.IN_PROGRESS));
         assertEq(uint8(parent.status()), uint8(GameStatus.IN_PROGRESS));
+        (, GameStatus parentOutcome,) = parent.resolutionStatus();
+        assertEq(uint8(parentOutcome), uint8(GameStatus.IN_PROGRESS));
 
         MultiProofGame retry = _propose(0, Claim.unwrap(child.rootClaim()), child.l2SequenceNumber(), 1);
         assertEq(retry.attempt(), 1);
@@ -639,6 +644,24 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.expectRevert(ParentGameNotResolved.selector);
         child.resolve();
         assertEq(uint8(child.status()), uint8(GameStatus.IN_PROGRESS));
+    }
+
+    function test_Create_RejectsLocallyDoomedParent() public {
+        _proposeAtAnchor();
+        MultiProofGame child = _proposeChild(0);
+
+        vm.warp(child.challengeDeadline().raw());
+        (, GameStatus outcome, InvalidationReason reason) = child.resolutionStatus();
+        assertEq(uint8(outcome), uint8(GameStatus.CHALLENGER_WINS));
+        assertEq(uint8(reason), uint8(InvalidationReason.PROOF_TIMEOUT));
+        assertEq(uint8(child.status()), uint8(GameStatus.IN_PROGRESS));
+
+        uint256 grandchildTarget = child.l2SequenceNumber() + BLOCK_INTERVAL;
+        bytes memory grandchildExtraData = _extraDataForParent(grandchildTarget, address(child), 0);
+        Claim grandchildClaim = Claim.wrap(_rootClaimFor(grandchildTarget));
+        vm.prank(proposer);
+        vm.expectRevert(InvalidParentGame.selector);
+        dgf.create(WC_GAME_TYPE, grandchildClaim, grandchildExtraData);
     }
 
     function test_ParentBlacklistedDuringFinalityAirgap_InvalidatesChild() public {
