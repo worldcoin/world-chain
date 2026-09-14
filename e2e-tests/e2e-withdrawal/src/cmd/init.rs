@@ -17,8 +17,11 @@ const L2_TO_L1_MESSAGE_PASSER: Address = address!("42000000000000000000000000000
 /// Run the `init` command.
 pub async fn run(args: &InitArgs) -> Result<StepOutcome, StepError> {
     // create L2 signer provider
-    let local_signer = PrivateKeySigner::from_str(&args.l2_private_key)
-        .map_err(|err| StepError::Generic(err.into()))?;
+    let local_signer = PrivateKeySigner::from_str(&args.l2_private_key).map_err(|_| {
+        StepError::InvalidConfiguration {
+            field: "L2_PRIVATE_KEY",
+        }
+    })?;
     let local_signer_addr = local_signer.address();
     let l2_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
@@ -28,16 +31,15 @@ pub async fn run(args: &InitArgs) -> Result<StepOutcome, StepError> {
     // target address of the L2 -> L1 withdrawal is the same address that sends the tx on L2
     let target_addr = local_signer_addr;
     // sends the initiate_withdrawal transaction to the L2ToL1MessagePasser contract
-    let (initiated_withdrawal, tx_hash) = initiate_withdrawal(l2_provider, target_addr, args.value)
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
+    let (initiated_withdrawal, tx_hash) =
+        initiate_withdrawal(l2_provider, target_addr, args.value).await?;
     // save the InitiatedWithdrawal data (local path or s3://bucket/key)
     storage::write_json(&args.initiated, &initiated_withdrawal)
         .await
         .map_err(|err| StepError::PersistenceAfterTransaction {
             transaction_hash: tx_hash,
             stage: StepStage::Init,
-            source: err.into(),
+            source: err,
         })?;
     // create the StepOutcome
     let initiated_outcome = InitiatedOutcome {
@@ -45,7 +47,6 @@ pub async fn run(args: &InitArgs) -> Result<StepOutcome, StepError> {
         withdrawal_hash: initiated_withdrawal.hash,
         l2_block: initiated_withdrawal.l2_block,
     };
-    tracing::info!("Initiated outcome: {:?}", initiated_outcome);
     Ok(StepOutcome::Initiated(initiated_outcome))
 }
 

@@ -26,8 +26,11 @@ const L2_TO_L1_MESSAGE_PASSER: Address = address!("42000000000000000000000000000
 /// Run the `prove` command.
 pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     // create L1 signer provider
-    let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key)
-        .map_err(|err| StepError::Generic(err.into()))?;
+    let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key).map_err(|_| {
+        StepError::InvalidConfiguration {
+            field: "L1_PRIVATE_KEY",
+        }
+    })?;
     let l1_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
         .connect(&args.l1_args.l1_rpc_endpoint)
@@ -39,9 +42,7 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
         .await
         .map_err(|err| StepError::Generic(err.into()))?;
     // read InitiatedWithdrawal data (local path or s3://bucket/key)
-    let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.initiated)
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
+    let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.initiated).await?;
     // wait for a covering WIP1006 game with l2SequenceNumber >= initiated_withdrawal.l2_block
     let Some((game_index, game_addr, game_l2_block)) = check_multi_proof_game(
         &l1_provider,
@@ -60,9 +61,7 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     };
     // get the output root proof and the withdrawal proof
     let (output_root_proof, withdrawal_proof) =
-        build_withdrawal_proof(l2_provider, game_l2_block, initiated_withdrawal.hash)
-            .await
-            .map_err(|err| StepError::Generic(err))?;
+        build_withdrawal_proof(l2_provider, game_l2_block, initiated_withdrawal.hash).await?;
     // send the OptimismPortal::proveWithdrawalTransaction
     let optimism_portal = OptimismPortalInstance::new(args.optimism_portal, &l1_provider);
     let pending_tx = optimism_portal
@@ -88,14 +87,12 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     // get the L1 timestamp of the block that includes this proveWithdrawal
     let block_number = receipt
         .block_number()
-        .ok_or_eyre("Block number not found.")
-        .map_err(|err| StepError::Generic(err))?;
+        .ok_or_eyre("Block number not found.")?;
     let block = l1_provider
         .get_block(BlockId::number(block_number))
         .await
         .map_err(|err| StepError::Generic(err.into()))?
-        .ok_or_eyre("Block not found.")
-        .map_err(|err| StepError::Generic(err))?;
+        .ok_or_eyre("Block not found.")?;
     let l1_timestamp = block.header.timestamp;
     // save useful data into a .json file
     let prove_withdrawal = ProveWithdrawal {
@@ -111,12 +108,12 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
         .map_err(|err| StepError::PersistenceAfterTransaction {
             transaction_hash: receipt.transaction_hash,
             stage: StepStage::Prove,
-            source: err.into(),
+            source: err,
         })?;
     Ok(StepOutcome::Proven(ProvenOutcome {
         tx_hash: receipt.transaction_hash,
         withdrawal_hash: initiated_withdrawal.hash,
-        l2_block: initiated_withdrawal.l2_block,
+        withdrawal_l2_block: initiated_withdrawal.l2_block,
     }))
 }
 

@@ -2,7 +2,7 @@ use crate::{
     args::StepArgs,
     cmd::{finalize, init, prove},
     storage,
-    types::{FinalizedOutcome, StepError, StepOutcome},
+    types::{FinalizedOutcome, StepError, StepOutcome, StepStage},
 };
 use eyre::eyre::WrapErr;
 
@@ -13,12 +13,8 @@ use eyre::eyre::WrapErr;
 /// - initiated, no proven -> `prove`
 /// - proven -> `finalize` (idempotent if already on-chain), then delete handoffs
 pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
-    let initiated_exists = storage::exists(&args.initiated)
-        .await
-        .map_err(StepError::Generic)?;
-    let proven_exists = storage::exists(&args.proven)
-        .await
-        .map_err(StepError::Generic)?;
+    let initiated_exists = storage::exists(&args.initiated).await?;
+    let proven_exists = storage::exists(&args.proven).await?;
 
     match (initiated_exists, proven_exists) {
         (false, false) => init::run(&args.to_init()).await,
@@ -32,8 +28,13 @@ pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
                     delete_handoffs(args, &finalized).await?;
                     Ok(StepOutcome::Finalized(finalized))
                 }
-                // Waiting (maturity / game not valid yet): keep handoffs for the next tick.
-                other => Ok(other),
+                StepOutcome::Waiting(waiting) => Ok(StepOutcome::Waiting(waiting)),
+                StepOutcome::Initiated(_) | StepOutcome::Proven(_) => {
+                    Err(StepError::InvalidState {
+                        stage: StepStage::Finalize,
+                        message: "finalize returned an outcome belonging to another stage",
+                    })
+                }
             }
         }
     }

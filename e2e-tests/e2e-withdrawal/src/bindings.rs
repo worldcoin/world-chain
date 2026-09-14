@@ -57,6 +57,12 @@ sol! {
     #[sol(rpc)]
     interface AnchorStateRegistry {
         function isGameClaimValid(IDisputeGame _game) public view returns (bool);
+        function paused() external view returns (bool);
+        function isGameRegistered(IDisputeGame _game) external view returns (bool);
+        function isGameBlacklisted(IDisputeGame _game) external view returns (bool);
+        function isGameRetired(IDisputeGame _game) external view returns (bool);
+        function isGameRespected(IDisputeGame _game) external view returns (bool);
+        function isGameFinalized(IDisputeGame _game) external view returns (bool);
     }
 
     #[sol(rpc)]
