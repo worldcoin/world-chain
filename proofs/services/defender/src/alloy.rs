@@ -209,13 +209,10 @@ where
                     DefenderError::from(error)
                 })?;
         let tx_hash = *pending.tx_hash();
-        let wait_started = Instant::now();
         let wait_for_receipt = |confirmations| {
             PendingTransactionBuilder::new(self.provider.root().clone(), tx_hash)
                 .with_required_confirmations(confirmations)
-                .with_timeout(Some(
-                    self.receipt_timeout.saturating_sub(wait_started.elapsed()),
-                ))
+                .with_timeout(Some(self.receipt_timeout))
                 .get_receipt()
         };
         let warn_failure = |error| {

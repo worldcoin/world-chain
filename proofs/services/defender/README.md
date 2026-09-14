@@ -24,6 +24,6 @@ Private submission mitigates reward theft. Residual relay/builder trust and reor
 are acknowledged and accepted.
 
 Already-proven lanes are skipped before submission. Subsequent failures emit
-`proof_submission_failed` for investigation. Inclusion and confirmations may block up to
-`L1_TX_RECEIPT_TIMEOUT_SECONDS` (default 300); errors retry on the next tick.
+`proof_submission_failed` for investigation. Inclusion and confirmations each may block up to
+`L1_TX_RECEIPT_TIMEOUT_SECONDS` (default 300); inclusion timeouts retry on the next tick.
 `proof_submission.inclusion_seconds` measures time to first observed inclusion, excluding confirmations.
