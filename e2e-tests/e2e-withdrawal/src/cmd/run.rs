@@ -13,17 +13,9 @@ const POLL_INTERVAL: Duration = Duration::from_secs(12);
 /// Run complete withdrawal cycles until a terminal failure occurs.
 pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
     args.validate()?;
-    run_steps(args, || step::run(args)).await
-}
-
-async fn run_steps<F, Fut>(args: &StepArgs, mut next_step: F) -> Result<StepOutcome, StepError>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<StepOutcome, StepError>>,
-{
     let mut cleanup_retry = RetryBudget::default();
     loop {
-        let result = next_step().await;
+        let result = step::run(args).await;
         match &result {
             Ok(outcome) => tracing::info!(?outcome, "withdrawal workflow iteration completed"),
             Err(_) => tracing::info!("withdrawal workflow iteration failed, handling error"),
