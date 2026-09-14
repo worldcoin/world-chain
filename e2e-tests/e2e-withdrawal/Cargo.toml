@@ -28,6 +28,7 @@ aws-sdk-s3.workspace = true
 
 # misc
 async-trait.workspace = true
+backoff.workspace = true
 clap.workspace = true
 eyre.workspace = true
 tokio.workspace = true

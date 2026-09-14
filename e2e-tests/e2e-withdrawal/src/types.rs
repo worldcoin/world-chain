@@ -126,7 +126,7 @@ pub enum WaitingReason {
 }
 
 /// Conditions that block finalization rather than represent normal progress.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum GameBlockedReason {
     /// The system must be unpaused before finalization can proceed.
     #[error("system is paused")]
@@ -205,4 +205,22 @@ pub enum StepError {
         /// Underlying handoff deletion failure.
         source: eyre::Report,
     },
+}
+
+impl StepError {
+    /// Return whether the error is retryable.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::CleanupAfterFinalized {
+                withdrawal_hash: _,
+                source: _,
+            } => true,
+            Self::GameBlocked {
+                withdrawal_hash: _,
+                game_address: _,
+                reason,
+            } if *reason == GameBlockedReason::SystemPaused => true,
+            _ => false,
+        }
+    }
 }
