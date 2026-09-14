@@ -10,7 +10,7 @@ const MAX_ATTEMPTS: u32 = 3;
 
 /// Apply retries below the provider so receipt polling and transaction fillers
 /// get the same policy as explicit reads. Submission requests are never retried.
-pub(super) fn client(endpoint: &str, field: &'static str) -> eyre::Result<RpcClient> {
+pub fn client(endpoint: &str, field: &'static str) -> eyre::Result<RpcClient> {
     let url = crate::args::rpc_url(endpoint, field)?;
     let client = reqwest::Client::builder()
         .timeout(super::DEFAULT_TIMEOUT)
