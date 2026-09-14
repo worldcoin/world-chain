@@ -3,3 +3,4 @@ pub mod bindings;
 pub mod cli;
 pub mod cmd;
 pub mod storage;
+pub mod types;
