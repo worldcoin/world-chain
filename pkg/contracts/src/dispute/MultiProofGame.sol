@@ -434,6 +434,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         ) {
             return false;
         }
+        // Parents of other game types, including an anchor inherited at cutover, only
+        // expose the standard dispute-game status getter.
+        if (game.gameType().raw() != GameTypes.MULTI_PROOF_GAME_TYPE.raw()) {
+            return game.status() != GameStatus.CHALLENGER_WINS;
+        }
         // `status()` alone is insufficient: an unproven parent whose clock has expired stays
         // `IN_PROGRESS` until its own parent resolves, but `resolutionStatus` already surfaces
         // `CHALLENGER_WINS` / `PROOF_TIMEOUT` so keepers (and child creation) can stop on it.
