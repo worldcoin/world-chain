@@ -33,6 +33,15 @@ pub enum FinalizedOutcome {
     },
 }
 
+impl FinalizedOutcome {
+    /// Withdrawal hash associated with this finalize outcome.
+    pub fn withdrawal_hash(&self) -> B256 {
+        match self {
+            Self::AlreadyFinalized { withdrawal_hash } => *withdrawal_hash,
+            Self::Finalized { witdrawal_hash, .. } => *witdrawal_hash,
+        }
+    }
+}
 #[derive(Debug)]
 pub struct WaitingOutcome {
     pub withdrawal_hash: B256,
@@ -79,6 +88,16 @@ pub enum StepError {
     PersistenceAfterTransaction {
         transaction_hash: B256,
         stage: StepStage,
+        source: eyre::Report,
+    },
+    /// Handoff cleanup failed after the withdrawal was already finalized onchain.
+    ///
+    /// The next `step` tick should retry finalize (idempotent) and cleanup.
+    #[error(
+        "Cleanup error after withdrawal was finalized onchain. Withdrawal hash: {withdrawal_hash}, source: {source}"
+    )]
+    CleanupAfterFinalized {
+        withdrawal_hash: B256,
         source: eyre::Report,
     },
 }
