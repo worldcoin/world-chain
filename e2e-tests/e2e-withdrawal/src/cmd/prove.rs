@@ -2,19 +2,19 @@ use crate::{
     args::ProveArgs,
     bindings::{
         IDisputeGameFactory::IDisputeGameFactoryInstance, IMultiProofGame::IMultiProofGameInstance,
-        InitiatedWithdrawal, OptimismPortal, OptimismPortal::OptimismPortalInstance,
-        OutputRootProof, ProveWithdrawal,
+        InitiatedWithdrawal, OptimismPortal::OptimismPortalInstance, OutputRootProof,
+        ProveWithdrawal,
     },
     storage,
     types::{ProvenOutcome, StepError, StepOutcome, StepStage, WaitingOutcome, WaitingReason},
 };
-use alloy_consensus::{BlockHeader, Transaction};
+use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::{EthereumWallet, ReceiptResponse};
 use alloy_primitives::{Address, B256, Bytes, U256, address, keccak256, ruint::FromUintError};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::{SolCall, SolValue};
+use alloy_sol_types::SolValue;
 use eyre::eyre::{OptionExt, ensure, eyre};
 use std::str::FromStr;
 
@@ -33,14 +33,24 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     })?;
     let l1_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
-        .connect(&args.l1_args.l1_rpc_endpoint)
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
+        .connect_reqwest(
+            super::rpc_client()?,
+            args.l1_args
+                .l1_rpc_endpoint
+                .parse()
+                .map_err(|_| StepError::InvalidConfiguration {
+                    field: "L1_RPC_ENDPOINT",
+                })?,
+        );
     // create L2 provider
-    let l2_provider = ProviderBuilder::new()
-        .connect(&args.l2_rpc_endpoint)
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
+    let l2_provider = ProviderBuilder::new().connect_reqwest(
+        super::rpc_client()?,
+        args.l2_rpc_endpoint
+            .parse()
+            .map_err(|_| StepError::InvalidConfiguration {
+                field: "L2_RPC_ENDPOINT",
+            })?,
+    );
     // read InitiatedWithdrawal data (local path or s3://bucket/key)
     let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.initiated).await?;
     // wait for a covering WIP1006 game with l2SequenceNumber >= initiated_withdrawal.l2_block
@@ -74,10 +84,9 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
         .send()
         .await
         .map_err(|err| StepError::Generic(err.into()))?;
-    let receipt = pending_tx
-        .get_receipt()
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
+    let tx_hash = *pending_tx.tx_hash();
+    let receipt =
+        super::receipt_with_deadline(tx_hash, StepStage::Prove, pending_tx.get_receipt()).await?;
     if !receipt.status() {
         return Err(StepError::Generic(eyre!(
             "ProveWithdrawalTransaction tx has not succeeded. Tx hash: {}",
@@ -94,11 +103,14 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
         game_l2_block,
         proven_at,
     );
-    storage::write_json(&args.proven, &prove_withdrawal)
+    let handoff =
+        serde_json::to_value(&prove_withdrawal).map_err(|err| StepError::Generic(err.into()))?;
+    storage::write_json(&args.proven, &handoff)
         .await
         .map_err(|err| StepError::PersistenceAfterTransaction {
             transaction_hash: receipt.transaction_hash(),
             stage: StepStage::Prove,
+            handoff: Box::new(handoff),
             source: err,
         })?;
     Ok(StepOutcome::Proven(ProvenOutcome {
@@ -106,44 +118,6 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
         withdrawal_hash,
         withdrawal_l2_block,
     }))
-}
-
-/// Reconstruct a [`ProveWithdrawal`] from a known prove transaction.
-///
-/// Uses the still-present initiated handoff plus the L1 prove tx receipt/calldata.
-pub async fn recover_prove_withdrawal<P: Provider>(
-    provider: &P,
-    factory_address: Address,
-    transaction_hash: B256,
-    initiated_withdrawal: InitiatedWithdrawal,
-) -> Result<ProveWithdrawal, StepError> {
-    let receipt = provider
-        .get_transaction_receipt(transaction_hash)
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?
-        .ok_or_eyre("prove withdrawal receipt missing")
-        .map_err(|err| StepError::Generic(err))?;
-    let proven_at = proven_at_from_receipt(provider, &receipt).await?;
-    let tx = provider
-        .get_transaction_by_hash(transaction_hash)
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?
-        .ok_or_eyre("prove transaction missing")
-        .map_err(|err| StepError::Generic(err))?;
-    let call = OptimismPortal::proveWithdrawalTransactionCall::abi_decode(tx.input())
-        .map_err(|err| StepError::Generic(err.into()))?;
-    let game_index: u64 = call
-        .disputeGameIndex
-        .try_into()
-        .map_err(|err: FromUintError<u64>| StepError::Generic(err.into()))?;
-    let (game_addr, game_l2_block) = game_at_index(provider, factory_address, game_index).await?;
-    Ok(prove_withdrawal(
-        initiated_withdrawal,
-        game_index,
-        game_addr,
-        game_l2_block,
-        proven_at,
-    ))
 }
 
 fn prove_withdrawal(
@@ -178,28 +152,6 @@ async fn proven_at_from_receipt<P: Provider>(
         .ok_or_eyre("prove L1 block not found")
         .map_err(|err| StepError::Generic(err))?;
     Ok(block.header.timestamp())
-}
-
-async fn game_at_index<P: Provider>(
-    provider: &P,
-    factory_address: Address,
-    game_index: u64,
-) -> Result<(Address, u64), StepError> {
-    let factory = IDisputeGameFactoryInstance::new(factory_address, provider);
-    let entry = factory
-        .gameAtIndex(U256::from(game_index))
-        .call()
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
-    let game = IMultiProofGameInstance::new(entry.proxy, provider);
-    let game_l2_block: u64 = game
-        .l2SequenceNumber()
-        .call()
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?
-        .try_into()
-        .map_err(|err: FromUintError<u64>| StepError::Generic(err.into()))?;
-    Ok((entry.proxy, game_l2_block))
 }
 
 async fn check_multi_proof_game<P>(

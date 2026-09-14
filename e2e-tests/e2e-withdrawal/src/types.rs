@@ -190,6 +190,8 @@ pub enum StepError {
         transaction_hash: B256,
         /// Stage that executed the transaction.
         stage: StepStage,
+        /// Complete handoff retained so persistence retries need no remote reads.
+        handoff: Box<serde_json::Value>,
         /// Underlying persistence failure.
         source: eyre::Report,
     },
@@ -211,10 +213,6 @@ impl StepError {
     /// Return whether the error is retryable.
     pub fn is_retryable(&self) -> bool {
         match self {
-            Self::CleanupAfterFinalized {
-                withdrawal_hash: _,
-                source: _,
-            } => true,
             Self::GameBlocked {
                 withdrawal_hash: _,
                 game_address: _,

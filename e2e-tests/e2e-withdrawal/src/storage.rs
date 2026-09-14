@@ -1,5 +1,9 @@
 use async_trait::async_trait;
 use aws_credential_types::provider::ProvideCredentials;
+use aws_sdk_s3::{
+    error::{ProvideErrorMetadata, SdkError},
+    operation::{delete_object::DeleteObjectError, put_object::PutObjectError},
+};
 use eyre::eyre::{Context, OptionExt, bail};
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -22,19 +26,19 @@ pub struct LocalStore;
 #[async_trait]
 impl BlobStore for LocalStore {
     async fn get(&self, key: &str) -> eyre::Result<Vec<u8>> {
-        Ok(std::fs::read(key)?)
+        Ok(tokio::fs::read(key).await?)
     }
 
     async fn put(&self, key: &str, bytes: &[u8]) -> eyre::Result<()> {
-        Ok(std::fs::write(key, bytes)?)
+        Ok(tokio::fs::write(key, bytes).await?)
     }
 
     async fn exists(&self, key: &str) -> eyre::Result<bool> {
-        Ok(std::path::Path::new(key).exists())
+        Ok(tokio::fs::try_exists(key).await?)
     }
 
     async fn delete(&self, key: &str) -> eyre::Result<()> {
-        match std::fs::remove_file(key) {
+        match tokio::fs::remove_file(key).await {
             Ok(()) => Ok(()),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(err) => Err(err.into()),
@@ -160,24 +164,81 @@ pub async fn open(location: &str) -> eyre::Result<(Box<dyn BlobStore>, String)> 
 
 /// Read and deserialize JSON from a local path or `s3://bucket/key`.
 pub async fn read_json<T: DeserializeOwned>(location: &str) -> eyre::Result<T> {
-    let (store, key) = open(location).await?;
-    Ok(serde_json::from_slice(&store.get(&key).await?)?)
+    with_deadline("read", location, async {
+        let (store, key) = open(location).await?;
+        Ok(serde_json::from_slice(&store.get(&key).await?)?)
+    })
+    .await
 }
 
 /// Serialize and write JSON to a local path or `s3://bucket/key`.
 pub async fn write_json<T: Serialize>(location: &str, value: &T) -> eyre::Result<()> {
-    let (store, key) = open(location).await?;
-    store.put(&key, &serde_json::to_vec_pretty(value)?).await
+    with_deadline("write", location, async {
+        let (store, key) = open(location).await?;
+        store.put(&key, &serde_json::to_vec_pretty(value)?).await
+    })
+    .await
 }
 
 /// Return whether a local path or `s3://bucket/key` exists.
 pub async fn exists(location: &str) -> eyre::Result<bool> {
-    let (store, key) = open(location).await?;
-    store.exists(&key).await
+    with_deadline("exists", location, async {
+        let (store, key) = open(location).await?;
+        store.exists(&key).await
+    })
+    .await
 }
 
 /// Delete a local path or `s3://bucket/key`. Missing objects are ignored.
 pub async fn delete(location: &str) -> eyre::Result<()> {
-    let (store, key) = open(location).await?;
-    store.delete(&key).await
+    with_deadline("delete", location, async {
+        let (store, key) = open(location).await?;
+        store.delete(&key).await
+    })
+    .await
+}
+
+async fn with_deadline<T>(
+    operation: &str,
+    location: &str,
+    future: impl std::future::Future<Output = eyre::Result<T>>,
+) -> eyre::Result<T> {
+    tokio::time::timeout(crate::cmd::DEFAULT_TIMEOUT, future)
+        .await
+        .wrap_err_with(|| {
+            format!("storage {operation} timed out after 30 seconds at `{location}`")
+        })?
+}
+
+/// Recognize permanent failures without matching human-readable error strings.
+pub fn is_permanent_error(error: &eyre::Report) -> bool {
+    if let Some(error) = error.downcast_ref::<std::io::Error>() {
+        return matches!(
+            error.kind(),
+            std::io::ErrorKind::PermissionDenied
+                | std::io::ErrorKind::InvalidInput
+                | std::io::ErrorKind::NotFound
+        );
+    }
+    // Both persistence and cleanup retain their typed SDK errors through context.
+    let code = error
+        .downcast_ref::<SdkError<PutObjectError>>()
+        .and_then(|error| error.as_service_error())
+        .and_then(|error| error.code())
+        .or_else(|| {
+            error
+                .downcast_ref::<SdkError<DeleteObjectError>>()
+                .and_then(|error| error.as_service_error())
+                .and_then(|error| error.code())
+        });
+    matches!(
+        code,
+        Some(
+            "AccessDenied"
+                | "InvalidAccessKeyId"
+                | "SignatureDoesNotMatch"
+                | "NoSuchBucket"
+                | "InvalidArgument"
+        )
+    )
 }

@@ -3,12 +3,39 @@ use crate::{
     types::{StepError, StepOutcome},
 };
 use clap::Subcommand;
+use eyre::eyre::WrapErr;
 
 mod finalize;
 mod init;
 mod prove;
 mod run;
 mod step;
+
+/// Default deadline for RPC requests, receipt waits and storage attempts.
+pub const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn rpc_client() -> eyre::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .timeout(DEFAULT_TIMEOUT)
+        .build()?)
+}
+
+/// Bound the entire receipt wait, including any in-flight RPC at the deadline.
+async fn receipt_with_deadline<T, E>(
+    transaction_hash: alloy_primitives::B256,
+    stage: crate::types::StepStage,
+    future: impl std::future::Future<Output = Result<T, E>>,
+) -> eyre::Result<T>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    tokio::time::timeout(DEFAULT_TIMEOUT, future)
+        .await
+        .wrap_err_with(|| {
+            format!("{stage} receipt timed out after 30 seconds; transaction {transaction_hash}")
+        })?
+        .wrap_err_with(|| format!("{stage} receipt failed; transaction {transaction_hash}"))
+}
 
 /// Commands for an end-to-end L2->L1 withdrawal flow.
 ///

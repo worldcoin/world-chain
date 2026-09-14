@@ -1,153 +1,105 @@
 use crate::{
     args::StepArgs,
-    cmd::{init, prove, step},
+    cmd::step,
     storage,
     types::{StepError, StepOutcome, StepStage},
 };
-use alloy_primitives::B256;
-use alloy_provider::ProviderBuilder;
-use backoff::{Error as BackoffError, ExponentialBackoff, future::retry_notify};
-use serde::Serialize;
+use backoff::{ExponentialBackoff, backoff::Backoff};
 use std::time::Duration;
 
-/// Run the `run` command.
+const MAX_ATTEMPTS: u32 = 10;
+const POLL_INTERVAL: Duration = Duration::from_secs(12);
+
+/// Run complete withdrawal cycles until a terminal failure occurs.
 pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
+    run_steps(args, || step::run(args)).await
+}
+
+async fn run_steps<F, Fut>(args: &StepArgs, mut next_step: F) -> Result<StepOutcome, StepError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<StepOutcome, StepError>>,
+{
+    let mut cleanup_retry = RetryBudget::default();
     loop {
-        let step_result = step::run(&args).await;
-        if let Ok(step_outcome) = step_result {
-            match step_outcome {
-                StepOutcome::Initiated(initiated_outcome) => {
-                    tracing::info!(?initiated_outcome);
-                }
-                StepOutcome::Proven(proven_outcome) => {
-                    tracing::info!(?proven_outcome);
-                }
-                StepOutcome::Finalized(finalized_outcome) => {
-                    tracing::info!(?finalized_outcome);
-                }
-                StepOutcome::Waiting(waiting_outcome) => {
-                    tracing::info!(?waiting_outcome);
-                }
-            }
-        } else {
-            // check if it's a retryable error:
-            // - if it is, then retry `step`
-
-            // safe unwrap because we've just checked above
-            let step_error = step_result.unwrap_err();
-            tracing::error!(?step_error);
-            if step_error.is_retryable() {
-                // sleep and continue
-                tokio::time::sleep(Duration::from_secs(12)).await;
-                continue;
-            }
-
-            // if error is `PersistenceAfterTransaction` we need to gather the tx receipt,
-            // recreate the needed data, save it and then continue the loop
-            if let StepError::PersistenceAfterTransaction {
+        match next_step().await {
+            Ok(_) => cleanup_retry = RetryBudget::default(),
+            Err(StepError::PersistenceAfterTransaction {
                 transaction_hash,
                 stage,
-                source: _,
-            } = &step_error
-            {
-                match stage {
-                    StepStage::Init => {
-                        let l2_provider = ProviderBuilder::new()
-                            .connect(&args.l2_rpc_endpoint)
-                            .await
-                            .map_err(|err| StepError::Generic(err.into()))?;
-                        let initiated_withdrawal =
-                            init::recover_initiated_withdrawal(l2_provider, *transaction_hash)
-                                .await?;
-                        write_json_with_backoff(
-                            &args.initiated,
-                            &initiated_withdrawal,
-                            *transaction_hash,
-                            StepStage::Init,
-                        )
-                        .await?;
-                        tokio::time::sleep(Duration::from_secs(12)).await;
-                        continue;
-                    }
-                    StepStage::Prove => {
-                        let l1_provider = ProviderBuilder::new()
-                            .connect(&args.l1_args.l1_rpc_endpoint)
-                            .await
-                            .map_err(|err| StepError::Generic(err.into()))?;
-                        let initiated_withdrawal = storage::read_json(&args.initiated)
-                            .await
-                            .map_err(|err| StepError::Generic(err.into()))?;
-                        let prove_withdrawal = prove::recover_prove_withdrawal(
-                            &l1_provider,
-                            args.dispute_game_factory,
-                            *transaction_hash,
-                            initiated_withdrawal,
-                        )
-                        .await?;
-                        write_json_with_backoff(
-                            &args.proven,
-                            &prove_withdrawal,
-                            *transaction_hash,
-                            StepStage::Prove,
-                        )
-                        .await?;
-                        tokio::time::sleep(Duration::from_secs(12)).await;
-                        continue;
-                    }
+                handoff,
+                source,
+            }) => {
+                let location = match stage {
+                    StepStage::Init => &args.initiated,
+                    StepStage::Prove => &args.proven,
                     _ => {
-                        // other stages don't have the `PersistenceAfterTransaction` error variant
+                        return Err(StepError::PersistenceAfterTransaction {
+                            transaction_hash,
+                            stage,
+                            handoff,
+                            source,
+                        });
+                    }
+                };
+                // Include the initial write in the budget and retain the payload.
+                // Recovery needs no further RPC or storage reads.
+                let mut retry = RetryBudget::default();
+                let mut source = source;
+                loop {
+                    let Some(delay) = retry.next_delay(&source) else {
+                        return Err(StepError::PersistenceAfterTransaction {
+                            transaction_hash,
+                            stage,
+                            handoff,
+                            source,
+                        });
+                    };
+                    tracing::warn!(error = ?source, %transaction_hash, %stage,
+                        attempt = retry.failures, retry_in_secs = delay.as_secs_f64(),
+                        "handoff persistence failed, retrying");
+                    tokio::time::sleep(delay).await;
+                    match storage::write_json(location, &handoff).await {
+                        Ok(()) => break,
+                        Err(error) => source = error,
                     }
                 }
             }
-
-            // otherwise just exit the loop and return the error
-            return Err(step_error);
+            Err(error @ StepError::CleanupAfterFinalized { .. }) => {
+                let StepError::CleanupAfterFinalized { source, .. } = &error else {
+                    // Safe, we've just checked it's a `CleanupAfterFinalized` error
+                    unreachable!()
+                };
+                let Some(delay) = cleanup_retry.next_delay(source) else {
+                    return Err(error);
+                };
+                tracing::warn!(error = ?error, attempt = cleanup_retry.failures,
+                    retry_in_secs = delay.as_secs_f64(), "handoff cleanup failed; retrying");
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+            Err(error) if error.is_retryable() => {
+                // System pause is an explicit on-chain waiting condition.
+                tracing::warn!(error = ?error, "withdrawal paused, waiting");
+            }
+            Err(error) => return Err(error),
         }
-        tokio::time::sleep(Duration::from_secs(12)).await;
+        tokio::time::sleep(POLL_INTERVAL).await;
     }
 }
 
-/// Maximum write attempts (initial try + retries) when reconciling a handoff.
-const MAX_PERSISTENCE_ATTEMPTS: u32 = 10;
+#[derive(Default)]
+struct RetryBudget {
+    failures: u32,
+    backoff: ExponentialBackoff,
+}
 
-/// Persist a handoff with bounded exponential backoff.
-async fn write_json_with_backoff<T: Serialize>(
-    location: &str,
-    value: &T,
-    transaction_hash: B256,
-    stage: StepStage,
-) -> Result<(), StepError> {
-    let backoff = ExponentialBackoff::default();
-    let mut attempts = 0u32;
-    retry_notify(
-        backoff,
-        || {
-            attempts += 1;
-            let attempt = attempts;
-            async move {
-                match storage::write_json(location, value).await {
-                    Ok(()) => Ok(()),
-                    Err(err) if attempt >= MAX_PERSISTENCE_ATTEMPTS => {
-                        Err(BackoffError::permanent(err))
-                    }
-                    Err(err) => Err(BackoffError::transient(err)),
-                }
-            }
-        },
-        |err, delay: Duration| {
-            tracing::warn!(
-                ?err,
-                retry_in_secs = delay.as_secs(),
-                %transaction_hash,
-                %stage,
-                "persistence after transaction failed; retrying"
-            );
-        },
-    )
-    .await
-    .map_err(|err| StepError::PersistenceAfterTransaction {
-        transaction_hash,
-        stage,
-        source: err,
-    })
+impl RetryBudget {
+    fn next_delay(&mut self, error: &eyre::Report) -> Option<Duration> {
+        self.failures += 1;
+        if self.failures >= MAX_ATTEMPTS || storage::is_permanent_error(error) {
+            return None;
+        }
+        self.backoff.next_backoff()
+    }
 }

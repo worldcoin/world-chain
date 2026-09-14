@@ -17,7 +17,9 @@ async fn main() -> eyre::Result<()> {
         .try_init()
         .map_err(|err| eyre!("failed to initialize tracing: {err}"))?;
 
-    let outcome = cli.run().await?;
-    tracing::info!(?outcome, "withdrawal command completed");
+    if let Err(error) = cli.run().await {
+        tracing::error!(error = ?error, "withdrawal command failed");
+        return Err(error.into());
+    }
     Ok(())
 }
