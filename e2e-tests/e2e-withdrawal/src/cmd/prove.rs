@@ -15,7 +15,7 @@ use alloy_primitives::{Address, B256, Bytes, U256, address, keccak256, ruint::Fr
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::SolValue;
-use eyre::eyre::{OptionExt, WrapErr, ensure, eyre};
+use eyre::eyre::{OptionExt, ensure, eyre};
 use std::str::FromStr;
 
 /// WIP-1006 game type.
@@ -137,13 +137,13 @@ async fn proven_at_from_receipt<P: Provider>(
     let block_number = receipt
         .block_number()
         .ok_or_eyre("prove receipt missing L1 block number")
-        .map_err(|err| StepError::Generic(err))?;
+        .map_err(StepError::Generic)?;
     let block = provider
         .get_block(BlockId::number(block_number))
         .await
         .map_err(|err| StepError::Generic(err.into()))?
         .ok_or_eyre("prove L1 block not found")
-        .map_err(|err| StepError::Generic(err))?;
+        .map_err(StepError::Generic)?;
     Ok(block.header.timestamp())
 }
 
