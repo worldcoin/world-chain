@@ -12,7 +12,7 @@ async fn main() -> eyre::Result<()> {
         .wrap_err("invalid RUST_LOG filter")?;
     tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .with_writer(std::io::stderr)
+        .json()
         .try_init()
         .map_err(|err| eyre!("failed to initialize tracing: {err}"))?;
 
