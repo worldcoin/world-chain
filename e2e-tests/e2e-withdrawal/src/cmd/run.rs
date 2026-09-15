@@ -8,7 +8,7 @@ use backoff::{ExponentialBackoff, backoff::Backoff};
 use std::time::Duration;
 
 const MAX_ATTEMPTS: u32 = 10;
-const POLL_INTERVAL: Duration = Duration::from_secs(12);
+const POLL_INTERVAL: Duration = Duration::from_secs(120);
 
 /// Run complete withdrawal cycles until a terminal failure occurs.
 pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
