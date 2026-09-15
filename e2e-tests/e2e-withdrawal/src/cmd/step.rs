@@ -13,6 +13,7 @@ use eyre::eyre::WrapErr;
 /// - initiated, no proven -> `prove`
 /// - proven -> `finalize` (idempotent if already on-chain), then delete handoffs
 pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
+    args.validate()?;
     let initiated_exists = storage::exists(&args.initiated).await?;
     let proven_exists = storage::exists(&args.proven).await?;
 

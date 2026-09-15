@@ -20,6 +20,7 @@ use std::str::FromStr;
 
 /// Run the `finalize` command.
 pub async fn run(args: &FinalizeArgs) -> Result<StepOutcome, StepError> {
+    args.validate()?;
     // create L1 signer provider
     let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key).map_err(|_| {
         StepError::InvalidConfiguration {
@@ -28,9 +29,10 @@ pub async fn run(args: &FinalizeArgs) -> Result<StepOutcome, StepError> {
     })?;
     let l1_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
-        .connect(&args.l1_args.l1_rpc_endpoint)
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
+        .connect_client(super::rpc::client(
+            &args.l1_args.l1_rpc_endpoint,
+            "L1_RPC_ENDPOINT",
+        )?);
     // read ProveWithdrawal data (local path or s3://bucket/key)
     let prove_withdrawal: ProveWithdrawal = storage::read_json(&args.proven).await?;
     // already finalized on-chain, treat as success so step can retry handoff cleanup.
@@ -103,10 +105,10 @@ pub async fn run(args: &FinalizeArgs) -> Result<StepOutcome, StepError> {
         .send()
         .await
         .map_err(|err| StepError::Generic(err.into()))?;
-    let receipt = pending_tx
-        .get_receipt()
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
+    let tx_hash = *pending_tx.tx_hash();
+    let receipt =
+        super::rpc::receipt_with_deadline(tx_hash, StepStage::Finalize, pending_tx.get_receipt())
+            .await?;
     if !receipt.status() {
         return Err(StepError::Generic(eyre!(
             "finalizeWithdrawalTransaction tx has not succeeded. Tx hash: {}",

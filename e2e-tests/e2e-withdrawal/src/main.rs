@@ -12,12 +12,13 @@ async fn main() -> eyre::Result<()> {
         .wrap_err("invalid RUST_LOG filter")?;
     tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .json()
         .with_writer(std::io::stderr)
         .try_init()
         .map_err(|err| eyre!("failed to initialize tracing: {err}"))?;
 
-    let outcome = cli.run().await?;
-    tracing::info!(?outcome, "withdrawal command completed");
+    if let Err(error) = cli.run().await {
+        tracing::error!(error = ?error, "withdrawal command failed");
+        return Err(error.into());
+    }
     Ok(())
 }

@@ -25,6 +25,7 @@ const L2_TO_L1_MESSAGE_PASSER: Address = address!("42000000000000000000000000000
 
 /// Run the `prove` command.
 pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
+    args.validate()?;
     // create L1 signer provider
     let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key).map_err(|_| {
         StepError::InvalidConfiguration {
@@ -33,14 +34,15 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     })?;
     let l1_provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(local_signer))
-        .connect(&args.l1_args.l1_rpc_endpoint)
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
+        .connect_client(super::rpc::client(
+            &args.l1_args.l1_rpc_endpoint,
+            "L1_RPC_ENDPOINT",
+        )?);
     // create L2 provider
-    let l2_provider = ProviderBuilder::new()
-        .connect(&args.l2_rpc_endpoint)
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
+    let l2_provider = ProviderBuilder::new().connect_client(super::rpc::client(
+        &args.l2_rpc_endpoint,
+        "L2_RPC_ENDPOINT",
+    )?);
     // read InitiatedWithdrawal data (local path or s3://bucket/key)
     let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.initiated).await?;
     // wait for a covering WIP1006 game with l2SequenceNumber >= initiated_withdrawal.l2_block
@@ -74,47 +76,75 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
         .send()
         .await
         .map_err(|err| StepError::Generic(err.into()))?;
-    let receipt = pending_tx
-        .get_receipt()
-        .await
-        .map_err(|err| StepError::Generic(err.into()))?;
+    let tx_hash = *pending_tx.tx_hash();
+    let receipt =
+        super::rpc::receipt_with_deadline(tx_hash, StepStage::Prove, pending_tx.get_receipt())
+            .await?;
     if !receipt.status() {
         return Err(StepError::Generic(eyre!(
             "ProveWithdrawalTransaction tx has not succeeded. Tx hash: {}",
-            receipt.transaction_hash
+            receipt.transaction_hash()
         )));
     }
-    // get the L1 timestamp of the block that includes this proveWithdrawal
-    let block_number = receipt
-        .block_number()
-        .ok_or_eyre("Block number not found.")?;
-    let block = l1_provider
-        .get_block(BlockId::number(block_number))
+    let proven_at = proven_at_from_receipt(&l1_provider, &receipt).await?;
+    let withdrawal_hash = initiated_withdrawal.hash;
+    let withdrawal_l2_block = initiated_withdrawal.l2_block;
+    let prove_withdrawal = prove_withdrawal(
+        initiated_withdrawal,
+        game_index,
+        game_addr,
+        game_l2_block,
+        proven_at,
+    );
+    let handoff =
+        serde_json::to_value(&prove_withdrawal).map_err(|err| StepError::Generic(err.into()))?;
+    storage::write_json(&args.proven, &handoff)
         .await
-        .map_err(|err| StepError::Generic(err.into()))?
-        .ok_or_eyre("Block not found.")?;
-    let l1_timestamp = block.header.timestamp;
-    // save useful data into a .json file
-    let prove_withdrawal = ProveWithdrawal {
+        .map_err(|err| StepError::PersistenceAfterTransaction {
+            transaction_hash: receipt.transaction_hash(),
+            stage: StepStage::Prove,
+            handoff: Box::new(handoff),
+            source: err,
+        })?;
+    Ok(StepOutcome::Proven(ProvenOutcome {
+        tx_hash: receipt.transaction_hash(),
+        withdrawal_hash,
+        withdrawal_l2_block,
+    }))
+}
+
+fn prove_withdrawal(
+    initiated_withdrawal: InitiatedWithdrawal,
+    game_index: u64,
+    game_addr: Address,
+    game_l2_block: u64,
+    proven_at: u64,
+) -> ProveWithdrawal {
+    ProveWithdrawal {
         transaction: initiated_withdrawal.transaction,
         hash: initiated_withdrawal.hash,
         game_index,
         game_l2_block,
         game_addr,
-        proven_at: l1_timestamp,
-    };
-    storage::write_json(&args.proven, &prove_withdrawal)
+        proven_at,
+    }
+}
+
+async fn proven_at_from_receipt<P: Provider>(
+    provider: &P,
+    receipt: &impl ReceiptResponse,
+) -> Result<u64, StepError> {
+    let block_number = receipt
+        .block_number()
+        .ok_or_eyre("prove receipt missing L1 block number")
+        .map_err(StepError::Generic)?;
+    let block = provider
+        .get_block(BlockId::number(block_number))
         .await
-        .map_err(|err| StepError::PersistenceAfterTransaction {
-            transaction_hash: receipt.transaction_hash,
-            stage: StepStage::Prove,
-            source: err,
-        })?;
-    Ok(StepOutcome::Proven(ProvenOutcome {
-        tx_hash: receipt.transaction_hash,
-        withdrawal_hash: initiated_withdrawal.hash,
-        withdrawal_l2_block: initiated_withdrawal.l2_block,
-    }))
+        .map_err(|err| StepError::Generic(err.into()))?
+        .ok_or_eyre("prove L1 block not found")
+        .map_err(StepError::Generic)?;
+    Ok(block.header.timestamp())
 }
 
 async fn check_multi_proof_game<P>(

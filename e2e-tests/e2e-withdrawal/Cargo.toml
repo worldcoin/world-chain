@@ -20,6 +20,10 @@ alloy-sol-types.workspace = true
 alloy-contract.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
+alloy-rpc-types.workspace = true
+alloy-json-rpc.workspace = true
+alloy-rpc-client.workspace = true
+alloy-transport-http = { workspace = true, features = ["reqwest"] }
 
 # aws
 aws-config.workspace = true
@@ -28,6 +32,8 @@ aws-sdk-s3.workspace = true
 
 # misc
 async-trait.workspace = true
+backoff.workspace = true
+reqwest = { version = "0.13", default-features = false }
 clap.workspace = true
 eyre.workspace = true
 tokio.workspace = true
@@ -36,3 +42,8 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["json"] }
 thiserror.workspace = true
+tower.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

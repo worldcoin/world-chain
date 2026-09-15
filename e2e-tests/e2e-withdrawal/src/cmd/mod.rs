@@ -7,6 +7,8 @@ use clap::Subcommand;
 mod finalize;
 mod init;
 mod prove;
+pub(crate) mod rpc;
+mod run;
 mod step;
 
 /// Commands for an end-to-end L2->L1 withdrawal flow.
@@ -31,6 +33,8 @@ pub enum Command {
     Finalize(FinalizeArgs),
     /// Run the next stage of the withdrawal workflow based on stored state.
     Step(StepArgs),
+    /// Run the e2e-withdrawal workflow undefinitely.
+    Run(StepArgs),
 }
 
 impl Command {
@@ -41,6 +45,7 @@ impl Command {
             Self::Prove(args) => prove::run(args).await,
             Self::Finalize(args) => finalize::run(args).await,
             Self::Step(args) => step::run(args).await,
+            Self::Run(args) => run::run(args).await,
         }
     }
 }

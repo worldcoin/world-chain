@@ -126,7 +126,7 @@ pub enum WaitingReason {
 }
 
 /// Conditions that block finalization rather than represent normal progress.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum GameBlockedReason {
     /// The system must be unpaused before finalization can proceed.
     #[error("system is paused")]
@@ -190,6 +190,8 @@ pub enum StepError {
         transaction_hash: B256,
         /// Stage that executed the transaction.
         stage: StepStage,
+        /// Complete handoff retained so persistence retries need no remote reads.
+        handoff: Box<serde_json::Value>,
         /// Underlying persistence failure.
         source: eyre::Report,
     },
@@ -205,4 +207,15 @@ pub enum StepError {
         /// Underlying handoff deletion failure.
         source: eyre::Report,
     },
+}
+
+impl StepError {
+    /// Return whether the error is retryable.
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::GameBlocked {
+                           withdrawal_hash: _,
+                        game_address: _,
+                         reason,}
+            if *reason == GameBlockedReason::SystemPaused)
+    }
 }
