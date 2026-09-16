@@ -112,6 +112,7 @@ jobs:
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           git_sha: ${{ needs.prepare-release.outputs.SHA }}
           cache_scope: ${{ inputs.ref }}
+          no_cache_filters: runtime
 
   merge:
     runs-on: ubuntu-latest

@@ -72,6 +72,7 @@ jobs:
           image_name: ${{ env.IMAGE_NAME }}
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          no_cache_filters: runtime
 
   merge:
     runs-on: ubuntu-latest
