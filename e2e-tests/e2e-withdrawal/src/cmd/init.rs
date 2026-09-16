@@ -28,7 +28,7 @@ pub async fn run(args: &InitArgs) -> Result<StepOutcome, StepError> {
     let signer_addr = wallet.default_signer().address();
     let l2_provider = ProviderBuilder::new()
         .wallet(wallet)
-        .connect_client(super::rpc::client(
+        .connect_client(crate::rpc::client(
             &args.l2_rpc_endpoint,
             "L2_RPC_ENDPOINT",
         )?);
@@ -73,7 +73,7 @@ where
         .await?;
     let tx_hash = *pending.tx_hash();
     let receipt =
-        super::rpc::receipt_with_deadline(tx_hash, StepStage::Init, pending.get_receipt()).await?;
+        crate::rpc::receipt_with_deadline(tx_hash, StepStage::Init, pending.get_receipt()).await?;
     ensure!(receipt.status(), "L2 withdrawal initiation reverted");
     let tx_hash = receipt.transaction_hash();
     let initiated_withdrawal = initiated_withdrawal_from_receipt(&receipt)?;
