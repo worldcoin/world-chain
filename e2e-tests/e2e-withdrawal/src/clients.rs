@@ -30,11 +30,7 @@ impl Clients {
             &args.l2_rpc_endpoint,
         )
         .await?;
-        Ok(Self {
-            l1,
-            l2,
-            l2_address,
-        })
+        Ok(Self { l1, l2, l2_address })
     }
 }
 

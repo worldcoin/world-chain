@@ -25,9 +25,7 @@ pub async fn run_with(args: &StepArgs, clients: &Clients) -> Result<StepOutcome,
     let proven_exists = storage::exists(&args.proven).await?;
 
     match (initiated_exists, proven_exists) {
-        (false, false) => {
-            init::run_with(&args.to_init(), &clients.l2, clients.l2_address).await
-        }
+        (false, false) => init::run_with(&args.to_init(), &clients.l2, clients.l2_address).await,
         (true, false) => prove::run_with(&args.to_prove(), &clients.l1, &clients.l2).await,
         // Both present, or only proven left after a partial cleanup: finalize is
         // idempotent, then retry handoff deletion.
