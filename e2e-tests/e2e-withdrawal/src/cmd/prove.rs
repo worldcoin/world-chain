@@ -5,18 +5,16 @@ use crate::{
         InitiatedWithdrawal, OptimismPortal::OptimismPortalInstance, OutputRootProof,
         ProveWithdrawal,
     },
-    storage,
+    signer, storage,
     types::{ProvenOutcome, StepError, StepOutcome, StepStage, WaitingOutcome, WaitingReason},
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_network::{EthereumWallet, ReceiptResponse};
+use alloy_network::ReceiptResponse;
 use alloy_primitives::{Address, B256, Bytes, U256, address, keccak256, ruint::FromUintError};
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::SolValue;
 use eyre::eyre::{OptionExt, ensure, eyre};
-use std::str::FromStr;
 
 /// WIP-1006 game type.
 const MULTI_PROOF_GAME_TYPE: u32 = 1006;
@@ -27,13 +25,16 @@ const L2_TO_L1_MESSAGE_PASSER: Address = address!("42000000000000000000000000000
 pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     args.validate()?;
     // create L1 signer provider
-    let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key).map_err(|_| {
-        StepError::InvalidConfiguration {
-            field: "L1_PRIVATE_KEY",
-        }
-    })?;
+    let wallet = signer::wallet(
+        args.l1_args.l1_private_key.as_deref(),
+        args.l1_args.l1_aws_kms_key_id.as_deref(),
+        &args.l1_args.l1_rpc_endpoint,
+        "L1_RPC_ENDPOINT",
+        "L1_PRIVATE_KEY or L1_AWS_KMS_KEY_ID (exactly one)",
+    )
+    .await?;
     let l1_provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(local_signer))
+        .wallet(wallet)
         .connect_client(super::rpc::client(
             &args.l1_args.l1_rpc_endpoint,
             "L1_RPC_ENDPOINT",

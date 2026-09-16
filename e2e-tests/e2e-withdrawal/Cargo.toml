@@ -15,6 +15,7 @@ workspace = true
 alloy-primitives.workspace = true
 alloy-provider = { workspace = true, features = ["reqwest", "reqwest-rustls-tls"] }
 alloy-signer-local.workspace = true
+alloy-signer-aws.workspace = true
 alloy-network.workspace = true
 alloy-sol-types.workspace = true
 alloy-contract.workspace = true
@@ -29,6 +30,7 @@ alloy-transport-http = { workspace = true, features = ["reqwest"] }
 aws-config.workspace = true
 aws-credential-types.workspace = true
 aws-sdk-s3.workspace = true
+aws-sdk-kms.workspace = true
 
 # misc
 async-trait.workspace = true

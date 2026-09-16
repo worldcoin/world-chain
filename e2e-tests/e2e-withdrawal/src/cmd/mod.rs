@@ -7,7 +7,7 @@ use clap::Subcommand;
 mod finalize;
 mod init;
 mod prove;
-pub(crate) mod rpc;
+pub mod rpc;
 mod run;
 mod step;
 
