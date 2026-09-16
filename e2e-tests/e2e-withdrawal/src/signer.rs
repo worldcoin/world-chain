@@ -1,6 +1,6 @@
 //! Local and AWS KMS wallet construction shared by both chains.
 
-use crate::{cmd::rpc, types::StepError};
+use crate::{rpc, types::StepError};
 use alloy_network::EthereumWallet;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_aws::AwsSigner;

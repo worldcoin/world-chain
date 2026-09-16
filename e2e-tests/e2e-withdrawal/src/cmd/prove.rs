@@ -35,12 +35,12 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     .await?;
     let l1_provider = ProviderBuilder::new()
         .wallet(wallet)
-        .connect_client(super::rpc::client(
+        .connect_client(crate::rpc::client(
             &args.l1_args.l1_rpc_endpoint,
             "L1_RPC_ENDPOINT",
         )?);
     // create L2 provider
-    let l2_provider = ProviderBuilder::new().connect_client(super::rpc::client(
+    let l2_provider = ProviderBuilder::new().connect_client(crate::rpc::client(
         &args.l2_rpc_endpoint,
         "L2_RPC_ENDPOINT",
     )?);
@@ -79,7 +79,7 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
         .map_err(|err| StepError::Generic(err.into()))?;
     let tx_hash = *pending_tx.tx_hash();
     let receipt =
-        super::rpc::receipt_with_deadline(tx_hash, StepStage::Prove, pending_tx.get_receipt())
+        crate::rpc::receipt_with_deadline(tx_hash, StepStage::Prove, pending_tx.get_receipt())
             .await?;
     if !receipt.status() {
         return Err(StepError::Generic(eyre!(
