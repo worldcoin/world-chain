@@ -1,16 +1,14 @@
 use crate::{
     args::InitArgs,
     bindings::{InitiatedWithdrawal, L2ToL1MessagePasser, WithdrawalTransaction},
-    storage,
+    signer, storage,
     types::{InitiatedOutcome, StepError, StepOutcome, StepStage},
 };
-use alloy_network::{EthereumWallet, ReceiptResponse};
+use alloy_network::ReceiptResponse;
 use alloy_primitives::{Address, B256, Bytes, U256, address};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::TransactionReceipt;
-use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::{OptionExt, ensure};
-use std::str::FromStr;
 
 /// Address of the `L2ToL1MessagePasser` contract on L2.
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("4200000000000000000000000000000000000016");
@@ -19,20 +17,23 @@ const L2_TO_L1_MESSAGE_PASSER: Address = address!("42000000000000000000000000000
 pub async fn run(args: &InitArgs) -> Result<StepOutcome, StepError> {
     args.validate()?;
     // create L2 signer provider
-    let local_signer = PrivateKeySigner::from_str(&args.l2_private_key).map_err(|_| {
-        StepError::InvalidConfiguration {
-            field: "L2_PRIVATE_KEY",
-        }
-    })?;
-    let local_signer_addr = local_signer.address();
+    let wallet = signer::wallet(
+        args.l2_private_key.as_deref(),
+        args.l2_aws_kms_key_id.as_deref(),
+        &args.l2_rpc_endpoint,
+        "L2_RPC_ENDPOINT",
+        "L2_PRIVATE_KEY or L2_AWS_KMS_KEY_ID (exactly one)",
+    )
+    .await?;
+    let signer_addr = wallet.default_signer().address();
     let l2_provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(local_signer))
+        .wallet(wallet)
         .connect_client(super::rpc::client(
             &args.l2_rpc_endpoint,
             "L2_RPC_ENDPOINT",
         )?);
     // target address of the L2 -> L1 withdrawal is the same address that sends the tx on L2
-    let target_addr = local_signer_addr;
+    let target_addr = signer_addr;
     // sends the initiate_withdrawal transaction to the L2ToL1MessagePasser contract
     let (initiated_withdrawal, tx_hash) =
         initiate_withdrawal(l2_provider, target_addr, args.value).await?;

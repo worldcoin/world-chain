@@ -4,31 +4,31 @@ use crate::{
         AnchorStateRegistry::AnchorStateRegistryInstance, IMultiProofGame::IMultiProofGameInstance,
         OptimismPortal::OptimismPortalInstance, ProveWithdrawal,
     },
-    storage,
+    signer, storage,
     types::{
         FinalizedOutcome, GameBlockedReason, StepError, StepOutcome, StepStage, WaitingOutcome,
         WaitingReason,
     },
 };
 use alloy_eips::BlockId;
-use alloy_network::EthereumWallet;
 use alloy_primitives::ruint::FromUintError;
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::{OptionExt, WrapErr, eyre};
-use std::str::FromStr;
 
 /// Run the `finalize` command.
 pub async fn run(args: &FinalizeArgs) -> Result<StepOutcome, StepError> {
     args.validate()?;
     // create L1 signer provider
-    let local_signer = PrivateKeySigner::from_str(&args.l1_args.l1_private_key).map_err(|_| {
-        StepError::InvalidConfiguration {
-            field: "L1_PRIVATE_KEY",
-        }
-    })?;
+    let wallet = signer::wallet(
+        args.l1_args.l1_private_key.as_deref(),
+        args.l1_args.l1_aws_kms_key_id.as_deref(),
+        &args.l1_args.l1_rpc_endpoint,
+        "L1_RPC_ENDPOINT",
+        "L1_PRIVATE_KEY or L1_AWS_KMS_KEY_ID (exactly one)",
+    )
+    .await?;
     let l1_provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(local_signer))
+        .wallet(wallet)
         .connect_client(super::rpc::client(
             &args.l1_args.l1_rpc_endpoint,
             "L1_RPC_ENDPOINT",

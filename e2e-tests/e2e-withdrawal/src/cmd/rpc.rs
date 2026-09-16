@@ -10,7 +10,8 @@ use std::{
 };
 use tower::Service;
 
-const MAX_ATTEMPTS: u32 = 3;
+/// Maximum number of attempts for retryable dependency requests.
+pub const MAX_ATTEMPTS: u32 = 3;
 
 /// Default deadline for RPC requests, receipt waits and storage attempts.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);

@@ -1,32 +1,36 @@
-use crate::types::StepError;
+use crate::{signer, types::StepError};
 use alloy_primitives::{Address, U256, utils::parse_ether};
-use alloy_signer_local::PrivateKeySigner;
 use clap::Args;
-use std::{
-    path::{Component, Path, PathBuf},
-    str::FromStr,
-};
+use std::path::{Component, Path, PathBuf};
 
 /// Arguments for the L1.
 #[derive(Debug, Args, Clone)]
+#[command(group(clap::ArgGroup::new("l1_signer").required(true).multiple(false).args(["l1_private_key", "l1_aws_kms_key_id"])))]
 pub struct L1Args {
     /// L1 rpc endpoint url.
     #[arg(long, env = "L1_RPC_ENDPOINT")]
     pub l1_rpc_endpoint: String,
     /// L1 private key.
     #[arg(long, env = "L1_PRIVATE_KEY")]
-    pub l1_private_key: String,
+    pub l1_private_key: Option<String>,
+    /// L1 AWS KMS Ethereum signing key ID, ARN or alias.
+    #[arg(long, env = "L1_AWS_KMS_KEY_ID")]
+    pub l1_aws_kms_key_id: Option<String>,
 }
 
 /// Arguments for the `init` command.
 #[derive(Debug, Args)]
+#[command(group(clap::ArgGroup::new("l2_signer").required(true).multiple(false).args(["l2_private_key", "l2_aws_kms_key_id"])))]
 pub struct InitArgs {
     /// L2 rpc endpoint url.
     #[arg(long, env = "L2_RPC_ENDPOINT")]
     pub l2_rpc_endpoint: String,
     /// L2 private key.
     #[arg(long, env = "L2_PRIVATE_KEY")]
-    pub l2_private_key: String,
+    pub l2_private_key: Option<String>,
+    /// L2 AWS KMS Ethereum signing key ID, ARN or alias.
+    #[arg(long, env = "L2_AWS_KMS_KEY_ID")]
+    pub l2_aws_kms_key_id: Option<String>,
     /// The amount of ETH you want to withdraw.
     #[arg(long, env = "ETH_VALUE", value_parser = parse_ether, default_value_t = U256::ZERO)]
     pub value: U256,
@@ -93,6 +97,7 @@ pub struct FinalizeArgs {
 
 /// Arguments for the `step` command.
 #[derive(Debug, Args)]
+#[command(group(clap::ArgGroup::new("l2_signer").required(true).multiple(false).args(["l2_private_key", "l2_aws_kms_key_id"])))]
 pub struct StepArgs {
     /// L1 args.
     #[command(flatten)]
@@ -102,7 +107,10 @@ pub struct StepArgs {
     pub l2_rpc_endpoint: String,
     /// L2 private key.
     #[arg(long, env = "L2_PRIVATE_KEY")]
-    pub l2_private_key: String,
+    pub l2_private_key: Option<String>,
+    /// L2 AWS KMS Ethereum signing key ID, ARN or alias.
+    #[arg(long, env = "L2_AWS_KMS_KEY_ID")]
+    pub l2_aws_kms_key_id: Option<String>,
     /// The amount of ETH you want to withdraw.
     #[arg(long, env = "ETH_VALUE", value_parser = parse_ether, default_value_t = U256::ZERO)]
     pub value: U256,
@@ -135,7 +143,11 @@ impl StepArgs {
     /// Validate the complete workflow before any transaction is submitted.
     pub fn validate(&self) -> Result<(), StepError> {
         self.l1_args.validate()?;
-        validate_key(&self.l2_private_key, "L2_PRIVATE_KEY")?;
+        signer::validate(
+            self.l2_private_key.as_deref(),
+            self.l2_aws_kms_key_id.as_deref(),
+            "L2_PRIVATE_KEY or L2_AWS_KMS_KEY_ID (exactly one)",
+        )?;
         rpc_url(&self.l2_rpc_endpoint, "L2_RPC_ENDPOINT")?;
         validate_handoffs(&self.initiated, &self.proven)
     }
@@ -145,6 +157,7 @@ impl StepArgs {
         InitArgs {
             l2_rpc_endpoint: self.l2_rpc_endpoint.clone(),
             l2_private_key: self.l2_private_key.clone(),
+            l2_aws_kms_key_id: self.l2_aws_kms_key_id.clone(),
             value: self.value,
             initiated: self.initiated.clone(),
         }
@@ -175,7 +188,11 @@ impl StepArgs {
 
 impl L1Args {
     fn validate(&self) -> Result<(), StepError> {
-        validate_key(&self.l1_private_key, "L1_PRIVATE_KEY")?;
+        signer::validate(
+            self.l1_private_key.as_deref(),
+            self.l1_aws_kms_key_id.as_deref(),
+            "L1_PRIVATE_KEY or L1_AWS_KMS_KEY_ID (exactly one)",
+        )?;
         rpc_url(&self.l1_rpc_endpoint, "L1_RPC_ENDPOINT")?;
         Ok(())
     }
@@ -183,7 +200,11 @@ impl L1Args {
 
 impl InitArgs {
     pub fn validate(&self) -> Result<(), StepError> {
-        validate_key(&self.l2_private_key, "L2_PRIVATE_KEY")?;
+        signer::validate(
+            self.l2_private_key.as_deref(),
+            self.l2_aws_kms_key_id.as_deref(),
+            "L2_PRIVATE_KEY or L2_AWS_KMS_KEY_ID (exactly one)",
+        )?;
         rpc_url(&self.l2_rpc_endpoint, "L2_RPC_ENDPOINT")?;
         handoff_identity(&self.initiated, "WITHDRAWAL_INITIATED")?;
         Ok(())
@@ -204,11 +225,6 @@ impl FinalizeArgs {
         handoff_identity(&self.proven, "WITHDRAWAL_PROVEN")?;
         Ok(())
     }
-}
-
-fn validate_key(value: &str, field: &'static str) -> Result<(), StepError> {
-    PrivateKeySigner::from_str(value).map_err(|_| StepError::InvalidConfiguration { field })?;
-    Ok(())
 }
 
 /// Parse only supported HTTP(S) endpoints without exposing credentials in errors.
