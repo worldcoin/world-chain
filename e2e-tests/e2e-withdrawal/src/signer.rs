@@ -59,7 +59,7 @@ pub async fn wallet(
                         .operation_attempt_timeout(rpc::DEFAULT_TIMEOUT)
                         .build(),
                 )
-                .retry_config(RetryConfig::standard().with_max_attempts(3))
+                .retry_config(RetryConfig::standard().with_max_attempts(rpc::MAX_ATTEMPTS))
                 .build();
             let signer = AwsSigner::new(
                 aws_sdk_kms::Client::from_conf(config),
