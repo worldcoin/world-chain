@@ -1,5 +1,6 @@
 use crate::{
     args::StepArgs,
+    clients::Clients,
     cmd::{finalize, init, prove},
     storage,
     types::{FinalizedOutcome, StepError, StepOutcome, StepStage},
@@ -14,16 +15,22 @@ use eyre::eyre::WrapErr;
 /// - proven -> `finalize` (idempotent if already on-chain), then delete handoffs
 pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
     args.validate()?;
+    let clients = Clients::from_step_args(args).await?;
+    run_with(args, &clients).await
+}
+
+/// Run the next workflow stage using pre-built providers.
+pub async fn run_with(args: &StepArgs, clients: &Clients) -> Result<StepOutcome, StepError> {
     let initiated_exists = storage::exists(&args.initiated).await?;
     let proven_exists = storage::exists(&args.proven).await?;
 
     match (initiated_exists, proven_exists) {
-        (false, false) => init::run(&args.to_init()).await,
-        (true, false) => prove::run(&args.to_prove()).await,
+        (false, false) => init::run_with(&args.to_init(), &clients.l2, clients.l2_address).await,
+        (true, false) => prove::run_with(&args.to_prove(), &clients.l1, &clients.l2).await,
         // Both present, or only proven left after a partial cleanup: finalize is
         // idempotent, then retry handoff deletion.
         (true, true) | (false, true) => {
-            let outcome = finalize::run(&args.to_finalize()).await?;
+            let outcome = finalize::run_with(&args.to_finalize(), &clients.l1).await?;
             match outcome {
                 StepOutcome::Finalized(finalized) => {
                     delete_handoffs(args, &finalized).await?;

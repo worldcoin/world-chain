@@ -5,14 +5,14 @@ use crate::{
         InitiatedWithdrawal, OptimismPortal::OptimismPortalInstance, OutputRootProof,
         ProveWithdrawal,
     },
-    signer, storage,
+    clients, storage,
     types::{ProvenOutcome, StepError, StepOutcome, StepStage, WaitingOutcome, WaitingReason},
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::ReceiptResponse;
 use alloy_primitives::{Address, B256, Bytes, U256, address, keccak256, ruint::FromUintError};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::Provider;
 use alloy_sol_types::SolValue;
 use eyre::eyre::{OptionExt, ensure, eyre};
 
@@ -24,31 +24,31 @@ const L2_TO_L1_MESSAGE_PASSER: Address = address!("42000000000000000000000000000
 /// Run the `prove` command.
 pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     args.validate()?;
-    // create L1 signer provider
-    let wallet = signer::wallet(
+    let l1_provider = clients::l1_provider(
         args.l1_args.l1_private_key.as_deref(),
         args.l1_args.l1_aws_kms_key_id.as_deref(),
         &args.l1_args.l1_rpc_endpoint,
-        "L1_RPC_ENDPOINT",
-        "L1_PRIVATE_KEY or L1_AWS_KMS_KEY_ID (exactly one)",
     )
     .await?;
-    let l1_provider = ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_client(crate::rpc::client(
-            &args.l1_args.l1_rpc_endpoint,
-            "L1_RPC_ENDPOINT",
-        )?);
-    // create L2 provider
-    let l2_provider = ProviderBuilder::new().connect_client(crate::rpc::client(
-        &args.l2_rpc_endpoint,
-        "L2_RPC_ENDPOINT",
-    )?);
+    let l2_provider = clients::l2_read_provider(&args.l2_rpc_endpoint)?;
+    run_with(args, &l1_provider, &l2_provider).await
+}
+
+/// Prove a withdrawal using pre-built L1 and L2 providers.
+pub async fn run_with<L1, L2>(
+    args: &ProveArgs,
+    l1_provider: &L1,
+    l2_provider: &L2,
+) -> Result<StepOutcome, StepError>
+where
+    L1: Provider,
+    L2: Provider,
+{
     // read InitiatedWithdrawal data (local path or s3://bucket/key)
     let initiated_withdrawal: InitiatedWithdrawal = storage::read_json(&args.initiated).await?;
     // wait for a covering WIP1006 game with l2SequenceNumber >= initiated_withdrawal.l2_block
     let Some((game_index, game_addr, game_l2_block)) = check_multi_proof_game(
-        &l1_provider,
+        l1_provider,
         args.dispute_game_factory,
         initiated_withdrawal.l2_block,
     )
@@ -66,7 +66,7 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
     let (output_root_proof, withdrawal_proof) =
         build_withdrawal_proof(l2_provider, game_l2_block, initiated_withdrawal.hash).await?;
     // send the OptimismPortal::proveWithdrawalTransaction
-    let optimism_portal = OptimismPortalInstance::new(args.optimism_portal, &l1_provider);
+    let optimism_portal = OptimismPortalInstance::new(args.optimism_portal, l1_provider);
     let pending_tx = optimism_portal
         .proveWithdrawalTransaction(
             initiated_withdrawal.transaction.clone(),
@@ -87,7 +87,7 @@ pub async fn run(args: &ProveArgs) -> Result<StepOutcome, StepError> {
             receipt.transaction_hash()
         )));
     }
-    let proven_at = proven_at_from_receipt(&l1_provider, &receipt).await?;
+    let proven_at = proven_at_from_receipt(l1_provider, &receipt).await?;
     let withdrawal_hash = initiated_withdrawal.hash;
     let withdrawal_l2_block = initiated_withdrawal.l2_block;
     let prove_withdrawal = prove_withdrawal(

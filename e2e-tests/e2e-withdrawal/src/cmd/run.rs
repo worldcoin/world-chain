@@ -1,5 +1,6 @@
 use crate::{
     args::StepArgs,
+    clients::Clients,
     cmd::step,
     storage,
     types::{StepError, StepOutcome, StepStage},
@@ -13,9 +14,10 @@ const POLL_INTERVAL: Duration = Duration::from_secs(120);
 /// Run complete withdrawal cycles until a terminal failure occurs.
 pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
     args.validate()?;
+    let clients = Clients::from_step_args(args).await?;
     let mut cleanup_retry = RetryBudget::default();
     loop {
-        let result = step::run(args).await;
+        let result = step::run_with(args, &clients).await;
         match &result {
             Ok(outcome) => tracing::info!(?outcome, "withdrawal workflow iteration completed"),
             Err(_) => tracing::info!("withdrawal workflow iteration failed, handling error"),

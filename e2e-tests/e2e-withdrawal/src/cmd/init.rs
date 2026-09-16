@@ -1,12 +1,12 @@
 use crate::{
     args::InitArgs,
     bindings::{InitiatedWithdrawal, L2ToL1MessagePasser, WithdrawalTransaction},
-    signer, storage,
+    clients, storage,
     types::{InitiatedOutcome, StepError, StepOutcome, StepStage},
 };
 use alloy_network::ReceiptResponse;
 use alloy_primitives::{Address, B256, Bytes, U256, address};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::Provider;
 use alloy_rpc_types::TransactionReceipt;
 use eyre::eyre::{OptionExt, ensure};
 
@@ -16,22 +16,24 @@ const L2_TO_L1_MESSAGE_PASSER: Address = address!("42000000000000000000000000000
 /// Run the `init` command.
 pub async fn run(args: &InitArgs) -> Result<StepOutcome, StepError> {
     args.validate()?;
-    // create L2 signer provider
-    let wallet = signer::wallet(
+    let (l2_provider, signer_addr) = clients::l2_provider(
         args.l2_private_key.as_deref(),
         args.l2_aws_kms_key_id.as_deref(),
         &args.l2_rpc_endpoint,
-        "L2_RPC_ENDPOINT",
-        "L2_PRIVATE_KEY or L2_AWS_KMS_KEY_ID (exactly one)",
     )
     .await?;
-    let signer_addr = wallet.default_signer().address();
-    let l2_provider = ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_client(crate::rpc::client(
-            &args.l2_rpc_endpoint,
-            "L2_RPC_ENDPOINT",
-        )?);
+    run_with(args, &l2_provider, signer_addr).await
+}
+
+/// Initialize a withdrawal using a pre-built L2 provider.
+pub async fn run_with<P>(
+    args: &InitArgs,
+    l2_provider: &P,
+    signer_addr: Address,
+) -> Result<StepOutcome, StepError>
+where
+    P: Provider,
+{
     // target address of the L2 -> L1 withdrawal is the same address that sends the tx on L2
     let target_addr = signer_addr;
     // sends the initiate_withdrawal transaction to the L2ToL1MessagePasser contract

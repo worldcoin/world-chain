@@ -4,7 +4,7 @@ use crate::{
         AnchorStateRegistry::AnchorStateRegistryInstance, IMultiProofGame::IMultiProofGameInstance,
         OptimismPortal::OptimismPortalInstance, ProveWithdrawal,
     },
-    signer, storage,
+    clients, storage,
     types::{
         FinalizedOutcome, GameBlockedReason, StepError, StepOutcome, StepStage, WaitingOutcome,
         WaitingReason,
@@ -12,31 +12,30 @@ use crate::{
 };
 use alloy_eips::BlockId;
 use alloy_primitives::ruint::FromUintError;
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::Provider;
 use eyre::eyre::{OptionExt, WrapErr, eyre};
 
 /// Run the `finalize` command.
 pub async fn run(args: &FinalizeArgs) -> Result<StepOutcome, StepError> {
     args.validate()?;
-    // create L1 signer provider
-    let wallet = signer::wallet(
+    let l1_provider = clients::l1_provider(
         args.l1_args.l1_private_key.as_deref(),
         args.l1_args.l1_aws_kms_key_id.as_deref(),
         &args.l1_args.l1_rpc_endpoint,
-        "L1_RPC_ENDPOINT",
-        "L1_PRIVATE_KEY or L1_AWS_KMS_KEY_ID (exactly one)",
     )
     .await?;
-    let l1_provider = ProviderBuilder::new()
-        .wallet(wallet)
-        .connect_client(crate::rpc::client(
-            &args.l1_args.l1_rpc_endpoint,
-            "L1_RPC_ENDPOINT",
-        )?);
+    run_with(args, &l1_provider).await
+}
+
+/// Finalize a withdrawal using a pre-built L1 provider.
+pub async fn run_with<P>(args: &FinalizeArgs, l1_provider: &P) -> Result<StepOutcome, StepError>
+where
+    P: Provider,
+{
     // read ProveWithdrawal data (local path or s3://bucket/key)
     let prove_withdrawal: ProveWithdrawal = storage::read_json(&args.proven).await?;
     // already finalized on-chain, treat as success so step can retry handoff cleanup.
-    let optimism_portal = OptimismPortalInstance::new(args.optimism_portal, &l1_provider);
+    let optimism_portal = OptimismPortalInstance::new(args.optimism_portal, l1_provider);
     if optimism_portal
         .finalizedWithdrawals(prove_withdrawal.hash)
         .call()
@@ -82,7 +81,7 @@ pub async fn run(args: &FinalizeArgs) -> Result<StepOutcome, StepError> {
         })?;
     // detect blocked games even while proof maturity is still pending. All game
     // checks use the same block hash so a changing head cannot mix game states.
-    let game_waiting = check_game(&l1_provider, args, &prove_withdrawal, block).await?;
+    let game_waiting = check_game(l1_provider, args, &prove_withdrawal, block).await?;
     if now < eligible_at {
         let waiting_outcome = WaitingOutcome {
             withdrawal_hash: prove_withdrawal.hash,
