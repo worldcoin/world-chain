@@ -122,6 +122,7 @@ jobs:
           context: source
           dockerfile: source/Dockerfile
           cache_scope: ${{ steps.target.outputs.cache_scope }}
+          no_cache_filters: runtime
 
   merge:
     name: merge multi-arch manifest

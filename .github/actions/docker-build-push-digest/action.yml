@@ -51,6 +51,10 @@ inputs:
       more than one image so their digest artifacts do not collide.
     required: false
     default: digests
+  no_cache_filters:
+    description: Build stages to exclude from the cache.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -113,6 +117,7 @@ runs:
         tags: ${{ inputs.registry }}/${{ inputs.image_name }}
         platforms: ${{ inputs.platform }}
         labels: ${{ steps.meta.outputs.labels }}
+        no-cache-filters: ${{ inputs.no_cache_filters }}
         cache-from: |
           type=s3,region=${{ inputs.aws_region }},bucket=${{ inputs.sccache_bucket }},prefix=${{ env.BUILDKIT_CACHE_PREFIX }},name=${{ env.CACHE_SCOPE }}
           type=s3,region=${{ inputs.aws_region }},bucket=${{ inputs.sccache_bucket }},prefix=${{ env.BUILDKIT_CACHE_PREFIX }},name=main
