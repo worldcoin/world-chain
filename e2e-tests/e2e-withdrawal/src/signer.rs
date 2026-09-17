@@ -1,6 +1,6 @@
 //! Local and AWS KMS wallet construction shared by both chains.
 
-use crate::{rpc, types::StepError};
+use crate::{retry, rpc, types::StepError};
 use alloy_network::EthereumWallet;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_aws::AwsSigner;
@@ -39,7 +39,7 @@ pub async fn wallet(
 
     // Also bound credential discovery and the chain-ID lookup, not only KMS requests.
     tokio::time::timeout(
-        rpc::DEFAULT_TIMEOUT,
+        retry::DEFAULT_TIMEOUT,
         Box::pin(async {
             let chain_id = ProviderBuilder::new()
                 .connect_client(rpc::client(endpoint, rpc_field)?)
@@ -55,11 +55,11 @@ pub async fn wallet(
             let config = aws_sdk_kms::config::Builder::from(&config)
                 .timeout_config(
                     TimeoutConfig::builder()
-                        .operation_timeout(rpc::DEFAULT_TIMEOUT)
-                        .operation_attempt_timeout(rpc::DEFAULT_TIMEOUT)
+                        .operation_timeout(retry::DEFAULT_TIMEOUT)
+                        .operation_attempt_timeout(retry::DEFAULT_TIMEOUT)
                         .build(),
                 )
-                .retry_config(RetryConfig::standard().with_max_attempts(rpc::MAX_ATTEMPTS))
+                .retry_config(RetryConfig::standard().with_max_attempts(retry::RPC_MAX_ATTEMPTS))
                 .build();
             let signer = AwsSigner::new(
                 aws_sdk_kms::Client::from_conf(config),

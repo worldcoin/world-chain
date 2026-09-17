@@ -120,9 +120,10 @@ where
         .await
         .map_err(|err| StepError::Generic(err.into()))?;
     if !is_finalized {
-        return Err(StepError::Generic(eyre!(
-            "Portal did not persist the finalized withdrawal"
-        )));
+        return Err(StepError::FinalizeNotYetVisible {
+            transaction_hash: receipt.transaction_hash,
+            withdrawal_hash: prove_withdrawal.hash,
+        });
     }
     Ok(StepOutcome::Finalized(FinalizedOutcome::Finalized {
         withdrawal_hash: prove_withdrawal.hash,

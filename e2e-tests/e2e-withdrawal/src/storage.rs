@@ -1,8 +1,12 @@
+use crate::retry::{self, DEFAULT_TIMEOUT, MAX_ATTEMPTS};
 use async_trait::async_trait;
 use aws_credential_types::provider::ProvideCredentials;
 use aws_sdk_s3::{
     error::{ProvideErrorMetadata, SdkError},
-    operation::{delete_object::DeleteObjectError, put_object::PutObjectError},
+    operation::{
+        delete_object::DeleteObjectError, get_object::GetObjectError, head_object::HeadObjectError,
+        put_object::PutObjectError,
+    },
 };
 use eyre::eyre::{Context, OptionExt, bail};
 use serde::{Serialize, de::DeserializeOwned};
@@ -164,7 +168,7 @@ pub async fn open(location: &str) -> eyre::Result<(Box<dyn BlobStore>, String)> 
 
 /// Read and deserialize JSON from a local path or `s3://bucket/key`.
 pub async fn read_json<T: DeserializeOwned>(location: &str) -> eyre::Result<T> {
-    with_deadline("read", location, async {
+    with_retries("read", location, || async {
         let (store, key) = open(location).await?;
         Ok(serde_json::from_slice(&store.get(&key).await?)?)
     })
@@ -173,7 +177,7 @@ pub async fn read_json<T: DeserializeOwned>(location: &str) -> eyre::Result<T> {
 
 /// Serialize and write JSON to a local path or `s3://bucket/key`.
 pub async fn write_json<T: Serialize>(location: &str, value: &T) -> eyre::Result<()> {
-    with_deadline("write", location, async {
+    with_retries("write", location, || async {
         let (store, key) = open(location).await?;
         store.put(&key, &serde_json::to_vec_pretty(value)?).await
     })
@@ -182,7 +186,7 @@ pub async fn write_json<T: Serialize>(location: &str, value: &T) -> eyre::Result
 
 /// Return whether a local path or `s3://bucket/key` exists.
 pub async fn exists(location: &str) -> eyre::Result<bool> {
-    with_deadline("exists", location, async {
+    with_retries("exists", location, || async {
         let (store, key) = open(location).await?;
         store.exists(&key).await
     })
@@ -191,10 +195,37 @@ pub async fn exists(location: &str) -> eyre::Result<bool> {
 
 /// Delete a local path or `s3://bucket/key`. Missing objects are ignored.
 pub async fn delete(location: &str) -> eyre::Result<()> {
-    with_deadline("delete", location, async {
+    with_retries("delete", location, || async {
         let (store, key) = open(location).await?;
         store.delete(&key).await
     })
+    .await
+}
+
+async fn with_retries<T, F, Fut>(
+    operation: &str,
+    location: &str,
+    mut attempt_fn: F,
+) -> eyre::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = eyre::Result<T>>,
+{
+    retry::with_backoff(
+        MAX_ATTEMPTS,
+        || with_deadline(operation, location, attempt_fn()),
+        |error| !is_permanent_error(error),
+        |attempt, delay, error| {
+            tracing::warn!(
+                error = ?error,
+                operation,
+                location,
+                attempt,
+                retry_in_secs = delay.as_secs_f64(),
+                "storage operation failed, retrying"
+            );
+        },
+    )
     .await
 }
 
@@ -203,7 +234,7 @@ async fn with_deadline<T>(
     location: &str,
     future: impl std::future::Future<Output = eyre::Result<T>>,
 ) -> eyre::Result<T> {
-    tokio::time::timeout(crate::rpc::DEFAULT_TIMEOUT, future)
+    tokio::time::timeout(DEFAULT_TIMEOUT, future)
         .await
         .wrap_err_with(|| {
             format!("storage {operation} timed out after 30 seconds at `{location}`")
@@ -220,8 +251,25 @@ pub fn is_permanent_error(error: &eyre::Report) -> bool {
                 | std::io::ErrorKind::NotFound
         );
     }
-    // Both persistence and cleanup retain their typed SDK errors through context.
-    let code = error
+    if error.downcast_ref::<serde_json::Error>().is_some() {
+        return true;
+    }
+    // Persistence and cleanup retain typed SDK errors through context.
+    matches!(
+        s3_service_code(error),
+        Some(
+            "AccessDenied"
+                | "InvalidAccessKeyId"
+                | "SignatureDoesNotMatch"
+                | "NoSuchBucket"
+                | "InvalidArgument"
+                | "NoSuchKey"
+        )
+    )
+}
+
+fn s3_service_code(error: &eyre::Report) -> Option<&str> {
+    error
         .downcast_ref::<SdkError<PutObjectError>>()
         .and_then(|error| error.as_service_error())
         .and_then(|error| error.code())
@@ -230,15 +278,17 @@ pub fn is_permanent_error(error: &eyre::Report) -> bool {
                 .downcast_ref::<SdkError<DeleteObjectError>>()
                 .and_then(|error| error.as_service_error())
                 .and_then(|error| error.code())
-        });
-    matches!(
-        code,
-        Some(
-            "AccessDenied"
-                | "InvalidAccessKeyId"
-                | "SignatureDoesNotMatch"
-                | "NoSuchBucket"
-                | "InvalidArgument"
-        )
-    )
+        })
+        .or_else(|| {
+            error
+                .downcast_ref::<SdkError<GetObjectError>>()
+                .and_then(|error| error.as_service_error())
+                .and_then(|error| error.code())
+        })
+        .or_else(|| {
+            error
+                .downcast_ref::<SdkError<HeadObjectError>>()
+                .and_then(|error| error.as_service_error())
+                .and_then(|error| error.code())
+        })
 }

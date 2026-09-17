@@ -207,15 +207,31 @@ pub enum StepError {
         /// Underlying handoff deletion failure.
         source: eyre::Report,
     },
+    /// Finalize tx succeeded but the portal read has not yet observed it.
+    ///
+    /// Usually caused by an RPC provider routing the confirmation read to a
+    /// lagging node. The next tick should retry finalize (idempotent).
+    #[error(
+        "Portal did not yet show finalized withdrawal {withdrawal_hash} after tx {transaction_hash}"
+    )]
+    FinalizeNotYetVisible {
+        /// Hash of the successful finalize transaction.
+        transaction_hash: B256,
+        /// Identifier of the withdrawal that should now be finalized.
+        withdrawal_hash: B256,
+    },
 }
 
 impl StepError {
     /// Return whether the error is retryable.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, Self::GameBlocked {
-                           withdrawal_hash: _,
-                        game_address: _,
-                         reason,}
-            if *reason == GameBlockedReason::SystemPaused)
+        matches!(
+            self,
+            Self::FinalizeNotYetVisible { .. }
+                | Self::GameBlocked {
+                    reason: GameBlockedReason::SystemPaused,
+                    ..
+                }
+        )
     }
 }

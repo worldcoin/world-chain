@@ -2,13 +2,12 @@ use crate::{
     args::StepArgs,
     clients::Clients,
     cmd::step,
+    retry::RetryBudget,
     storage,
-    types::{StepError, StepOutcome, StepStage},
+    types::{GameBlockedReason, StepError, StepOutcome, StepStage},
 };
-use backoff::{ExponentialBackoff, backoff::Backoff};
 use std::time::Duration;
 
-const MAX_ATTEMPTS: u32 = 10;
 const POLL_INTERVAL: Duration = Duration::from_secs(120);
 
 /// Run complete withdrawal cycles until a terminal failure occurs.
@@ -47,7 +46,7 @@ pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
                 let mut retry = RetryBudget::default();
                 let mut source = source;
                 loop {
-                    let Some(delay) = retry.next_delay(&source) else {
+                    let Some(delay) = retry.next_delay(storage::is_permanent_error(&source)) else {
                         return Err(StepError::PersistenceAfterTransaction {
                             transaction_hash,
                             stage,
@@ -70,36 +69,35 @@ pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
                     // Safe, we've just checked it's a `CleanupAfterFinalized` error
                     unreachable!()
                 };
-                let Some(delay) = cleanup_retry.next_delay(source) else {
+                let Some(delay) = cleanup_retry.next_delay(storage::is_permanent_error(source))
+                else {
                     return Err(error);
                 };
                 tracing::warn!(error = ?error, attempt = cleanup_retry.failures,
-                    retry_in_secs = delay.as_secs_f64(), "handoff cleanup failed; retrying");
+                    retry_in_secs = delay.as_secs_f64(), "handoff cleanup failed, retrying");
                 tokio::time::sleep(delay).await;
                 continue;
             }
+            Err(StepError::GameBlocked {
+                withdrawal_hash,
+                game_address,
+                reason,
+            }) if reason != GameBlockedReason::SystemPaused => {
+                tracing::warn!(
+                    %withdrawal_hash,
+                    %game_address,
+                    %reason,
+                    "supporting game is invalid. Deleting proven handoff to re-prove"
+                );
+                storage::delete(&args.proven)
+                    .await
+                    .map_err(StepError::Generic)?;
+            }
             Err(error) if error.is_retryable() => {
-                // System pause is an explicit on-chain waiting condition.
-                tracing::warn!(error = ?error, "withdrawal paused, waiting");
+                tracing::warn!(error = ?error, "retryable withdrawal condition, waiting");
             }
             Err(error) => return Err(error),
         }
         tokio::time::sleep(POLL_INTERVAL).await;
-    }
-}
-
-#[derive(Default)]
-struct RetryBudget {
-    failures: u32,
-    backoff: ExponentialBackoff,
-}
-
-impl RetryBudget {
-    fn next_delay(&mut self, error: &eyre::Report) -> Option<Duration> {
-        self.failures += 1;
-        if self.failures >= MAX_ATTEMPTS || storage::is_permanent_error(error) {
-            return None;
-        }
-        self.backoff.next_backoff()
     }
 }
