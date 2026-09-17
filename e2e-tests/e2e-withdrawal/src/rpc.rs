@@ -1,8 +1,12 @@
+use crate::{
+    args,
+    retry::{self, DEFAULT_TIMEOUT, RPC_MAX_ATTEMPTS},
+    types::StepStage,
+};
 use alloy_json_rpc::{RequestPacket, ResponsePacket};
 use alloy_provider::transport::{TransportError, TransportErrorKind, TransportFut};
 use alloy_rpc_client::RpcClient;
 use alloy_transport_http::Http;
-use backoff::{ExponentialBackoff, backoff::Backoff};
 use eyre::eyre::WrapErr;
 use std::{
     task::{Context, Poll},
@@ -10,16 +14,10 @@ use std::{
 };
 use tower::Service;
 
-/// Maximum number of attempts for retryable dependency requests.
-pub const MAX_ATTEMPTS: u32 = 3;
-
-/// Default deadline for RPC requests, receipt waits and storage attempts.
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// Bound the entire receipt wait, including any in-flight RPC at the deadline.
 pub async fn receipt_with_deadline<T, E>(
     transaction_hash: alloy_primitives::B256,
-    stage: crate::types::StepStage,
+    stage: StepStage,
     future: impl std::future::Future<Output = Result<T, E>>,
 ) -> eyre::Result<T>
 where
@@ -36,7 +34,7 @@ where
 /// Apply retries below the provider so receipt polling and transaction fillers
 /// get the same policy as explicit reads. Submission requests are never retried.
 pub fn client(endpoint: &str, field: &'static str) -> eyre::Result<RpcClient> {
-    let url = crate::args::rpc_url(endpoint, field)?;
+    let url = args::rpc_url(endpoint, field)?;
     let client = reqwest::Client::builder()
         .timeout(DEFAULT_TIMEOUT)
         .retry(reqwest::retry::never())
@@ -77,33 +75,20 @@ impl Service<RequestPacket> for ReadRetryTransport {
 }
 
 impl ReadRetryTransport {
-    async fn retry_read(
-        mut self,
-        request: RequestPacket,
-    ) -> Result<ResponsePacket, TransportError> {
+    async fn retry_read(self, request: RequestPacket) -> Result<ResponsePacket, TransportError> {
         let methods = request.method_names().collect::<Vec<_>>().join(",");
-        let mut backoff = ExponentialBackoff::default();
-        let mut attempt = 0;
-        loop {
-            attempt += 1;
-            let error = match self
-                .inner
-                .call(request.clone())
-                .await
-                .and_then(check_response)
-            {
-                Ok(response) => return Ok(response),
-                Err(error) => error,
-            };
-            if attempt >= MAX_ATTEMPTS || !is_transient(&error) {
-                return Err(error);
-            }
-            let Some(delay) = backoff.next_backoff() else {
-                return Err(error);
-            };
-            log_retry(self.dependency, &methods, attempt, delay, &error);
-            tokio::time::sleep(delay).await;
-        }
+        let dependency = self.dependency;
+        retry::with_backoff(
+            RPC_MAX_ATTEMPTS,
+            || {
+                let mut transport = self.clone();
+                let request = request.clone();
+                async move { transport.inner.call(request).await.and_then(check_response) }
+            },
+            is_transient,
+            |attempt, delay, error| log_retry(dependency, &methods, attempt, delay, error),
+        )
+        .await
     }
 }
 
