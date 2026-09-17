@@ -3,7 +3,7 @@ use crate::{
     clients::Clients,
     cmd::step,
     storage,
-    types::{StepError, StepOutcome, StepStage},
+    types::{GameBlockedReason, StepError, StepOutcome, StepStage},
 };
 use backoff::{ExponentialBackoff, backoff::Backoff};
 use std::time::Duration;
@@ -74,13 +74,27 @@ pub async fn run(args: &StepArgs) -> Result<StepOutcome, StepError> {
                     return Err(error);
                 };
                 tracing::warn!(error = ?error, attempt = cleanup_retry.failures,
-                    retry_in_secs = delay.as_secs_f64(), "handoff cleanup failed; retrying");
+                    retry_in_secs = delay.as_secs_f64(), "handoff cleanup failed, retrying");
                 tokio::time::sleep(delay).await;
                 continue;
             }
+            Err(StepError::GameBlocked {
+                withdrawal_hash,
+                game_address,
+                reason,
+            }) if reason != GameBlockedReason::SystemPaused => {
+                tracing::warn!(
+                    %withdrawal_hash,
+                    %game_address,
+                    %reason,
+                    "supporting game is invalid. Deleting proven handoff to re-prove"
+                );
+                storage::delete(&args.proven)
+                    .await
+                    .map_err(StepError::Generic)?;
+            }
             Err(error) if error.is_retryable() => {
-                // System pause is an explicit on-chain waiting condition.
-                tracing::warn!(error = ?error, "withdrawal paused, waiting");
+                tracing::warn!(error = ?error, "retryable withdrawal condition, waiting");
             }
             Err(error) => return Err(error),
         }
