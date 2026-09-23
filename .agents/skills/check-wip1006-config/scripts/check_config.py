@@ -4,6 +4,7 @@
 import argparse
 from functools import lru_cache
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import time
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 HELPER = Path(__file__).resolve().parents[2] / "investigate-game/scripts/investigate_game.py"
 spec = importlib.util.spec_from_file_location("game_rpc", HELPER)
@@ -20,6 +22,7 @@ UNKNOWN = "UNKNOWN"
 ZERO = "0x" + "00" * 20
 GAME_TYPE = 1006  # pkg/contracts/src/dispute/lib/GameTypes.sol
 NETWORKS = {"mainnet": (1, "ETHEREUM_PROVIDER"), "sepolia": (11155111, "ETHEREUM_SEPOLIA_PROVIDER")}
+RELEASES_API = "https://api.github.com/repos/worldcoin/world-chain/releases"
 IMPL = {
     **{k: v[1] for k, v in base.GETTERS.items() if k in (
         "gameType", "proposerBond", "challengerBond", "aggregationVKey", "rangeVKeyCommitment",
@@ -40,6 +43,81 @@ def keccak(value):
     except (OSError, subprocess.SubprocessError):
         raise ValueError("Local cast keccak failed; install Foundry and check PATH") from None
     return base.decode(result, "bytes32")
+
+
+def github_token():
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        return token
+    try:
+        result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def proofs_release(aggregation, range_commitment, image_id):
+    """Match all three onchain identities against published GitHub release notes."""
+    if UNKNOWN in (aggregation, range_commitment, image_id):
+        return UNKNOWN
+    expected = (aggregation.lower(), range_commitment.lower(), image_id.lower())
+    deadline = time.monotonic() + 30
+    token = github_token()
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "check-wip1006-config"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    for page in range(1, 21):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError("GitHub release lookup timed out")
+        request = Request(f"{RELEASES_API}?per_page=100&page={page}",
+                          headers=headers)
+        try:
+            with urlopen(request, timeout=min(10, remaining)) as response:
+                payload = response.read(2_000_001)
+            if len(payload) > 2_000_000:
+                raise ValueError("GitHub release response exceeds size limit")
+            releases = json.loads(payload)
+        except (OSError, TimeoutError, UnicodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"GitHub release lookup failed: {type(error).__name__}") from None
+        if not isinstance(releases, list) or len(releases) > 100:
+            raise ValueError("Invalid GitHub release response")
+        for release in releases:
+            if not isinstance(release, dict) or not isinstance(release.get("tag_name"), str):
+                raise ValueError("Invalid GitHub release entry")
+            tag = release["tag_name"]
+            if not tag.startswith("proofs/"):
+                continue
+            if not re.fullmatch(r"proofs/v[0-9A-Za-z._-]+", tag):
+                raise ValueError("Invalid proofs release tag")
+            body = release.get("body")
+            if not isinstance(body, str):
+                raise ValueError(f"Proofs release {tag} has no release notes")
+            values = []
+            for field, size in (("aggregation_vkey", 64), ("range_vkey_commitment", 64), ("PCR0", 96)):
+                matches = re.findall(rf"(?im)^\s*\|\s*{field}\s*\|\s*`?(0x[0-9a-f]{{{size}}})`?\s*\|", body)
+                if len(matches) != 1:
+                    raise ValueError(f"Proofs release {tag} has missing or ambiguous {field}")
+                values.append(matches[0].lower())
+            if (values[0], values[1], keccak(values[2]).lower()) == expected:
+                return tag
+        if len(releases) < 100:
+            if not token:
+                raise ValueError("GitHub authentication unavailable; draft releases were not searched")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError("GitHub release lookup timed out")
+            try:
+                request = Request("https://api.github.com/repos/worldcoin/world-chain", headers=headers)
+                with urlopen(request, timeout=min(10, remaining)) as response:
+                    repository = json.loads(response.read(1_000_001))
+            except (OSError, TimeoutError, UnicodeError, json.JSONDecodeError) as error:
+                raise ValueError(f"GitHub draft visibility check failed: {type(error).__name__}") from None
+            permissions = repository.get("permissions") if isinstance(repository, dict) else None
+            if not isinstance(permissions, dict) or permissions.get("push") is not True:
+                raise ValueError("GitHub token cannot confirm draft release visibility")
+            return None
+    raise ValueError("GitHub release lookup exceeded 20 pages; history incomplete")
 
 
 def address(value):
@@ -68,6 +146,7 @@ class Inspector:
         self.checks, self.sources, self.sections = [], {}, {}
         self.block = None
         self.pcr_cache = {}
+        self.release_result = UNKNOWN
         self.sections["WIP-1006"] = dict.fromkeys(["implementation", *IMPL], UNKNOWN)
         self.sections["TEE Attestation"] = {"NitroAttestationVerifier": UNKNOWN, "PCR sets": UNKNOWN}
 
@@ -288,6 +367,18 @@ class Inspector:
         self.sections["WIP-1006"] = self.implementation(target, "WIP-1006", factory, system)
         if candidate:
             self.sections["NEW implementation"] = self.implementation(candidate, "NEW", factory, system)
+        active = self.sections["WIP-1006"]
+        try:
+            release = proofs_release(active["aggregationVKey"], active["rangeVKeyCommitment"], active["teeImageId"])
+            if release == UNKNOWN:
+                self.check("UNKNOWN", "Proofs release lookup: onchain identity unavailable")
+            elif release is None:
+                self.release_result = "doesn't match any release in the world-chain releases section"
+                self.check("WARNING", "Onchain proofs identities match no published world-chain proofs release")
+            else:
+                self.release_result = release
+        except ValueError as error:
+            self.check("UNKNOWN", f"Proofs release lookup: {error}")
         self.check("UNKNOWN", "Proof artifacts/key correctness and end-to-end availability cannot be established from getters")
         self.check("WARNING", "Supplied registry is the trust root; canonical deployment and bytecode identity not authenticated")
 
@@ -321,6 +412,7 @@ class Inspector:
                 else:
                     suffix = " [raw ERC-20 units]" if key in ("proposerBond", "challengerBond") else " [wei]" if key == "initBonds(uint32)" else ""
                     lines.append(f"{key}: {value}{suffix}")
+        lines.extend(["", f"Onchain proofs release: {self.release_result}", f"Release source: {RELEASES_API}"])
         if "NEW implementation" in self.sections:
             lines.extend(["", "OLD (active) vs NEW (candidate)"])
             old, new = self.sections["WIP-1006"], self.sections["NEW implementation"]
