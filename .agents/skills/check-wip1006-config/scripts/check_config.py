@@ -391,6 +391,7 @@ class Inspector:
             self.sections.clear()
             self.sources.clear()
             self.checks.clear()
+            self.release_result = UNKNOWN
             raise ValueError("Snapshot reorganized; discarded report. Rerun inspection")
 
     def render(self):
