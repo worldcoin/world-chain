@@ -6,5 +6,4 @@
 
 ## Architecture and maintenance
 
-- [Kona reuse and World proof adapters](../docs/proof/kona-reuse.md): upstream implementations, remaining local responsibilities and update requirements.
 - [Reproducible proof builds](../docs/proof/reproducible-builds.md): measured workspaces, verification keys and enclave PCRs.

@@ -36,11 +36,6 @@ Two consequences worth knowing:
   `proofs/backends/nitro/register` (a root-workspace crate) precisely so `alloy-provider`,
   the transaction signer and their transitive graph stay out of the enclave's lockfile.
 
-The shared Kona client imports core Kona and `kona-sp1-client-utils` at a fixed Optimism
-revision. Their feature resolution and transitive dependencies are part of each consumer
-lockfile. See [Kona reuse and World proof adapters](kona-reuse.md) for the ownership boundary
-and pin-update checks.
-
 ## 2. The EIF is built with Nix, end to end
 
 `flake.nix` builds the enclave binary, its rootfs, and the EIF itself. The assembly is
