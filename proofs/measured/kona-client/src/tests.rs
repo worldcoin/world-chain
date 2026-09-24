@@ -1,9 +1,49 @@
-pub use kona_sp1_client_utils::precompiles::CustomCrypto;
+mod output_version {
+    use alloy_primitives::{B256, keccak256};
+    use kona_preimage::PreimageKey;
+    use kona_proof::{block_on, errors::OracleProviderError, sync::fetch_safe_head_hash};
+    use world_chain_proof_core::witness::preimage_store::PreimageStore;
 
-#[cfg(test)]
-mod tests {
-    use super::CustomCrypto;
+    fn oracle_for_output(preimage: [u8; 128]) -> (PreimageStore, B256) {
+        let root = keccak256(preimage);
+        let mut oracle = PreimageStore::default();
+        oracle
+            .save_preimage(PreimageKey::new_keccak256(root.0), preimage.to_vec())
+            .unwrap();
+        (oracle, root)
+    }
+
+    #[test]
+    fn version_zero_output_returns_safe_head() {
+        let safe_head = B256::repeat_byte(0x42);
+        let mut preimage = [0u8; 128];
+        preimage[96..].copy_from_slice(safe_head.as_slice());
+        let (oracle, root) = oracle_for_output(preimage);
+
+        assert_eq!(
+            block_on(fetch_safe_head_hash(&oracle, root)).unwrap(),
+            safe_head
+        );
+    }
+
+    #[test]
+    fn nonzero_output_version_is_rejected() {
+        for index in [0, 31] {
+            let mut preimage = [0u8; 128];
+            preimage[index] = 1;
+            let version = B256::from_slice(&preimage[..32]);
+            let (oracle, root) = oracle_for_output(preimage);
+
+            let err = block_on(fetch_safe_head_hash(&oracle, root))
+                .expect_err("unsupported output version must be rejected");
+            assert!(matches!(err, OracleProviderError::UnknownOutputVersion(v) if v == version));
+        }
+    }
+}
+
+mod kzg {
     use alloy_primitives::hex_literal::hex;
+    use kona_sp1_client_utils::precompiles::CustomCrypto;
     use kzg_rs::{Bytes32, Bytes48, KzgProof, KzgSettings};
     use revm::precompile::{Crypto, PrecompileHalt};
 

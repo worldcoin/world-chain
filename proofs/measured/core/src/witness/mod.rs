@@ -1,6 +1,4 @@
-pub mod preimage_store;
-
-pub use kona_sp1_client_utils::witness::{BlobData, WitnessData};
+pub use kona_sp1_client_utils::witness::{BlobData, WitnessData, preimage_store};
 use preimage_store::PreimageStore;
 
 use crate::range::WorldRangeHardforkConfig;

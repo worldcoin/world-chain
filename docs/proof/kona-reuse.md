@@ -21,7 +21,7 @@ the consumer lockfiles remain part of the measured build boundary. KZG resolves 
 
 | Responsibility | Upstream implementation now used | Local responsibility retained |
 | --- | --- | --- |
-| Safe-head output-root lookup and version validation | `kona_proof::sync::fetch_safe_head_hash` | Re-export and regression tests |
+| Safe-head output-root lookup and version validation | `kona_proof::sync::fetch_safe_head_hash` | Regression tests; setup calls the upstream helper |
 | Sync-start validation and cursor/provider initialization | `kona_proof::sync::prepare_derivation` | Load boot inputs, adapt the return value and preserve starting height |
 | Derivation/execution loop, including retry and end-of-source behavior | `kona_driver::Driver::advance_to_target_with_metrics` | Invoke the driver with World’s executor and validate its result |
 | KZG point-evaluation crypto adapter | `kona_sp1_client_utils::precompiles::CustomCrypto` | Install it into revm; retain valid/invalid-opening tests |
@@ -85,6 +85,24 @@ task and drops its connection, rather than producing `EnclaveResponse::Error`. N
 catch-and-reimplement validation layer is added. Do not change the enclave to panic-abort
 without reassessing this boundary. Process/task behavior here is based on source/build
 configuration inspection; an actual EIF request test remains a release validation step.
+
+## Local file cleanup
+
+The forwarding files `core/src/witness/preimage_store.rs`, `core/src/oracle/mod.rs`,
+`kona-client/src/client.rs`, `kona-client/src/witness.rs` and
+`kona-client/src/precompiles/custom.rs` have been removed. The existing World preimage
+module path re-exports the upstream module directly. `BlobStore` and `CustomCrypto` are
+re-exported at their used interfaces. The executor calls the upstream driver directly;
+its unused schedule-free `run` method has also been removed. Output-version and KZG
+regression tests live in `kona-client/src/tests.rs`, with no production wrapper.
+
+The remaining Kona client has approximately 457 non-test lines, including comments and
+blank lines: 197 executor integration, 150 World EVM factory, 58 pipeline result adaptation,
+36 output-root witness wrapper, and 16 module/export lines. These counts exclude test
+modules. This is still local integration code, not a claim that all textual overlap with
+upstream is gone. The factory is deliberately retained and the upstream witness runner
+hardcodes its factory; World aggregation also retains logic that upstream exposes only
+inside a differently shaped guest program.
 
 ## Historical reuse inventory at `e19990dd`
 
