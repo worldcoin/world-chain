@@ -60,23 +60,60 @@ The refactor preserves World’s EVM factory. It adopts upstream’s zero-step c
 and header/first-transaction block-info extraction. The old custom periodic progress logs
 are removed; upstream logs and cycle measurements remain.
 
-## Further reduction candidates
+## Remaining upstream reuse: source review at `e19990dd`
 
-The clearest next change is to share the range runner between
-`sp1-programs/range-utils/src/lib.rs::run_range_program` and
-`nitro-enclave/src/enclave.rs::run_full_range_program`. They repeat setup, execution and
-public-value conversion. A backend-neutral function in the shared client can return a
-`Result`; SP1 can fail the guest on error and Nitro can attach request context. Keep
-backend-specific proof commitment and signing outside that function.
+This review covers all 21 Rust source files in the measured core, Kona client and three
+SP1 programs, plus the SP1 request/vkey glue relevant to their interfaces. It compares the
+pinned Optimism source, not an unpinned latest branch. It is not an exhaustive review of
+Nitro attestation, host services or upstream security. Duplicated TEE/SP1 orchestration is
+acceptable; the priority is removing locally maintained upstream algorithms.
 
-The local `WitnessExecutor` trait has one implementation and its schedule-free `run`
-wrapper has no callers in the inspected repository. Simplifying that interface may remove
-boilerplate, but does not remove a major protocol algorithm. Preserve the host witness
-execution caller as well as both proof backends if doing this cleanup.
+| Local code | Upstream counterpart | Assessment |
+| --- | --- | --- |
+| `core/witness/preimage_store.rs` | `kona_sp1_client_utils::witness::preimage_store::{PreimageStore, check_preimage}` | Strong reuse candidate. Validation, insert-only storage and oracle implementations match. Upstream makes the map private; no external direct map accesses were found in this repository. Check rkyv/serde compatibility before replacing the type. |
+| `core/witness/mod.rs::BlobData` | `kona_sp1_client_utils::witness::BlobData` | Same three fields and derives. Re-export candidate; test serialized witness compatibility. |
+| `core/oracle/blob_provider.rs` | `kona_sp1_client_utils::BlobStore` | Important behavior divergence; see below. Upstream is not a behavior-neutral replacement. |
+| `core/witness/mod.rs::WitnessData` | upstream `WitnessData` | Can potentially reuse once underlying stores/types align, implementing the trait for World’s schedule-bearing witness. Upstream blob construction panics; our current path returns an error. |
+| `core/types.rs::u32_to_u8` | upstream `types::u32_to_u8` | Same big-endian conversion; direct re-export candidate with existing vector test. Small maintenance benefit. |
+| `core/boot.rs` | upstream `boot.rs` | Retain World ABI and hash wrapper: World includes the starting height and Tropo/Strato hash inputs. Upstream’s hash helper only accepts `RollupConfig` and panics on serialization failure; it does not support our generic flattened input. SHA-256 and JSON serialization already come from dependencies. |
+| `core/range.rs` | Kona schedule/spec types | Retain World schedule representation and fork extension; not an unchanged upstream type. |
+| `core/artifacts.rs`, core module exports | upstream proof/boot types | World statement wrappers and exports, no additional protocol implementation to replace. |
+| Kona client sync, driver, crypto, metrics and output root files | upstream APIs listed above | Already delegate; tests and wrappers remain. |
+| Kona client executor and factory | upstream witness executor and OP EVM factory | Deliberate local customization/integration. Height check is private inside upstream’s hardcoded runner. Preserve factory as requested. |
+| Kona client witness/module exports | World core exports | No algorithm to replace. |
+| `sp1-programs/range-ethereum`, `range-utils` | upstream range entrypoint/runner | World witness, schedule and public-value integration. SP1 IO and Kona execution already delegated. Do not replace with the upstream boot statement. |
+| `sp1-programs/aggregation` | upstream aggregation binary | Real algorithm overlap remains, but no reusable parameterized header-chain/aggregation helper was identified at the pin. World adds height continuity, carries its range key as input, changes output ABI and omits prover address. Upstream embeds a fixed range key and uses its own statement. Preserve World checks; recursive verification already calls `sp1_lib`. |
+| SP1 request/vkey glue | SP1 SDK | World request/serialization wrappers and key plumbing; actual proving/key generation already delegated. The conversion helper above is the identified reusable duplicate. |
 
-No claim is made here that the wider World witness/core or aggregation code is minimal.
-Replacing those types or algorithms requires a separate comparison of serialization,
-validation and public-statement semantics.
+Upstream evidence at the pin: [preimage store](https://github.com/ethereum-optimism/optimism/blob/96ffbb2a94f19886fe7e27c45f3310e64ccd18b3/rust/kona/sp1/crates/client/src/witness/preimage_store.rs),
+[witness types](https://github.com/ethereum-optimism/optimism/blob/96ffbb2a94f19886fe7e27c45f3310e64ccd18b3/rust/kona/sp1/crates/client/src/witness/mod.rs),
+[blob store](https://github.com/ethereum-optimism/optimism/blob/96ffbb2a94f19886fe7e27c45f3310e64ccd18b3/rust/kona/sp1/crates/client/src/oracle/blob_provider.rs),
+[aggregation](https://github.com/ethereum-optimism/optimism/blob/96ffbb2a94f19886fe7e27c45f3310e64ccd18b3/rust/kona/sp1/programs/aggregation/src/main.rs).
+
+### Blob-store divergence
+
+Pinned upstream `oracle/blob_provider.rs` checks all three input vector lengths before
+batch verification and serves blobs by requested versioned hash (`position` plus
+`swap_remove`). Our copy reverses the witness vector, pops positionally and drops an item
+when its hash differs. Out-of-order requests can therefore lose available blobs and return
+fewer than requested. Our constructor also lacks upstream's explicit count checks;
+`kzg-rs 0.2.8` returns early for zero blobs before checking the other lengths.
+
+Two temporary tests against the local blob-provider source reproduced both the empty
+out-of-order result and acceptance of zero blobs with a nonempty commitment list. The
+production file was restored after the probes. These are correctness/validation differences,
+not a demonstrated accepted invalid proof. Upstream includes regression tests for reordered requests, missing hashes
+and the zero-blob count mismatch. Its rejection behavior is panic-based, while World's
+constructor uses `TryFrom` and structured errors. Choose the error behavior explicitly
+before reuse; do not hide an upstream panic behind a supposedly fallible adapter.
+
+Recommended order: reuse preimage store, blob data and vkey conversion after serialization
+compatibility tests; then adopt upstream blob/witness handling if its fail-closed behavior
+is acceptable for both backends. If structured errors are required, retain that small local
+boundary and document the remaining blob-store maintenance instead of claiming full reuse.
+Importing utilities into core broadens that crate's dependency graph and requires consumer
+lockfile/measurement review, even though the final proof backends already use the utility
+crate through the Kona client. No upstream changes are required for the first group.
 
 ## Verification and update process
 
