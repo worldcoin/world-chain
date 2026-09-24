@@ -9,7 +9,7 @@
     "rev": "77041d2ce690e692d6e03cc812b57d1ddaa4d505"
   },
   "lib/nitro-validator": {
-    "rev": "c0a9f217b6a51325c59c103a22939f9a3742a90d"
+    "rev": "0ea0d12366b4fa44f9e07e4755f2ad36561cb674"
   },
   "lib/openzeppelin-contracts": {
     "rev": "69c8def5f222ff96f2b5beff05dfba996368aa79"

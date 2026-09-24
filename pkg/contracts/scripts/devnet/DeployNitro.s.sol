@@ -77,7 +77,7 @@ contract DeployNitro is Script {
         P384Verifier p384Verifier = new P384Verifier();
         console.log("P384Verifier:", address(p384Verifier));
 
-        CertManager certManager = new CertManager(IP384Verifier(address(p384Verifier)));
+        CertManager certManager = new CertManager(IP384Verifier(address(p384Verifier)), owner, owner);
         console.log("CertManager:", address(certManager));
 
         NitroAttestationVerifier verifier = new NitroAttestationVerifier(
@@ -94,11 +94,7 @@ contract DeployNitro is Script {
         vm.stopBroadcast();
 
         _writeDeployment(
-            address(p384Verifier),
-            address(certManager),
-            address(verifier),
-            address(registry),
-            address(proofVerifier)
+            address(p384Verifier), address(certManager), address(verifier), address(registry), address(proofVerifier)
         );
 
         // ════════════════════════════════════════════════════════════════════

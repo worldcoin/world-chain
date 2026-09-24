@@ -60,7 +60,7 @@ contract NitroAttestationVerifierTest is Test {
 
     function setUp() public {
         p384Verifier = new P384Verifier();
-        certManager = new CertManager(IP384Verifier(address(p384Verifier)));
+        certManager = new CertManager(IP384Verifier(address(p384Verifier)), address(this), address(this));
 
         verifier = new NitroAttestationVerifier(
             ICertManager(address(certManager)), IP384Verifier(address(p384Verifier)), owner
@@ -341,6 +341,43 @@ contract NitroAttestationVerifierTest is Test {
         h0 = keccak256(p0);
         h1 = keccak256(p1);
         h2 = keccak256(p2);
+    }
+
+    function _sparsePcrBank() internal pure returns (CborElement[] memory bank) {
+        bank = new CborElement[](32);
+        for (uint256 i; i < bank.length; i++) {
+            bank[i] = LibCborElement.toCborElement(0xf6, 0, 0);
+        }
+        for (uint256 i; i < 3; i++) {
+            bank[i] = LibCborElement.toCborElement(0x40, i * 48, 48);
+        }
+    }
+
+    function test_VerifyValidated_AcceptsSparsePcrBank() public {
+        (bytes memory tbs, bytes memory expectedKey) = _buildTbsWithPcrsAndKey();
+        (bytes32 h0, bytes32 h1, bytes32 h2) = _approvedPcrHashes();
+        vm.prank(owner);
+        harness.approvePCRSet(h0, h1, h2);
+        vm.warp(1_000_000);
+        NitroValidator.Ptrs memory ptrs =
+            _buildPtrs(uint64(1_000_000 * 1000), 3, _sparsePcrBank(), LibCborElement.toCborElement(0x40, 144, 65));
+        (bytes memory pk, bytes32 p0, bytes32 p1, bytes32 p2) = harness.exposeVerifyValidated(tbs, ptrs);
+        assertEq(pk, expectedKey);
+        assertEq(p0, h0);
+        assertEq(p1, h1);
+        assertEq(p2, h2);
+    }
+
+    function testFuzz_VerifyValidated_RejectsMissingRequiredPcr(uint8 missing) public {
+        missing = uint8(bound(missing, 0, 2));
+        (bytes memory tbs,) = _buildTbsWithPcrsAndKey();
+        CborElement[] memory bank = _sparsePcrBank();
+        bank[missing] = LibCborElement.toCborElement(0xf6, 0, 0);
+        vm.warp(1_000_000);
+        NitroValidator.Ptrs memory ptrs =
+            _buildPtrs(uint64(1_000_000 * 1000), 3, bank, LibCborElement.toCborElement(0x40, 144, 65));
+        vm.expectRevert(abi.encodeWithSelector(NitroAttestationVerifier.MissingPcr.selector, uint256(missing)));
+        harness.exposeVerifyValidated(tbs, ptrs);
     }
 
     function test_VerifyValidated_HappyPath() public {
