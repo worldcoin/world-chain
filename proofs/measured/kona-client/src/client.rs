@@ -1,28 +1,11 @@
 use alloy_primitives::B256;
 use kona_derive::{Pipeline, SignalReceiver};
-use kona_driver::{Driver, DriverMetrics, DriverPhase, DriverPipeline, DriverResult, Executor};
+use kona_driver::{Driver, DriverPipeline, DriverResult, Executor};
 use kona_genesis::RollupConfig;
 pub use kona_proof::sync::fetch_safe_head_hash;
 use kona_protocol::L2BlockInfo;
+use kona_sp1_client_utils::metrics::CycleTrackerDriverMetrics;
 use std::fmt::Debug;
-
-struct CycleTrackerMetrics;
-
-impl DriverMetrics for CycleTrackerMetrics {
-    fn phase_start(&self, phase: DriverPhase) {
-        #[cfg(target_os = "zkvm")]
-        println!("cycle-tracker-report-start: {}", phase.as_str());
-        #[cfg(not(target_os = "zkvm"))]
-        let _ = phase;
-    }
-
-    fn phase_end(&self, phase: DriverPhase) {
-        #[cfg(target_os = "zkvm")]
-        println!("cycle-tracker-report-end: {}", phase.as_str());
-        #[cfg(not(target_os = "zkvm"))]
-        let _ = phase;
-    }
-}
 
 /// Runs Kona derivation with SP1 cycle measurements.
 #[allow(clippy::result_large_err)]
@@ -37,7 +20,7 @@ where
     P: Pipeline + SignalReceiver + Send + Sync + Debug,
 {
     driver
-        .advance_to_target_with_metrics(cfg, target, &CycleTrackerMetrics)
+        .advance_to_target_with_metrics(cfg, target, &CycleTrackerDriverMetrics)
         .await
 }
 

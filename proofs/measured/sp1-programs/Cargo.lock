@@ -346,7 +346,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "alloy-sol-types",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "serde",
  "serde_json",
  "thiserror",
@@ -2003,6 +2003,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-serde",
  "alloy-sol-types",
  "async-trait",
  "derive_more",
@@ -2010,6 +2011,7 @@ dependencies = [
  "kona-protocol",
  "kona-registry",
  "op-alloy-consensus",
+ "serde",
  "thiserror",
  "tracing",
 ]
@@ -2094,6 +2096,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
+ "alloy-serde",
  "ambassador",
  "async-trait",
  "brotli-decompressor",
@@ -2104,8 +2107,10 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
+ "serde",
  "thiserror",
  "tracing",
+ "tracing-subscriber",
  "unsigned-varint",
 ]
 
@@ -2125,6 +2130,41 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "kona-sp1-client-utils"
+version = "0.0.1"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-op-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-sol-types",
+ "anyhow",
+ "async-trait",
+ "cfg-if",
+ "kona-derive",
+ "kona-driver",
+ "kona-executor",
+ "kona-genesis",
+ "kona-interop",
+ "kona-preimage",
+ "kona-proof",
+ "kona-protocol",
+ "kzg-rs",
+ "op-alloy-consensus",
+ "op-revm",
+ "revm",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "sha2",
+ "spin 0.10.0",
+ "tracing",
 ]
 
 [[package]]
@@ -2245,6 +2285,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
 dependencies = [
  "adler2",
+ "serde",
 ]
 
 [[package]]
@@ -4126,6 +4167,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
 dependencies = [
  "nu-ansi-term",
+ "serde",
  "sharded-slab",
  "smallvec",
  "thread_local",
@@ -4493,6 +4535,7 @@ dependencies = [
  "kona-preimage",
  "kona-proof",
  "kona-protocol",
+ "kona-sp1-client-utils",
  "kzg-rs",
  "op-alloy-consensus",
  "op-revm",
