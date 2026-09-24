@@ -19347,18 +19347,11 @@ dependencies = [
 name = "world-chain-proof-core"
 version = "1.0.0-rc.4"
 dependencies = [
- "alloy-consensus 2.1.1",
- "alloy-eips 2.1.1",
  "alloy-primitives",
  "alloy-sol-types",
- "anyhow",
- "async-trait",
- "kona-derive",
  "kona-genesis",
- "kona-preimage",
  "kona-proof",
- "kona-protocol",
- "kzg-rs",
+ "kona-sp1-client-utils",
  "rkyv",
  "serde",
  "serde_json",

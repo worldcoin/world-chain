@@ -26,10 +26,7 @@ sol! {
     }
 }
 
-/// Converts an SP1 vkey digest from `[u32; 8]` to the bytes used on-chain.
-pub fn u32_to_u8(input: [u32; 8]) -> [u8; 32] {
-    std::array::from_fn(|i| input[i / 4].to_be_bytes()[i % 4])
-}
+pub use kona_sp1_client_utils::types::u32_to_u8;
 
 #[cfg(test)]
 mod tests {

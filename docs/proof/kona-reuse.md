@@ -27,6 +27,12 @@ the consumer lockfiles remain part of the measured build boundary. KZG resolves 
 | KZG point-evaluation crypto adapter | `kona_sp1_client_utils::precompiles::CustomCrypto` | Install it into revm; retain valid/invalid-opening tests |
 | Per-phase SP1 cycle markers | `kona_sp1_client_utils::metrics::CycleTrackerDriverMetrics` | Pass the collector to the driver; retain whole-range markers |
 | V0 output-root encoding and hashing | `kona_protocol::OutputRoot` | Preserve `OutputRootWitness` serialization and field names |
+| Preimage storage, validation and oracle implementation | `kona_sp1_client_utils::witness::preimage_store` | Public re-export and wire-compatibility tests |
+| Blob input container | `kona_sp1_client_utils::witness::BlobData` | Embed it in World’s schedule-bearing witness |
+| Blob verification and lookup | `kona_sp1_client_utils::BlobStore` | Re-export; regression tests for valid, reordered and malformed inputs |
+| Witness validation flow | `kona_sp1_client_utils::witness::WitnessData` | Implement the trait for `WorldRangeWitnessData` |
+| Range-vkey word/byte conversion | `kona_sp1_client_utils::types::u32_to_u8` | Re-export and known-vector test |
+
 
 Two concrete drift examples motivated the change. Our copied safe-head helper omitted
 output-version validation even though the pinned Kona helper already rejected nonzero
@@ -60,7 +66,30 @@ The refactor preserves World’s EVM factory. It adopts upstream’s zero-step c
 and header/first-transaction block-info extraction. The old custom periodic progress logs
 are removed; upstream logs and cycle measurements remain.
 
-## Remaining upstream reuse: source review at `e19990dd`
+## Witness reuse follow-up
+
+The preimage store, blob data, blob store, witness trait and vkey conversion identified in
+our source review below now all delegate to the same pinned upstream utility crate.
+The local blob provider and its error enum have been removed. World’s schedule-bearing
+witness and public ABI remain local; the EVM factory is unchanged.
+
+Compatibility tests deserialize a nonempty legacy rkyv witness into the upstream-backed
+World type and back again, and check serde output for the component types. Real constant
+polynomial blob vectors exercise verification and reversed request order; rejection tests
+cover invalid proofs, missing blobs and mismatched empty inputs.
+
+Upstream invalid blob inputs panic rather than produce the former `BlobStoreError`.
+SP1 fails the guest execution. Nitro runs each connection in `tokio::spawn`, and the
+inspected measured build uses the default unwind strategy: such a panic ends the request
+task and drops its connection, rather than producing `EnclaveResponse::Error`. No local
+catch-and-reimplement validation layer is added. Do not change the enclave to panic-abort
+without reassessing this boundary. Process/task behavior here is based on source/build
+configuration inspection; an actual EIF request test remains a release validation step.
+
+## Historical reuse inventory at `e19990dd`
+
+The candidate statuses below record the investigation before the witness reuse follow-up;
+the five witness/conversion candidates have since been implemented as described above.
 
 This review covers all 21 Rust source files in the measured core, Kona client and three
 SP1 programs, plus the SP1 request/vkey glue relevant to their interfaces. It compares the
@@ -117,7 +146,7 @@ crate through the Kona client. No upstream changes are required for the first gr
 
 ## Verification and update process
 
-The source refactor passed 11 shared-client tests, 64 Nitro native tests and native SP1
+The witness follow-up passed 12 core tests, 11 shared-client tests, 64 Nitro native tests and native SP1
 workspace compilation. Linux Nitro dependency resolution also passed. Native Nitro tests
 on macOS do not compile the Linux-only enclave execution path; native SP1 checks do not
 execute a zkVM guest. These results do not establish complete proof equivalence.

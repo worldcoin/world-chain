@@ -1,2 +1,1 @@
-mod blob_provider;
-pub use blob_provider::BlobStore;
+pub use kona_sp1_client_utils::BlobStore;
