@@ -68,13 +68,14 @@ mod tests {
     use kona_proof::{block_on, sync::SyncStartError};
     use world_chain_proof_core::witness::preimage_store::PreimageStore;
 
-    fn oracle(claimed_height: u64, matching_root: bool) -> Arc<PreimageStore> {
+    fn oracle(claimed_height: u64, matching_root: bool, version: u8) -> Arc<PreimageStore> {
         let header = Header {
             number: 42,
             ..Default::default()
         };
         let hash = header.hash_slow();
         let mut output = [0u8; 128];
+        output[31] = version;
         output[96..].copy_from_slice(hash.as_slice());
         let root = keccak256(output);
         let claim = if matching_root { root } else { B256::ZERO };
@@ -111,7 +112,7 @@ mod tests {
     #[test]
     fn unchanged_claim_preserves_starting_height_without_l1_witness() {
         let (boot, inputs, pre_height) =
-            block_on(get_inputs_for_pipeline(oracle(42, true))).unwrap();
+            block_on(get_inputs_for_pipeline(oracle(42, true, 0))).unwrap();
         assert!(inputs.is_none());
         assert_eq!(pre_height, 42);
         assert_eq!(boot.claimed_l2_block_number, pre_height);
@@ -120,7 +121,7 @@ mod tests {
 
     #[test]
     fn unchanged_height_rejects_different_root() {
-        let error = block_on(get_inputs_for_pipeline(oracle(42, false))).unwrap_err();
+        let error = block_on(get_inputs_for_pipeline(oracle(42, false, 0))).unwrap_err();
         assert!(matches!(
             error.downcast_ref::<SyncStartError>(),
             Some(SyncStartError::ClaimedRootMismatch { .. })
@@ -129,10 +130,21 @@ mod tests {
 
     #[test]
     fn claim_before_safe_head_is_rejected() {
-        let error = block_on(get_inputs_for_pipeline(oracle(41, true))).unwrap_err();
+        let error = block_on(get_inputs_for_pipeline(oracle(41, true, 0))).unwrap_err();
         assert!(matches!(
             error.downcast_ref::<SyncStartError>(),
             Some(SyncStartError::ClaimedBlockBeforeSafeHead { .. })
+        ));
+    }
+
+    #[test]
+    fn pipeline_rejects_unsupported_output_version() {
+        let error = block_on(get_inputs_for_pipeline(oracle(42, true, 1))).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<SyncStartError>(),
+            Some(SyncStartError::Oracle(
+                kona_proof::errors::OracleProviderError::UnknownOutputVersion(_)
+            ))
         ));
     }
 }

@@ -1,6 +1,6 @@
 use super::*;
 use alloy_eips::eip4844::kzg_to_versioned_hash;
-use alloy_primitives::{B256, hex_literal::hex, keccak256};
+use alloy_primitives::{hex_literal::hex, keccak256};
 use kona_derive::BlobProvider;
 use kona_preimage::{PreimageKey, PreimageOracleClient};
 use kona_proof::block_on;
@@ -118,7 +118,7 @@ fn upstream_witness_returns_verified_blobs_in_requested_order() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "assertion `left == right` failed")]
 fn upstream_witness_rejects_empty_blob_count_mismatch() {
     let data = BlobData {
         commitments: vec![Bytes48([0; 48])],
@@ -129,30 +129,10 @@ fn upstream_witness_rejects_empty_blob_count_mismatch() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "KZG proof verification failed: invalid proofs")]
 fn upstream_witness_rejects_invalid_blob_proof() {
     let mut data = blob_data();
     data.blobs.swap(0, 1);
     let witness = WorldRangeWitnessData::from_parts(PreimageStore::default(), data);
     let _ = block_on(witness.get_oracle_and_blob_provider());
-}
-
-#[test]
-#[should_panic(expected = "requested blob hash not present")]
-fn upstream_store_rejects_missing_blob() {
-    let mut store = crate::BlobStore::default();
-    let _ = block_on(store.get_and_validate_blobs(&BlockInfo::default(), &[B256::ZERO]));
-}
-
-#[test]
-fn upstream_store_rejects_invalid_preimages_and_conflicting_local_values() {
-    let mut store = PreimageStore::default();
-    let key = PreimageKey::new_keccak256(keccak256(b"valid").0);
-    assert!(store.save_preimage(key, b"wrong".to_vec()).is_err());
-    store.save_preimage(key, b"valid".to_vec()).unwrap();
-    let local = PreimageKey::new_local(1);
-    store.save_preimage(local, b"first".to_vec()).unwrap();
-    assert!(store.save_preimage(local, b"second".to_vec()).is_err());
-    assert_eq!(block_on(store.get(local)).unwrap(), b"first");
-    store.check_preimages().unwrap();
 }

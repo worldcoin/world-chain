@@ -24,21 +24,22 @@ the consumer lockfiles remain part of the measured build boundary. KZG resolves 
 | Safe-head output-root lookup and version validation | `kona_proof::sync::fetch_safe_head_hash` | Regression tests; setup calls the upstream helper |
 | Sync-start validation and cursor/provider initialization | `kona_proof::sync::prepare_derivation` | Load boot inputs, adapt the return value and preserve starting height |
 | Derivation/execution loop, including retry and end-of-source behavior | `kona_driver::Driver::advance_to_target_with_metrics` | Invoke the driver with World’s executor and validate its result |
-| KZG point-evaluation crypto adapter | `kona_sp1_client_utils::precompiles::CustomCrypto` | Install it into revm; retain valid/invalid-opening tests |
+| KZG point-evaluation crypto adapter | `kona_sp1_client_utils::precompiles::CustomCrypto` | Install the upstream provider into revm |
 | Per-phase SP1 cycle markers | `kona_sp1_client_utils::metrics::CycleTrackerDriverMetrics` | Pass the collector to the driver; retain whole-range markers |
 | V0 output-root encoding and hashing | `kona_protocol::OutputRoot` | Preserve `OutputRootWitness` serialization and field names |
 | Preimage storage, validation and oracle implementation | `kona_sp1_client_utils::witness::preimage_store` | Public re-export and wire-compatibility tests |
 | Blob input container | `kona_sp1_client_utils::witness::BlobData` | Embed it in World’s schedule-bearing witness |
 | Blob verification and lookup | `kona_sp1_client_utils::BlobStore` | Re-export; regression tests for valid, reordered and malformed inputs |
 | Witness validation flow | `kona_sp1_client_utils::witness::WitnessData` | Implement the trait for `WorldRangeWitnessData` |
-| Range-vkey word/byte conversion | `kona_sp1_client_utils::types::u32_to_u8` | Re-export and known-vector test |
+| Range-vkey word/byte conversion | `kona_sp1_client_utils::types::u32_to_u8` | Re-export |
 
 
 Two concrete drift examples motivated the change. Our copied safe-head helper omitted
 output-version validation even though the pinned Kona helper already rejected nonzero
 versions. Our copied KZG adapter previously accepted `Ok(false)` from `kzg-rs`; the pinned
 upstream adapter already rejected it. PR #1164 fixes the local KZG behavior; PR #1165 then
-replaces that implementation with the upstream provider while retaining regression tests.
+replaces that implementation with the upstream provider. Provider-only tests are owned
+upstream; local tests focus on World integration.
 
 Updates to the pin now bring changes to these imported implementations directly. This is
 not an automatic update policy: API compatibility, feature selection, proof behavior and
@@ -76,7 +77,7 @@ witness and public ABI remain local; the EVM factory is unchanged.
 Compatibility tests deserialize a nonempty legacy rkyv witness into the upstream-backed
 World type and back again, and check serde output for the component types. Real constant
 polynomial blob vectors exercise verification and reversed request order; rejection tests
-cover invalid proofs, missing blobs and mismatched empty inputs.
+cover invalid proofs and mismatched empty inputs through World’s witness wrapper.
 
 Upstream invalid blob inputs panic rather than produce the former `BlobStoreError`.
 SP1 fails the guest execution. Nitro runs each connection in `tokio::spawn`, and the
@@ -93,8 +94,8 @@ The forwarding files `core/src/witness/preimage_store.rs`, `core/src/oracle/mod.
 `kona-client/src/precompiles/custom.rs` have been removed. The existing World preimage
 module path re-exports the upstream module directly. `BlobStore` and `CustomCrypto` are
 re-exported at their used interfaces. The executor calls the upstream driver directly;
-its unused schedule-free `run` method has also been removed. Output-version and KZG
-regression tests live in `kona-client/src/tests.rs`, with no production wrapper.
+its unused schedule-free `run` method has also been removed. The output-version regression calls World’s pipeline setup directly. The redundant
+provider-only test module has been removed.
 
 The remaining Kona client has approximately 457 non-test lines, including comments and
 blank lines: 197 executor integration, 150 World EVM factory, 58 pipeline result adaptation,
@@ -162,10 +163,25 @@ Importing utilities into core broadens that crate's dependency graph and require
 lockfile/measurement review, even though the final proof backends already use the utility
 crate through the Kona client. No upstream changes are required for the first group.
 
+## Regression-test scope
+
+Local tests cover legacy witness wire compatibility, World witness validation with real
+blob vectors, the observed blob-order/count regressions, World configuration hashing and
+fork activation, output-root field mapping, and pipeline setup including unsupported
+output versions and zero-step claims. Negative blob tests require the expected rejection
+message rather than accepting any panic.
+
+Provider-only KZG/preimage/blob tests, the re-exported byte-conversion test, and trivial
+height-helper tests have been removed. They duplicated upstream coverage or tested a
+comparison without proving the executor called it. The output-version test now enters
+through `get_inputs_for_pipeline` instead of directly testing an upstream helper. The
+root/height checks remain in production; these unit tests do not establish end-to-end
+`EndOfSource` rejection or guest/EIF equivalence.
+
 ## Verification and update process
 
-The witness follow-up passed 12 core tests, 11 shared-client tests, 64 Nitro native tests and native SP1
-workspace compilation. Linux Nitro dependency resolution also passed. Native Nitro tests
+After test consolidation, 9 core tests and 5 shared-client tests pass. The preceding
+production-code checks passed 64 Nitro native tests and native SP1 workspace compilation. Linux Nitro dependency resolution also passed. Native Nitro tests
 on macOS do not compile the Linux-only enclave execution path; native SP1 checks do not
 execute a zkVM guest. These results do not establish complete proof equivalence.
 

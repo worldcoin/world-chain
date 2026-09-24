@@ -194,38 +194,3 @@ where
         .await?)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::ensure_derived_block_matches_claim;
-
-    #[test]
-    fn returns_ok_when_derived_equals_claimed() {
-        assert!(ensure_derived_block_matches_claim(0, 0).is_ok());
-        assert!(ensure_derived_block_matches_claim(123_456, 123_456).is_ok());
-        assert!(ensure_derived_block_matches_claim(u64::MAX, u64::MAX).is_ok());
-    }
-
-    #[test]
-    fn returns_err_with_both_numbers_when_derived_below_claimed() {
-        let err = ensure_derived_block_matches_claim(50, 100).expect_err("expected mismatch error");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("#50"),
-            "missing derived block number in: {msg}"
-        );
-        assert!(
-            msg.contains("#100"),
-            "missing claimed block number in: {msg}"
-        );
-    }
-
-    #[test]
-    fn returns_err_with_both_numbers_when_derived_above_claimed() {
-        let err =
-            ensure_derived_block_matches_claim(150, 100).expect_err("expected mismatch error");
-        let msg = err.to_string();
-        assert!(msg.contains("#150"));
-        assert!(msg.contains("#100"));
-    }
-}
