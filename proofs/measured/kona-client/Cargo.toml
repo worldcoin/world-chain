@@ -91,7 +91,6 @@ op-alloy-consensus.workspace = true
 op-revm.workspace = true
 revm.workspace = true
 revm-precompile.workspace = true
-serde = { workspace = true, features = ["derive"] }
 spin.workspace = true
 tracing.workspace = true
 world-chain-proof-core.workspace = true

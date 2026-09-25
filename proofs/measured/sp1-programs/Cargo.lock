@@ -4534,7 +4534,6 @@ dependencies = [
  "op-revm",
  "revm",
  "revm-precompile",
- "serde",
  "spin 0.10.0",
  "tracing",
  "world-chain-proof-core",
