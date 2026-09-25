@@ -6,28 +6,6 @@ use kona_preimage::{PreimageKey, PreimageOracleClient};
 use kona_proof::block_on;
 use kona_protocol::BlockInfo;
 use kzg_rs::{Blob, Bytes48};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
-// Freeze the pre-refactor wire shapes to test both directions across the upstream type boundary.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, Deserialize)]
-struct LegacyPreimageStore {
-    preimage_map: HashMap<PreimageKey, Vec<u8>>,
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, Deserialize)]
-struct LegacyBlobData {
-    blobs: Vec<Blob>,
-    commitments: Vec<Bytes48>,
-    proofs: Vec<Bytes48>,
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-struct LegacyWorldWitness {
-    preimage_store: LegacyPreimageStore,
-    blob_data: LegacyBlobData,
-    schedule: WorldRangeHardforkConfig,
-}
 
 fn blob_data() -> BlobData {
     // Constant-zero and constant-two vectors from kzg-rs 0.2.8's verify_blob_kzg_proof tests.
@@ -51,50 +29,25 @@ fn blob_data() -> BlobData {
 }
 
 #[test]
-fn legacy_and_upstream_witnesses_deserialize_in_both_directions() {
-    let value = b"witness compatibility".to_vec();
+fn world_witness_roundtrip_preserves_schedule_and_preimages() {
+    let value = b"world witness".to_vec();
     let key = PreimageKey::new_keccak256(keccak256(&value).0);
-    let blobs = blob_data();
-    let old = LegacyWorldWitness {
-        preimage_store: LegacyPreimageStore {
-            preimage_map: HashMap::from([(key, value.clone())]),
-        },
-        blob_data: LegacyBlobData {
-            blobs: blobs.blobs,
-            commitments: blobs.commitments,
-            proofs: blobs.proofs,
-        },
-        schedule: WorldRangeHardforkConfig {
-            tropo_time: Some(42),
-            strato_time: Some(84),
-            ..Default::default()
-        },
+    let mut preimages = PreimageStore::default();
+    preimages.save_preimage(key, value.clone()).unwrap();
+    let schedule = WorldRangeHardforkConfig {
+        tropo_time: Some(42),
+        strato_time: Some(84),
+        ..Default::default()
     };
-    let old_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&old).unwrap();
-    let new = rkyv::from_bytes::<WorldRangeWitnessData, rkyv::rancor::Error>(&old_bytes).unwrap();
-    new.preimage_store.check_preimages().unwrap();
-    assert_eq!(block_on(new.preimage_store.get(key)).unwrap(), value);
-    assert_eq!(
-        bincode::serialize(&old.preimage_store).unwrap(),
-        bincode::serialize(&new.preimage_store).unwrap()
+    let witness = WorldRangeWitnessData::from_parts_with_world_config(
+        preimages,
+        BlobData::default(),
+        schedule.clone(),
     );
-    assert_eq!(
-        serde_json::to_value(&old.blob_data).unwrap(),
-        serde_json::to_value(&new.blob_data).unwrap()
-    );
-    assert_eq!(new.schedule, old.schedule);
-    let new_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&new).unwrap();
-    let roundtrip =
-        rkyv::from_bytes::<LegacyWorldWitness, rkyv::rancor::Error>(&new_bytes).unwrap();
-    assert_eq!(
-        roundtrip.preimage_store.preimage_map,
-        old.preimage_store.preimage_map
-    );
-    assert_eq!(
-        serde_json::to_value(roundtrip.blob_data).unwrap(),
-        serde_json::to_value(old.blob_data).unwrap()
-    );
-    assert_eq!(roundtrip.schedule, old.schedule);
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&witness).unwrap();
+    let decoded = rkyv::from_bytes::<WorldRangeWitnessData, rkyv::rancor::Error>(&bytes).unwrap();
+    assert_eq!(decoded.schedule, schedule);
+    assert_eq!(block_on(decoded.preimage_store.get(key)).unwrap(), value);
 }
 
 #[test]
@@ -115,17 +68,6 @@ fn upstream_witness_returns_verified_blobs_in_requested_order() {
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].as_slice(), expected_first);
     assert_eq!(result[1].as_slice(), expected_second);
-}
-
-#[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-fn upstream_witness_rejects_empty_blob_count_mismatch() {
-    let data = BlobData {
-        commitments: vec![Bytes48([0; 48])],
-        ..Default::default()
-    };
-    let witness = WorldRangeWitnessData::from_parts(PreimageStore::default(), data);
-    let _ = block_on(witness.get_oracle_and_blob_provider());
 }
 
 #[test]

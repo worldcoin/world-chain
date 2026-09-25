@@ -32,7 +32,7 @@ use serde_json::{Value, json};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainHardforks};
 use world_chain_proof_core::{
     hash_world_rollup_config,
-    range::{WorldRangeHardfork, WorldRangeHardforkConfig, WorldRangeSpecId},
+    range::{WorldRangeHardfork, WorldRangeHardforkConfig},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 use world_chain_proof_kona_client::{
@@ -358,7 +358,6 @@ pub async fn build_range_input(
     let active_fork = config
         .schedule
         .active_fork_at(request.end_block, post_block.timestamp.0);
-    let world_spec_id = WorldRangeSpecId::from_hardfork(active_fork);
 
     let host = SingleChainHost {
         l1_head,
@@ -400,7 +399,7 @@ pub async fn build_range_input(
             l2_post_root: post_root,
             rollup_config_hash: config.rollup_config_hash,
             active_fork: format!("{active_fork:?}"),
-            world_spec_id: <&'static str>::from(world_spec_id).to_string(),
+            world_spec_id: format!("{active_fork:?}"),
         },
         witness,
     })

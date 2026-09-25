@@ -140,76 +140,6 @@ pub enum WorldRangeHardfork {
     Strato,
 }
 
-/// World proof spec id used by the range proof wrapper.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(non_camel_case_types)]
-pub enum WorldRangeSpecId {
-    /// Bedrock spec id.
-    BEDROCK = 100,
-    /// Regolith spec id.
-    REGOLITH,
-    /// Canyon spec id.
-    CANYON,
-    /// Ecotone spec id.
-    ECOTONE,
-    /// Fjord spec id.
-    FJORD,
-    /// Granite spec id.
-    GRANITE,
-    /// Holocene spec id.
-    HOLOCENE,
-    /// Isthmus spec id.
-    ISTHMUS,
-    /// Jovian spec id.
-    JOVIAN,
-    /// Karst spec id.
-    KARST,
-    /// Tropo spec id.
-    TROPO,
-    /// Strato spec id.
-    STRATO,
-}
-
-impl WorldRangeSpecId {
-    /// Converts a World hardfork name to the corresponding proof spec id.
-    pub const fn from_hardfork(hardfork: WorldRangeHardfork) -> Self {
-        match hardfork {
-            WorldRangeHardfork::Bedrock => Self::BEDROCK,
-            WorldRangeHardfork::Regolith => Self::REGOLITH,
-            WorldRangeHardfork::Canyon => Self::CANYON,
-            WorldRangeHardfork::Ecotone => Self::ECOTONE,
-            WorldRangeHardfork::Fjord => Self::FJORD,
-            WorldRangeHardfork::Granite => Self::GRANITE,
-            WorldRangeHardfork::Holocene => Self::HOLOCENE,
-            WorldRangeHardfork::Isthmus => Self::ISTHMUS,
-            WorldRangeHardfork::Jovian => Self::JOVIAN,
-            WorldRangeHardfork::Karst => Self::KARST,
-            WorldRangeHardfork::Tropo => Self::TROPO,
-            WorldRangeHardfork::Strato => Self::STRATO,
-        }
-    }
-}
-
-impl From<WorldRangeSpecId> for &'static str {
-    fn from(spec_id: WorldRangeSpecId) -> Self {
-        match spec_id {
-            WorldRangeSpecId::BEDROCK => "Bedrock",
-            WorldRangeSpecId::REGOLITH => "Regolith",
-            WorldRangeSpecId::CANYON => "Canyon",
-            WorldRangeSpecId::ECOTONE => "Ecotone",
-            WorldRangeSpecId::FJORD => "Fjord",
-            WorldRangeSpecId::GRANITE => "Granite",
-            WorldRangeSpecId::HOLOCENE => "Holocene",
-            WorldRangeSpecId::ISTHMUS => "Isthmus",
-            WorldRangeSpecId::JOVIAN => "Jovian",
-            WorldRangeSpecId::KARST => "Karst",
-            WorldRangeSpecId::TROPO => "Tropo",
-            WorldRangeSpecId::STRATO => "Strato",
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,13 +182,5 @@ mod tests {
         assert_eq!(config.active_fork_at(1, 20), WorldRangeHardfork::Karst);
         assert_eq!(config.active_fork_at(1, 30), WorldRangeHardfork::Tropo);
         assert_eq!(config.active_fork_at(1, 40), WorldRangeHardfork::Strato);
-        assert_eq!(
-            WorldRangeSpecId::from_hardfork(config.active_fork_at(1, 20)),
-            WorldRangeSpecId::KARST
-        );
-        assert_eq!(
-            WorldRangeSpecId::from_hardfork(config.active_fork_at(1, 40)),
-            WorldRangeSpecId::STRATO
-        );
     }
 }

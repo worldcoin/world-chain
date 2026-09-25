@@ -4514,7 +4514,6 @@ name = "world-chain-proof-kona-client"
 version = "1.0.0-rc.4"
 dependencies = [
  "alloy-consensus",
- "alloy-eips",
  "alloy-evm",
  "alloy-op-evm",
  "alloy-primitives",
@@ -4523,17 +4522,12 @@ dependencies = [
  "async-trait",
  "kona-derive",
  "kona-driver",
- "kona-executor",
  "kona-genesis",
  "kona-preimage",
  "kona-proof",
- "kona-protocol",
  "kona-sp1-client-utils",
- "kzg-rs",
- "op-alloy-consensus",
  "op-revm",
  "revm",
- "revm-precompile",
  "spin 0.10.0",
  "tracing",
  "world-chain-proof-core",
@@ -4572,7 +4566,6 @@ version = "1.0.0-rc.4"
 dependencies = [
  "anyhow",
  "kona-proof",
- "sp1-zkvm",
  "tracing",
  "tracing-subscriber",
  "world-chain-proof-core",

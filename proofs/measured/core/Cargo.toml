@@ -72,7 +72,6 @@ sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-bincode = "1"
 alloy-eips.workspace = true
 kona-derive.workspace = true
 kona-preimage.workspace = true
