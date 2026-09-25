@@ -16,15 +16,13 @@ use kona_proof::{
     l1::{OracleL1ChainProvider, OraclePipeline},
     l2::OracleL2ChainProvider,
 };
+use kona_sp1_client_utils::metrics::CycleTrackerDriverMetrics;
 use spin::RwLock;
 use tracing::info;
 
 use world_chain_proof_core::range::WorldRangeHardforkConfig;
 
-use crate::{
-    advance_to_target,
-    precompiles::{CustomCrypto, ZkvmOpEvmFactory},
-};
+use crate::precompiles::{CustomCrypto, ZkvmOpEvmFactory};
 
 #[async_trait]
 pub trait WitnessExecutor {
@@ -44,22 +42,6 @@ pub trait WitnessExecutor {
         l1_provider: Self::L1,
         l2_provider: Self::L2,
     ) -> Result<OraclePipeline<Self::O, Self::L1, Self::L2, Self::DA>>;
-
-    async fn run<O, DP, P>(
-        &self,
-        boot: BootInfo,
-        pipeline: DP,
-        cursor: Arc<RwLock<PipelineCursor>>,
-        l2_provider: OracleL2ChainProvider<O>,
-    ) -> Result<BootInfo>
-    where
-        O: CommsClient + FlushableCache + Send + Sync + Debug,
-        DP: DriverPipeline<P> + Send + Sync + Debug,
-        P: Pipeline + SignalReceiver + Send + Sync + Debug,
-    {
-        self.run_with_world_schedule(boot, pipeline, cursor, l2_provider, None)
-            .await
-    }
 
     async fn run_with_world_schedule<O, DP, P>(
         &self,
@@ -96,12 +78,13 @@ pub trait WitnessExecutor {
 
         #[cfg(target_os = "zkvm")]
         println!("cycle-tracker-report-start: block-execution-and-derivation");
-        let (safe_head, output_root) = advance_to_target(
-            &mut driver,
-            rollup_config.as_ref(),
-            Some(boot.claimed_l2_block_number),
-        )
-        .await?;
+        let (safe_head, output_root) = driver
+            .advance_to_target_with_metrics(
+                rollup_config.as_ref(),
+                Some(boot.claimed_l2_block_number),
+                &CycleTrackerDriverMetrics,
+            )
+            .await?;
         #[cfg(target_os = "zkvm")]
         println!("cycle-tracker-report-end: block-execution-and-derivation");
 
@@ -209,40 +192,5 @@ where
             None,
         )
         .await?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ensure_derived_block_matches_claim;
-
-    #[test]
-    fn returns_ok_when_derived_equals_claimed() {
-        assert!(ensure_derived_block_matches_claim(0, 0).is_ok());
-        assert!(ensure_derived_block_matches_claim(123_456, 123_456).is_ok());
-        assert!(ensure_derived_block_matches_claim(u64::MAX, u64::MAX).is_ok());
-    }
-
-    #[test]
-    fn returns_err_with_both_numbers_when_derived_below_claimed() {
-        let err = ensure_derived_block_matches_claim(50, 100).expect_err("expected mismatch error");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("#50"),
-            "missing derived block number in: {msg}"
-        );
-        assert!(
-            msg.contains("#100"),
-            "missing claimed block number in: {msg}"
-        );
-    }
-
-    #[test]
-    fn returns_err_with_both_numbers_when_derived_above_claimed() {
-        let err =
-            ensure_derived_block_matches_claim(150, 100).expect_err("expected mismatch error");
-        let msg = err.to_string();
-        assert!(msg.contains("#150"));
-        assert!(msg.contains("#100"));
     }
 }

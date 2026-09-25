@@ -39,6 +39,9 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///         required).
     error InsufficientPcrs(uint256 found);
 
+    /// @notice A required PCR slot is absent from the sparse PCR bank.
+    error MissingPcr(uint256 index);
+
     /// @notice The PCR triple extracted from the document is not currently
     ///         approved by the owner.
     error PCRSetNotApproved(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
@@ -217,6 +220,9 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
 
         // 3. Extract PCR0/1/2 digests from the document.
         if (ptrs.pcrs.length < 3) revert InsufficientPcrs(ptrs.pcrs.length);
+        for (uint256 i; i < 3; i++) {
+            if (ptrs.pcrs[i].isNull()) revert MissingPcr(i);
+        }
         pcr0 = _hashPcr(attestationTbs, ptrs.pcrs[0]);
         pcr1 = _hashPcr(attestationTbs, ptrs.pcrs[1]);
         pcr2 = _hashPcr(attestationTbs, ptrs.pcrs[2]);

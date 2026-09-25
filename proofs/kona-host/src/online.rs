@@ -25,17 +25,18 @@ use kona_preimage::{
     PreimageKey, VerifyingPreimageFetcher,
 };
 use kona_proof::{CachingOracle, HintType, l1::OracleBlobProvider};
+use kona_protocol::OutputRoot;
 use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainHardforks};
 use world_chain_proof_core::{
     hash_world_rollup_config,
-    range::{WorldRangeHardfork, WorldRangeHardforkConfig, WorldRangeSpecId},
+    range::{WorldRangeHardfork, WorldRangeHardforkConfig},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 use world_chain_proof_kona_client::{
-    ETHDAWitnessExecutor, OutputRootWitness, WitnessExecutor, get_inputs_for_pipeline,
+    ETHDAWitnessExecutor, WitnessExecutor, get_inputs_for_pipeline,
 };
 
 const L1_BLOCK_PREDEPLOY: Address = address!("0x4200000000000000000000000000000000000015");
@@ -346,8 +347,8 @@ pub async fn build_range_input(
         &post_block,
     )
     .await?;
-    let pre_root = pre_state.output_root();
-    let post_root = post_state.output_root();
+    let pre_root = pre_state.hash();
+    let post_root = post_state.hash();
 
     let l1_head = match request.l1_head {
         Some(hash) => hash,
@@ -357,7 +358,6 @@ pub async fn build_range_input(
     let active_fork = config
         .schedule
         .active_fork_at(request.end_block, post_block.timestamp.0);
-    let world_spec_id = WorldRangeSpecId::from_hardfork(active_fork);
 
     let host = SingleChainHost {
         l1_head,
@@ -399,7 +399,7 @@ pub async fn build_range_input(
             l2_post_root: post_root,
             rollup_config_hash: config.rollup_config_hash,
             active_fork: format!("{active_fork:?}"),
-            world_spec_id: <&'static str>::from(world_spec_id).to_string(),
+            world_spec_id: format!("{active_fork:?}"),
         },
         witness,
     })
@@ -407,7 +407,7 @@ pub async fn build_range_input(
 
 async fn collect_world_range_witness(
     host: SingleChainHost,
-    agreed_output: &OutputRootWitness,
+    agreed_output: &OutputRoot,
     schedule: WorldRangeHardforkConfig,
     timeout: Duration,
 ) -> anyhow::Result<WorldRangeWitnessData> {
@@ -420,7 +420,7 @@ async fn collect_world_range_witness(
 
     // Kona asks for this preimage to recover the agreed L2 head. Seeding the value avoids
     // recomputing the post-Isthmus storage root through `eth_getProof`.
-    let agreed_output_root = agreed_output.output_root();
+    let agreed_output_root = agreed_output.hash();
     kv_store.write().await.set(
         PreimageKey::new_keccak256(*agreed_output_root).into(),
         agreed_output.encode().to_vec(),
@@ -568,14 +568,14 @@ async fn output_root_witness(
     consensus_rpc_url: Option<&str>,
     block_number: u64,
     block: &RpcBlock,
-) -> anyhow::Result<OutputRootWitness> {
+) -> anyhow::Result<OutputRoot> {
     if schedule.is_active(WorldRangeHardfork::Isthmus, block_number, block.timestamp.0) {
-        let message_passer_storage_root = block.withdrawals_root.with_context(|| {
+        let bridge_storage_root = block.withdrawals_root.with_context(|| {
             format!("post-Isthmus L2 block {block_number} is missing withdrawalsRoot")
         })?;
-        return Ok(OutputRootWitness {
+        return Ok(OutputRoot {
             state_root: block.state_root,
-            message_passer_storage_root,
+            bridge_storage_root,
             block_hash: block.hash,
         });
     }
@@ -613,9 +613,9 @@ async fn output_root_witness(
         }
     };
 
-    Ok(OutputRootWitness {
+    Ok(OutputRoot {
         state_root: block.state_root,
-        message_passer_storage_root: proof.storage_hash,
+        bridge_storage_root: proof.storage_hash,
         block_hash: block.hash,
     })
 }
@@ -625,7 +625,7 @@ async fn output_root_witness_from_op_node(
     rpc_url: &str,
     block_number: u64,
     block: &RpcBlock,
-) -> anyhow::Result<OutputRootWitness> {
+) -> anyhow::Result<OutputRoot> {
     let output: OptimismOutputAtBlock = rpc(
         client,
         rpc_url,
@@ -635,12 +635,12 @@ async fn output_root_witness_from_op_node(
     .await?
     .context("optimism_outputAtBlock returned null")?;
 
-    let witness = OutputRootWitness {
+    let witness = OutputRoot {
         state_root: output.state_root,
-        message_passer_storage_root: output.withdrawal_storage_root,
+        bridge_storage_root: output.withdrawal_storage_root,
         block_hash: block.hash,
     };
-    let computed = witness.output_root();
+    let computed = witness.hash();
     if computed != output.output_root {
         bail!(
             "output root mismatch for block {block_number}: computed {computed}, RPC returned {}",
@@ -803,7 +803,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(witness.message_passer_storage_root, withdrawals_root);
+        assert_eq!(witness.bridge_storage_root, withdrawals_root);
         assert_eq!(witness.state_root, block.state_root);
         assert_eq!(witness.block_hash, block.hash);
     }
@@ -828,16 +828,5 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("missing withdrawalsRoot"));
-    }
-
-    #[test]
-    fn starting_output_preimage_matches_output_root() {
-        let output = OutputRootWitness {
-            state_root: B256::with_last_byte(1),
-            message_passer_storage_root: B256::with_last_byte(2),
-            block_hash: B256::with_last_byte(3),
-        };
-
-        assert_eq!(keccak256(output.encode()), output.output_root());
     }
 }
