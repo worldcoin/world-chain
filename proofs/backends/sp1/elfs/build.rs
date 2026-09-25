@@ -9,7 +9,7 @@
 //!
 //! Behaviour:
 //! - Uses `docker: true` by default with the pinned SP1 toolchain image
-//!   (matches the `=6.4.0` version of `sp1-zkvm` the guest workspace pins to)
+//!   (matches the `=6.8.1` version of `sp1-zkvm` the guest workspace pins to)
 //!   for bit-for-bit reproducible ELFs. This is the ecosystem
 //!   standard used by op-succinct, sp1-helios, and all other SP1 adopters.
 //!   Docker provides reproducibility by fixing the build environment path
@@ -98,7 +98,7 @@ fn main() {
                 // reference for readability, while the digest prevents a mutable tag from
                 // silently rotating the guest ELFs and their on-chain vkeys.
                 tag:
-                    "v6.4.0@sha256:bd050ab351d134f2e7345ad686c103e1f33635e929372b503ecae0c50a233147"
+                    "v6.8.1@sha256:e672d7160039916f40a6a4c2ea4cb0c8cd3dab120fdb24d08560d386ad8f59c2"
                         .to_string(),
                 ignore_rust_version: true,
                 locked: true,

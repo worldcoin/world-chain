@@ -246,7 +246,7 @@ jobs:
       # https://sp1.succinct.xyz bootstrap script, which fetches sp1up from `main` unpinned.
       - name: Install SP1 toolchain
         env:
-          SP1_VERSION: "v6.4.0"
+          SP1_VERSION: "v6.8.1"
           SP1UP_SHA256: 55d4f6ef8e79e04a7ccd064f75c6a6b44a1694b21cd41aa8e7d0d53eb880a71d
         run: |
           set -euo pipefail
