@@ -77,7 +77,7 @@ pub fn cert_cache_key(der: &[u8]) -> Result<B256> {
 /// # Errors
 ///
 /// Returns an error if the certificate or its signature cannot be parsed, or if either
-/// signature component exceeds 384 bits.
+/// signature scalar is outside the valid P-384 range.
 pub fn parse_cert_signature(der: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     use x509_parser::prelude::{FromDer as _, X509Certificate};
 
@@ -85,8 +85,10 @@ pub fn parse_cert_signature(der: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
         X509Certificate::from_der(der).map_err(|e| anyhow!("X.509 parse error: {e:?}"))?;
 
     let hash = Sha384::digest(cert.tbs_certificate.as_ref()).to_vec();
-    let sig = decode_ecdsa_der_sig(cert.signature_value.data.as_ref())
-        .context("decoding certificate ECDSA signature")?;
+    let sig = p384::ecdsa::Signature::from_der(cert.signature_value.data.as_ref())
+        .context("decoding certificate ECDSA signature")?
+        .to_bytes()
+        .to_vec();
 
     Ok((hash, sig))
 }
@@ -186,82 +188,6 @@ pub fn packed_cert_not_after(packed: &[u8]) -> Option<u64> {
     Some(u64::from_be_bytes(bytes))
 }
 
-// ─── DER helpers ─────────────────────────────────────────────────────────────
-
-/// Decodes a DER `SEQUENCE { INTEGER r, INTEGER s }` into raw `r || s`, each left-padded to
-/// 48 bytes.
-fn decode_ecdsa_der_sig(der: &[u8]) -> Result<Vec<u8>> {
-    if der.first() != Some(&0x30) {
-        bail!(
-            "expected SEQUENCE tag 0x30, got 0x{:02x}",
-            der.first().copied().unwrap_or(0)
-        );
-    }
-    let mut pos = 1;
-    let (seq_len, consumed) = decode_der_length(&der[pos..])?;
-    pos += consumed;
-    let end = pos
-        .checked_add(seq_len)
-        .filter(|end| *end <= der.len())
-        .ok_or_else(|| anyhow!("DER SEQUENCE length overflows input"))?;
-
-    let (r_bytes, advanced) = decode_der_integer(&der[pos..end])?;
-    pos += advanced;
-    let (s_bytes, _) = decode_der_integer(&der[pos..end])?;
-
-    let mut out = Vec::with_capacity(96);
-    out.extend_from_slice(&pad_to_48(&r_bytes)?);
-    out.extend_from_slice(&pad_to_48(&s_bytes)?);
-    Ok(out)
-}
-
-fn decode_der_length(data: &[u8]) -> Result<(usize, usize)> {
-    let first = *data
-        .first()
-        .ok_or_else(|| anyhow!("unexpected end of DER length"))?;
-    if first < 0x80 {
-        return Ok((first as usize, 1));
-    }
-    let num_bytes = (first & 0x7f) as usize;
-    if num_bytes == 0 || num_bytes > 4 || data.len() < 1 + num_bytes {
-        bail!("unsupported DER length encoding");
-    }
-    let mut len = 0usize;
-    for &b in &data[1..=num_bytes] {
-        len = (len << 8) | b as usize;
-    }
-    Ok((len, 1 + num_bytes))
-}
-
-fn decode_der_integer(data: &[u8]) -> Result<(Vec<u8>, usize)> {
-    if data.first() != Some(&0x02) {
-        bail!(
-            "expected INTEGER tag 0x02, got 0x{:02x}",
-            data.first().copied().unwrap_or(0)
-        );
-    }
-    let (len, header) = decode_der_length(&data[1..])?;
-    let start = 1 + header;
-    let bytes = data
-        .get(start..start + len)
-        .ok_or_else(|| anyhow!("DER INTEGER length overflows input"))?;
-    // DER prefixes a zero byte to keep the sign bit clear on positive integers.
-    let stripped = match bytes.first() {
-        Some(0x00) => &bytes[1..],
-        _ => bytes,
-    };
-    Ok((stripped.to_vec(), start + len))
-}
-
-fn pad_to_48(bytes: &[u8]) -> Result<Vec<u8>> {
-    if bytes.len() > 48 {
-        bail!("integer exceeds 384 bits ({} bytes)", bytes.len());
-    }
-    let mut out = vec![0u8; 48 - bytes.len()];
-    out.extend_from_slice(bytes);
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,11 +212,40 @@ mod tests {
     }
 
     #[test]
-    fn cert_signature_decodes_to_96_bytes() {
-        let cert = include_bytes!("testdata/aws_zonal.der");
-        let (hash, sig) = parse_cert_signature(cert).unwrap();
-        assert_eq!(hash.len(), 48, "SHA-384 digest");
-        assert_eq!(sig.len(), 96, "r || s");
+    fn extracted_certificate_signatures_verify_against_their_issuers() {
+        use p384::ecdsa::{Signature, VerifyingKey, signature::hazmat::PrehashVerifier};
+
+        let chain = [
+            include_bytes!("testdata/aws_root.der").as_slice(),
+            include_bytes!("testdata/aws_regional.der").as_slice(),
+            include_bytes!("testdata/aws_zonal.der").as_slice(),
+            include_bytes!("testdata/aws_instance.der").as_slice(),
+            include_bytes!("testdata/aws_leaf.der").as_slice(),
+        ];
+        for (index, certificate) in chain.iter().enumerate() {
+            let issuer = chain[index.saturating_sub(1)];
+            let mut public_key = vec![4];
+            public_key.extend_from_slice(&cert_pubkey_xy(issuer).unwrap());
+            let key = VerifyingKey::from_sec1_bytes(&public_key).unwrap();
+            let (hash, signature) = parse_cert_signature(certificate).unwrap();
+            let signature = Signature::from_slice(&signature).unwrap();
+            key.verify_prehash(&hash, &signature).unwrap();
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_signature_scalars_in_certificate() {
+        use x509_parser::prelude::{FromDer as _, X509Certificate};
+
+        let mut certificate = include_bytes!("testdata/aws_zonal.der").to_vec();
+        let (_, parsed) = X509Certificate::from_der(&certificate).unwrap();
+        let signature = parsed.signature_value.data.as_ref();
+        let offset = certificate.len() - signature.len();
+        // The fixture uses short DER lengths. Zeroing r preserves certificate framing.
+        assert_eq!(&signature[..3], &[0x30, (signature.len() - 2) as u8, 0x02]);
+        let r_len = signature[3] as usize;
+        certificate[offset + 4..offset + 4 + r_len].fill(0);
+        assert!(parse_cert_signature(&certificate).is_err());
     }
 
     #[test]
@@ -309,19 +264,5 @@ mod tests {
 
         assert_eq!(packed_cert_not_after(&[]), None, "uncached record");
         assert_eq!(packed_cert_not_after(&[0x01, 0x00]), None, "truncated");
-    }
-
-    #[test]
-    fn der_integer_strips_the_sign_padding_byte() {
-        // INTEGER 0x00FF → 0xFF once the sign byte is stripped.
-        let (bytes, consumed) = decode_der_integer(&[0x02, 0x02, 0x00, 0xFF]).unwrap();
-        assert_eq!(bytes, vec![0xFF]);
-        assert_eq!(consumed, 4);
-    }
-
-    #[test]
-    fn der_length_rejects_overflowing_sequence() {
-        // SEQUENCE claiming 0x7F bytes of content but carrying none.
-        assert!(decode_ecdsa_der_sig(&[0x30, 0x7F]).is_err());
     }
 }

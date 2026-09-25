@@ -8,7 +8,6 @@ repository.workspace = true
 
 [dependencies]
 kona-proof.workspace = true
-sp1-zkvm.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-kona-client.workspace = true
 

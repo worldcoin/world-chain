@@ -1,4 +1,3 @@
 pub mod online;
-pub mod witness_generation;
 
-pub use witness_generation::{OnlineBlobStore, PreimageWitnessCollector};
+pub use kona_sp1_host_utils::witness_generation::{OnlineBlobStore, PreimageWitnessCollector};

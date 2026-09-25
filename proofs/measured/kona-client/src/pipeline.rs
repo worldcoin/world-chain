@@ -1,19 +1,13 @@
 use std::{fmt::Debug, sync::Arc};
 
-use alloy_primitives::{BlockNumber, Sealed};
-use anyhow::{Result, anyhow};
+use alloy_primitives::BlockNumber;
+use anyhow::Result;
 use kona_driver::PipelineCursor;
-use kona_executor::TrieDBProvider as _;
 use kona_preimage::CommsClient;
-use kona_proof::{
-    BootInfo, FlushableCache, l1::OracleL1ChainProvider, l2::OracleL2ChainProvider,
-    sync::new_oracle_pipeline_cursor,
-};
+use kona_proof::{BootInfo, FlushableCache, l1::OracleL1ChainProvider, l2::OracleL2ChainProvider};
 use spin::RwLock;
 
-use crate::client::fetch_safe_head_hash;
-
-/// Loads boot info and constructs the initial pipeline cursor and providers.
+/// Prepares the upstream pipeline and returns its starting L2 height for World public values.
 pub async fn get_inputs_for_pipeline<O>(
     oracle: Arc<O>,
 ) -> Result<(
@@ -28,48 +22,105 @@ pub async fn get_inputs_for_pipeline<O>(
 where
     O: CommsClient + FlushableCache + Send + Sync + Debug,
 {
-    let boot = match BootInfo::load(oracle.as_ref()).await {
-        Ok(boot) => boot,
-        Err(e) => {
-            return Err(anyhow!("Failed to load boot info: {:?}", e));
-        }
+    let (boot, inputs) =
+        kona_sp1_client_utils::witness::executor::get_inputs_for_pipeline(oracle).await?;
+    let safe_head_number = match &inputs {
+        Some((cursor, _, _)) => cursor.read().tip().l2_safe_head.block_info.number,
+        // Upstream accepts a zero-step claim only when its height and root match the safe head.
+        None => boot.claimed_l2_block_number,
     };
+    Ok((boot, inputs, safe_head_number))
+}
 
-    let boot_clone = boot.clone();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::{B256, keccak256};
+    use kona_preimage::{
+        L1_HEAD_KEY, L2_CHAIN_ID_KEY, L2_CLAIM_BLOCK_NUMBER_KEY, L2_CLAIM_KEY, L2_OUTPUT_ROOT_KEY,
+        PreimageKey,
+    };
+    use kona_proof::{block_on, sync::SyncStartError};
+    use world_chain_proof_core::witness::preimage_store::PreimageStore;
 
-    let rollup_config = Arc::new(boot.rollup_config);
-    let safe_head_hash = fetch_safe_head_hash(oracle.as_ref(), boot.agreed_l2_output_root).await?;
+    fn oracle(claimed_height: u64, matching_root: bool, version: u8) -> Arc<PreimageStore> {
+        let header = Header {
+            number: 42,
+            ..Default::default()
+        };
+        let hash = header.hash_slow();
+        let mut output = [0u8; 128];
+        output[31] = version;
+        output[96..].copy_from_slice(hash.as_slice());
+        let root = keccak256(output);
+        let claim = if matching_root { root } else { B256::ZERO };
+        let mut oracle = PreimageStore::default();
+        for (key, value) in [
+            (
+                PreimageKey::new_keccak256(hash.0),
+                alloy_rlp::encode(&header),
+            ),
+            (PreimageKey::new_keccak256(root.0), output.to_vec()),
+            (
+                PreimageKey::new_local(L1_HEAD_KEY.to()),
+                B256::ZERO.to_vec(),
+            ),
+            (
+                PreimageKey::new_local(L2_OUTPUT_ROOT_KEY.to()),
+                root.to_vec(),
+            ),
+            (PreimageKey::new_local(L2_CLAIM_KEY.to()), claim.to_vec()),
+            (
+                PreimageKey::new_local(L2_CLAIM_BLOCK_NUMBER_KEY.to()),
+                claimed_height.to_be_bytes().to_vec(),
+            ),
+            (
+                PreimageKey::new_local(L2_CHAIN_ID_KEY.to()),
+                10u64.to_be_bytes().to_vec(),
+            ),
+        ] {
+            oracle.save_preimage(key, value).unwrap();
+        }
+        Arc::new(oracle)
+    }
 
-    let mut l1_provider = OracleL1ChainProvider::new(boot.l1_head, oracle.clone());
-    let mut l2_provider =
-        OracleL2ChainProvider::new(safe_head_hash, rollup_config.clone(), oracle.clone());
+    #[test]
+    fn unchanged_claim_preserves_starting_height_without_l1_witness() {
+        let (boot, inputs, pre_height) =
+            block_on(get_inputs_for_pipeline(oracle(42, true, 0))).unwrap();
+        assert!(inputs.is_none());
+        assert_eq!(pre_height, 42);
+        assert_eq!(boot.claimed_l2_block_number, pre_height);
+        assert_eq!(boot.claimed_l2_output_root, boot.agreed_l2_output_root);
+    }
 
-    let safe_head = l2_provider
-        .header_by_hash(safe_head_hash)
-        .map(|header| Sealed::new_unchecked(header, safe_head_hash))?;
-    let safe_head_block_number = safe_head.number;
-
-    if boot.claimed_l2_block_number < safe_head.number {
-        return Err(anyhow!(
-            "Claimed L2 block number {claimed} is less than the safe head {safe}",
-            claimed = boot.claimed_l2_block_number,
-            safe = safe_head.number
+    #[test]
+    fn unchanged_height_rejects_different_root() {
+        let error = block_on(get_inputs_for_pipeline(oracle(42, false, 0))).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<SyncStartError>(),
+            Some(SyncStartError::ClaimedRootMismatch { .. })
         ));
     }
 
-    let cursor = new_oracle_pipeline_cursor(
-        rollup_config.as_ref(),
-        safe_head,
-        boot.agreed_l2_output_root,
-        &mut l1_provider,
-        &mut l2_provider,
-    )
-    .await?;
-    l2_provider.set_cursor(cursor.clone());
+    #[test]
+    fn claim_before_safe_head_is_rejected() {
+        let error = block_on(get_inputs_for_pipeline(oracle(41, true, 0))).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<SyncStartError>(),
+            Some(SyncStartError::ClaimedBlockBeforeSafeHead { .. })
+        ));
+    }
 
-    Ok((
-        boot_clone,
-        Some((cursor, l1_provider, l2_provider)),
-        safe_head_block_number,
-    ))
+    #[test]
+    fn pipeline_rejects_unsupported_output_version() {
+        let error = block_on(get_inputs_for_pipeline(oracle(42, true, 1))).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<SyncStartError>(),
+            Some(SyncStartError::Oracle(
+                kona_proof::errors::OracleProviderError::UnknownOutputVersion(_)
+            ))
+        ));
+    }
 }
