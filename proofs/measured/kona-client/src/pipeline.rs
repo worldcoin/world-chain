@@ -1,18 +1,13 @@
 use std::{fmt::Debug, sync::Arc};
 
 use alloy_primitives::BlockNumber;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use kona_driver::PipelineCursor;
 use kona_preimage::CommsClient;
-use kona_proof::{
-    BootInfo, FlushableCache,
-    l1::OracleL1ChainProvider,
-    l2::OracleL2ChainProvider,
-    sync::{DerivationInputs, prepare_derivation},
-};
+use kona_proof::{BootInfo, FlushableCache, l1::OracleL1ChainProvider, l2::OracleL2ChainProvider};
 use spin::RwLock;
 
-/// Loads boot info and constructs the initial pipeline cursor and providers.
+/// Prepares the upstream pipeline and returns its starting L2 height for World public values.
 pub async fn get_inputs_for_pipeline<O>(
     oracle: Arc<O>,
 ) -> Result<(
@@ -27,33 +22,14 @@ pub async fn get_inputs_for_pipeline<O>(
 where
     O: CommsClient + FlushableCache + Send + Sync + Debug,
 {
-    let boot = match BootInfo::load(oracle.as_ref()).await {
-        Ok(boot) => boot,
-        Err(e) => {
-            return Err(anyhow!("Failed to load boot info: {:?}", e));
-        }
+    let (boot, inputs) =
+        kona_sp1_client_utils::witness::executor::get_inputs_for_pipeline(oracle).await?;
+    let safe_head_number = match &inputs {
+        Some((cursor, _, _)) => cursor.read().tip().l2_safe_head.block_info.number,
+        // Upstream accepts a zero-step claim only when its height and root match the safe head.
+        None => boot.claimed_l2_block_number,
     };
-
-    let inputs = prepare_derivation(&boot, Arc::new(boot.rollup_config.clone()), oracle).await?;
-    match inputs {
-        DerivationInputs::TraceExtension => {
-            // Kona has checked that both the claimed height and root equal the safe head.
-            let safe_head_number = boot.claimed_l2_block_number;
-            Ok((boot, None, safe_head_number))
-        }
-        DerivationInputs::Derive {
-            cursor,
-            l1_provider,
-            l2_provider,
-        } => {
-            let safe_head_number = cursor.read().tip().l2_safe_head.block_info.number;
-            Ok((
-                boot,
-                Some((cursor, l1_provider, l2_provider)),
-                safe_head_number,
-            ))
-        }
-    }
+    Ok((boot, inputs, safe_head_number))
 }
 
 #[cfg(test)]
