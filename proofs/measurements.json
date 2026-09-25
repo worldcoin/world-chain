@@ -1,19 +1,19 @@
 {
   "nitro": {
-    "pcr0": "0x94b7fae4809321645eab5829256f3802b147ed89f61a86187df376f811c2d950447473c8b09d1b371118cead2a2a2dc7",
+    "pcr0": "0x027f985ea84fb40346bb6363e1140b684e28637d0bb66451b8bd922e1c4dddae2f39ca8c522c1b1c154f461e7b610c4c",
     "pcr1": "0xab92a79f22cbca162b415c97f3406327ab858f9a73ffd4f7720710529eee87f085d21c3dd2819ef63263b0dad0b4a9d6",
-    "pcr2": "0x6fc82f6f636acf921324315eb67f4f76a5bfb3ada46edda1c810039105a11c3986565c055b4e9ccbb09d93ead170f7af"
+    "pcr2": "0xba0b7c568ac1475748c75611fe57c8950a39f4a6a88ebb094eb5d2403cfccea409007d78f74c08493676a6805d09f994"
   },
   "sp1": {
-    "aggregation_vkey": "0x003aa583daa4450bf717fc96ae34e6df8715bb95ee876c02a6ea1c8d74e30baa",
+    "aggregation_vkey": "0x00ddf93b5c2a6679e10ebcbd971864c773a6ff95068adb2976b8b0922a7c2b98",
     "elfs": {
       "world-chain-aggregation": {
-        "sha256": "479f38a38ade6a3dce3064ad9487ebe419a38d778d8de6c815a53f238a19cbdb"
+        "sha256": "42db56b676e694783adedf0976ae32eb50db2df2e0f6ba5183ab25e1657776f5"
       },
       "world-chain-range-ethereum": {
-        "sha256": "2a838c4b6b4d4f9fa24958eda93a521f92567c4eac1dd359eaf1afd0db1770ef"
+        "sha256": "1ccf6bb5c9a29f9b376d6f0e22b813a6d20a1214784e7481d9b375e126ad6218"
       }
     },
-    "range_vkey_commitment": "0x133a36152e734dee7101696009e1747f2e006ca806f4bca516f857e446aa63e6"
+    "range_vkey_commitment": "0x5f6a04fb18c2e4837c9cd3e65da2ddb3108c3de84898763951e56a3365c74ca8"
   }
 }
