@@ -134,6 +134,7 @@ mod tests {
     fn recreated_account_across_flashblocks_matches_serial_state() {
         let address = Address::with_last_byte(1);
         let mut state = State::builder().with_bundle_update().build();
+        // Prefunding prevents revm from eliding the first creation and destruction as a no-op.
         state.insert_account(
             address,
             AccountInfo {
@@ -167,6 +168,7 @@ mod tests {
             AccountStatus::DestroyedChanged
         );
 
+        // Neither update includes slot 0, so merging must preserve its committed value.
         let mut sparse_write = Account::from(info.clone());
         sparse_write.mark_touch();
         sparse_write.storage.insert(
@@ -178,7 +180,9 @@ mod tests {
         balance_only.info.balance = U256::from(2);
 
         for update in [sparse_write, balance_only, destroyed] {
+            // A fresh destruction is the control case: it must still clear slot 0.
             let is_destroyed = update.is_selfdestructed();
+            // Serial processing carries the whole bundle; a flashblock starts from its cache.
             let mut serial = State::builder()
                 .with_bundle_prestate(committed.clone())
                 .with_bundle_update()
@@ -198,6 +202,7 @@ mod tests {
             let composed = extend_flashblock_bundle(&committed, fragment.take_bundle());
             let mut expected = serial.take_bundle();
             expected.reverts = flatten_reverts(&expected.reverts);
+            // Compare the retained slot, trie inputs, and rollback data with serial processing.
             assert_eq!(
                 composed.storage(&address, U256::ZERO),
                 Some(if is_destroyed {
