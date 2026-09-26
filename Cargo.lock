@@ -20031,7 +20031,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-challenger"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-consensus 2.1.1",
  "alloy-contract",
@@ -20115,7 +20115,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-defender"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-contract",
  "alloy-network 2.1.1",
@@ -20462,7 +20462,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-core"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -20478,7 +20478,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-it"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -20499,7 +20499,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-kona-client"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-consensus 2.1.1",
  "alloy-evm",
@@ -20523,7 +20523,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-kona-host"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-consensus 2.1.1",
  "alloy-primitives",
@@ -20546,7 +20546,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-metrics"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-json-rpc 2.1.1",
  "alloy-primitives",
@@ -20562,7 +20562,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-nitro-enclave"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -20595,7 +20595,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-nitro-register"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-contract",
  "alloy-primitives",
@@ -20616,7 +20616,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-nitro-worker"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "alloy-provider",
@@ -20642,7 +20642,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-protocol"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-contract",
  "alloy-primitives",
@@ -20663,7 +20663,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-sp1-elfs"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "sp1-build",
  "sp1-sdk",
@@ -20671,7 +20671,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-sp1-guest-builder"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "anyhow",
  "sp1-build",
@@ -20679,7 +20679,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-sp1-host"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -20704,7 +20704,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-sp1-types"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "rkyv",
@@ -20714,7 +20714,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-sp1-worker"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-contract",
  "alloy-network 2.1.1",
@@ -20754,7 +20754,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-tx-signer"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-network 2.1.1",
  "alloy-primitives",
@@ -20771,7 +20771,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-worker"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "anyhow",
@@ -20786,7 +20786,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proposer"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-consensus 2.1.1",
  "alloy-contract",
@@ -20815,7 +20815,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-prover"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "anyhow",
@@ -20833,7 +20833,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-prover-cli"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "alloy-provider",
@@ -20851,7 +20851,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-prover-nitro"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -20867,7 +20867,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-prover-service"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "alloy-provider",
@@ -20896,7 +20896,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-prover-sp1"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "anyhow",

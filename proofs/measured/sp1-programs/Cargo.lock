@@ -4426,7 +4426,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-core"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -4442,7 +4442,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-kona-client"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-consensus",
  "alloy-evm",
@@ -4466,7 +4466,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-succinct-aggregation"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
@@ -4481,7 +4481,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-succinct-range-ethereum"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "kona-proof",
  "rkyv",
@@ -4493,7 +4493,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-succinct-range-utils"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "anyhow",
  "kona-proof",
