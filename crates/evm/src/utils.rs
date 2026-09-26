@@ -2,8 +2,11 @@ use alloy_eips::Encodable2718;
 use op_revm::estimate_tx_compressed_size;
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use revm_database::{
-    BundleState, CacheState,
-    states::reverts::{AccountInfoRevert, Reverts},
+    AccountStatus, BundleState, CacheState,
+    states::{
+        CacheAccount,
+        reverts::{AccountInfoRevert, Reverts},
+    },
 };
 use std::collections::{HashMap, hash_map::Entry};
 
@@ -60,7 +63,17 @@ pub fn cache_prestate_from_bundle(bundle: &BundleState) -> CacheState {
         accounts: bundle
             .state
             .iter()
-            .map(|(address, account)| (*address, account.into()))
+            .map(|(address, account)| {
+                let mut cached = CacheAccount::from(account);
+                // Destruction is already recorded in the committed bundle. Carrying it into a
+                // fresh fragment makes `extend` replace storage with that fragment's sparse writes.
+                // InMemoryChange still treats missing slots as zero; a new destruction is tracked
+                // normally by revm.
+                if cached.status == AccountStatus::DestroyedChanged {
+                    cached.status = AccountStatus::InMemoryChange;
+                }
+                (*address, cached)
+            })
             .collect(),
         contracts: bundle.contracts.clone(),
     }
@@ -98,16 +111,113 @@ pub fn estimated_da_size_bytes(tx: &impl Encodable2718) -> u64 {
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, U256};
+    use reth_trie_common::{HashedPostState, KeccakKeyHasher};
     use revm::{
+        Database, DatabaseCommit,
         database::{
-            AccountRevert, AccountStatus, RevertToSlot,
-            states::reverts::{AccountInfoRevert, Reverts},
+            AccountRevert, AccountStatus, RevertToSlot, State,
+            states::{
+                bundle_state::BundleRetention,
+                reverts::{AccountInfoRevert, Reverts},
+            },
         },
-        state::AccountInfo,
+        state::{Account, AccountInfo, EvmStorageSlot},
     };
 
-    use crate::utils::{effective_gas_limit, flatten_reverts};
+    use crate::utils::{
+        cache_prestate_from_bundle, effective_gas_limit, extend_flashblock_bundle, flatten_reverts,
+    };
     use reth_optimism_payload_builder::config::OpBuilderConfig;
+
+    /// Fragment composition must preserve recreated storage and still honor a new destruction.
+    #[test]
+    fn recreated_account_across_flashblocks_matches_serial_state() {
+        let address = Address::with_last_byte(1);
+        let mut state = State::builder().with_bundle_update().build();
+        // Prefunding prevents revm from eliding the first creation and destruction as a no-op.
+        state.insert_account(
+            address,
+            AccountInfo {
+                balance: U256::from(1),
+                ..Default::default()
+            },
+        );
+
+        // EVM outputs for create-and-destroy, then recreation in another transaction.
+        let mut destroyed = Account::default();
+        destroyed.mark_touch();
+        destroyed.mark_selfdestruct();
+        state.commit([(address, destroyed.clone())].into_iter().collect());
+
+        let info = AccountInfo {
+            nonce: 1,
+            ..Default::default()
+        };
+        let mut recreated = Account::from(info.clone());
+        recreated.mark_touch();
+        recreated.mark_created();
+        recreated.storage.insert(
+            U256::ZERO,
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(1), Default::default()),
+        );
+        state.commit([(address, recreated)].into_iter().collect());
+        state.merge_transitions(BundleRetention::Reverts);
+        let committed = state.take_bundle();
+        assert_eq!(
+            committed.state[&address].status,
+            AccountStatus::DestroyedChanged
+        );
+
+        // Neither update includes slot 0, so merging must preserve its committed value.
+        let mut sparse_write = Account::from(info.clone());
+        sparse_write.mark_touch();
+        sparse_write.storage.insert(
+            U256::from(1),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(7), Default::default()),
+        );
+        let mut balance_only = Account::from(info);
+        balance_only.mark_touch();
+        balance_only.info.balance = U256::from(2);
+
+        for update in [sparse_write, balance_only, destroyed] {
+            // A fresh destruction is the control case: it must still clear slot 0.
+            let is_destroyed = update.is_selfdestructed();
+            // Serial processing carries the whole bundle; a flashblock starts from its cache.
+            let mut serial = State::builder()
+                .with_bundle_prestate(committed.clone())
+                .with_bundle_update()
+                .build();
+            let mut fragment = State::builder()
+                .with_cached_prestate(cache_prestate_from_bundle(&committed))
+                .with_bundle_update()
+                .build();
+            for state in [&mut serial, &mut fragment] {
+                state.basic(address).unwrap();
+                // Missing storage must not fall through to the parent database.
+                assert_eq!(state.storage(address, U256::from(2)).unwrap(), U256::ZERO);
+                state.commit([(address, update.clone())].into_iter().collect());
+                state.merge_transitions(BundleRetention::Reverts);
+            }
+
+            let composed = extend_flashblock_bundle(&committed, fragment.take_bundle());
+            let mut expected = serial.take_bundle();
+            expected.reverts = flatten_reverts(&expected.reverts);
+            // Compare the retained slot, trie inputs, and rollback data with serial processing.
+            assert_eq!(
+                composed.storage(&address, U256::ZERO),
+                Some(if is_destroyed {
+                    U256::ZERO
+                } else {
+                    U256::from(1)
+                }),
+            );
+            assert_eq!(
+                HashedPostState::from_bundle_state::<KeccakKeyHasher>(composed.state.iter()),
+                HashedPostState::from_bundle_state::<KeccakKeyHasher>(expected.state.iter()),
+            );
+            assert_eq!(composed.reverts, expected.reverts);
+        }
+    }
 
     #[bon::builder]
     fn revert(
