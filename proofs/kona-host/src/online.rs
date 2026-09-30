@@ -36,7 +36,7 @@ use world_chain_proof_core::{
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 use world_chain_proof_kona_client::{
-    ETHDAWitnessExecutor, WitnessExecutor, get_inputs_for_pipeline,
+    ETHDAWitnessExecutor, KonaWitnessExecutor, WitnessExecutor, get_inputs_for_pipeline,
 };
 
 const L1_BLOCK_PREDEPLOY: Address = address!("0x4200000000000000000000000000000000000015");

@@ -2019,6 +2019,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "kona-proof-interop"
+version = "0.2.0"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-op-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-engine",
+ "async-trait",
+ "kona-executor",
+ "kona-genesis",
+ "kona-interop",
+ "kona-mpt",
+ "kona-preimage",
+ "kona-proof",
+ "kona-protocol",
+ "kona-registry",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
+ "op-revm",
+ "revm",
+ "serde",
+ "serde_json",
+ "spin 0.10.0",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "kona-protocol"
 version = "0.4.5"
 source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
@@ -2101,6 +2133,33 @@ dependencies = [
  "sha2",
  "spin 0.10.0",
  "tracing",
+]
+
+[[package]]
+name = "kona-sp1-ethereum-client-utils"
+version = "0.0.1"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=96ffbb2a94f19886fe7e27c45f3310e64ccd18b3#96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+dependencies = [
+ "alloy-chains",
+ "alloy-consensus",
+ "alloy-op-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "anyhow",
+ "async-trait",
+ "kona-derive",
+ "kona-driver",
+ "kona-executor",
+ "kona-genesis",
+ "kona-interop",
+ "kona-preimage",
+ "kona-proof",
+ "kona-proof-interop",
+ "kona-registry",
+ "kona-sp1-client-utils",
+ "revm",
+ "serde_json",
+ "spin 0.10.0",
 ]
 
 [[package]]
@@ -4457,6 +4516,7 @@ dependencies = [
  "kona-preimage",
  "kona-proof",
  "kona-sp1-client-utils",
+ "kona-sp1-ethereum-client-utils",
  "op-revm",
  "revm",
  "spin 0.10.0",
