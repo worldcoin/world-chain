@@ -47,6 +47,10 @@ struct Cli {
     #[arg(long, env = "VERIFYING_OUTPUT_ROOT_RPC_URL")]
     verifying_output_root_rpc: Option<String>,
 
+    /// Start from this eligible game until a valid ASR anchor advances above it.
+    #[arg(long, env = "RECOVERY_PARENT")]
+    recovery_parent: Option<Address>,
+
     /// OP Stack `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
@@ -173,6 +177,7 @@ async fn main() -> Result<()> {
     let registered = contracts.registered_lineage_config();
     let bond_vault = contracts.bond_vault_address();
     let config = ProposerConfig {
+        recovery_parent: cli.recovery_parent,
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_resolutions_per_tick: cli.max_resolutions_per_tick,
     };
@@ -184,6 +189,7 @@ async fn main() -> Result<()> {
         output_root_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.output_root_rpc),
         verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         dispute_game_factory = %cli.factory_address,
+        recovery_parent = ?cli.recovery_parent,
         anchor = %registered.anchor_registry,
         bond_vault = %bond_vault,
         proposer = %proposer_address,

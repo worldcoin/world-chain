@@ -59,6 +59,10 @@ struct Cli {
     #[arg(long, env = "PROVER_SERVICE_URL")]
     prover_service_url: String,
 
+    /// Start from this eligible game until a valid ASR anchor advances above it.
+    #[arg(long, env = "RECOVERY_PARENT")]
+    recovery_parent: Option<Address>,
+
     /// OP Stack `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
@@ -213,6 +217,7 @@ async fn main() -> Result<()> {
     let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
     let config = DefenderConfig {
+        recovery_parent: cli.recovery_parent,
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
     };
@@ -226,6 +231,7 @@ async fn main() -> Result<()> {
         verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         prover_service = %cli.prover_service_url,
         dispute_game_factory = %cli.factory_address,
+        recovery_parent = ?cli.recovery_parent,
         defender = %defender_address,
         reward_recipient = %reward_recipient,
         l1_tx_confirmations = cli.l1_tx_confirmations,

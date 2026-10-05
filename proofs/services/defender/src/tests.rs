@@ -20,7 +20,8 @@ use world_chain_proof_core::boot::TransitionPublicValues;
 use world_chain_proof_protocol::{
     ClaimData, ConsensusError, ConsensusProvider, GameStatus, InvalidationReason, LineageAnchor,
     LineageError, LineageGame, LineageProvider, LineageTransition, MAX_ATTEMPT_SCAN,
-    PROOF_THRESHOLD, ProofLane, ProposalCommitment, ProposalStatus, ResolutionStatus, proof_count,
+    PROOF_THRESHOLD, ProofLane, ProposalCommitment, ProposalStatus, RecoveryParent,
+    ResolutionStatus, proof_count,
 };
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
@@ -195,6 +196,32 @@ impl LineageProvider for MockClient {
 
     async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError> {
         Ok(self.state.lock().expect("not poisoned").anchor)
+    }
+
+    async fn recovery_parent(&self, game: Address) -> Result<RecoveryParent, LineageError> {
+        let guard = self.state.lock().expect("not poisoned");
+        let record = guard
+            .games
+            .get(&game)
+            .ok_or(LineageError::InvalidRecoveryParent(game))?;
+        Ok(RecoveryParent {
+            anchor: LineageAnchor {
+                address: game,
+                l2_block_number: record.metadata.l2_block_number,
+            },
+            root_claim: record.metadata.root_claim,
+            eligible: record.state == GameLifecycle::Finalized,
+        })
+    }
+
+    async fn lineage_anchor_claim_valid(&self, game: Address) -> Result<bool, LineageError> {
+        Ok(self
+            .state
+            .lock()
+            .expect("not poisoned")
+            .games
+            .get(&game)
+            .is_some_and(|record| record.state == GameLifecycle::Finalized))
     }
 
     async fn game_for_transition(
@@ -436,6 +463,7 @@ impl ProofRequester for MockProver {
 
 fn config() -> DefenderConfig {
     DefenderConfig {
+        recovery_parent: None,
         poll_interval: Duration::from_secs(1),
         max_game_concurrency: 10,
     }
@@ -865,8 +893,56 @@ async fn selected_game_deadline_stops_proof_work() {
 #[test]
 fn config_rejects_zero_concurrency() {
     let config = DefenderConfig {
+        recovery_parent: None,
         poll_interval: Duration::from_secs(1),
         max_game_concurrency: 0,
     };
     assert!(config.validate().is_err());
+}
+
+#[tokio::test]
+async fn recovery_defends_replacement_branch_instead_of_unusable_anchor() {
+    let parent = Address::repeat_byte(0x77);
+    let old_anchor = Address::repeat_byte(0x88);
+    let parent_root = B256::repeat_byte(0x10);
+    let root = B256::repeat_byte(0x20);
+    let client = MockClient::new();
+    client.insert_game(
+        parent,
+        ANCHOR,
+        parent_root,
+        L2_BLOCK - BLOCK_INTERVAL,
+        0,
+        GameLifecycle::Finalized,
+    );
+    client.insert_game(
+        old_anchor,
+        parent,
+        root,
+        L2_BLOCK,
+        0,
+        GameLifecycle::Invalidated,
+    );
+    client.insert_game(GAME_1, parent, root, L2_BLOCK, 0, GameLifecycle::Proposed);
+    client.state.lock().expect("not poisoned").anchor = LineageAnchor {
+        address: old_anchor,
+        l2_block_number: L2_BLOCK,
+    };
+    let prover = MockProver::default();
+    let mut defender = WorldChainDefender::new(
+        DefenderConfig {
+            recovery_parent: Some(parent),
+            ..config()
+        },
+        client.clone(),
+        output_roots(
+            &[(L2_BLOCK - BLOCK_INTERVAL, parent_root), (L2_BLOCK, root)],
+            L2_BLOCK,
+        ),
+        prover.clone(),
+    );
+    defender.tick().await.unwrap();
+    defender.tick().await.unwrap();
+    assert_eq!(prover.requests().len(), 1);
+    assert_eq!(client.submissions()[0].0, GAME_1);
 }

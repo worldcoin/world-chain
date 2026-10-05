@@ -1,4 +1,5 @@
 use crate::error::DefenderError;
+use alloy_primitives::Address;
 use std::time::Duration;
 
 /// Default number of games processed concurrently.
@@ -10,6 +11,8 @@ pub const DEFAULT_L1_TX_CONFIRMATIONS: u64 = 5;
 /// Configuration for the defender.
 #[derive(Debug, Clone)]
 pub struct DefenderConfig {
+    /// Eligible game to extend while recovering from an unusable ASR anchor.
+    pub recovery_parent: Option<Address>,
     /// Delay between periodic scan attempts.
     pub poll_interval: Duration,
     /// Maximum number of games to process concurrently.
@@ -35,6 +38,7 @@ impl DefenderConfig {
 impl Default for DefenderConfig {
     fn default() -> Self {
         Self {
+            recovery_parent: None,
             poll_interval: Duration::from_mins(1),
             max_game_concurrency: DEFAULT_MAX_GAME_CONCURRENCY,
         }

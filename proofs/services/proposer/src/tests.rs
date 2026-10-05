@@ -8,8 +8,8 @@ use alloy_primitives::{Address, B256, BlockNumber, address, b256};
 use async_trait::async_trait;
 use world_chain_proof_protocol::{
     ConsensusError, ConsensusProvider, GameStatus, InvalidationReason, LineageAnchor, LineageError,
-    LineageGame, LineageProvider, LineageTransition, ProposalCommitment, ResolutionStatus,
-    SelectedLineageGame,
+    LineageGame, LineageProvider, LineageTransition, ProposalCommitment, RecoveryParent,
+    ResolutionStatus, SelectedLineageGame,
 };
 
 use crate::{
@@ -49,6 +49,25 @@ impl LineageProvider for MockContracts {
 
     async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError> {
         Ok(self.anchor)
+    }
+
+    async fn recovery_parent(&self, game: Address) -> Result<RecoveryParent, LineageError> {
+        if game != ANCHOR {
+            return Err(LineageError::InvalidRecoveryParent(game));
+        }
+        Ok(RecoveryParent {
+            anchor: anchor_at(0),
+            root_claim: B256::ZERO,
+            eligible: true,
+        })
+    }
+
+    async fn lineage_anchor_claim_valid(&self, game: Address) -> Result<bool, LineageError> {
+        Ok(!self
+            .unfinalized_games
+            .lock()
+            .expect("not poisoned")
+            .contains(&game))
     }
 
     async fn game_for_transition(
@@ -408,6 +427,7 @@ impl ConsensusProvider for MockOutputRoots {
 
 fn config() -> ProposerConfig {
     ProposerConfig {
+        recovery_parent: None,
         poll_interval: Duration::from_secs(1),
         max_resolutions_per_tick: 1,
     }
@@ -1506,4 +1526,39 @@ async fn timed_out_game_bumps_attempt_while_its_parent_is_still_acceptable() {
             invalidated_game: timed_out,
         }
     );
+}
+
+#[tokio::test]
+async fn recovery_proposes_from_override_instead_of_unusable_anchor() {
+    let submissions = Arc::default();
+    let contracts = MockContracts {
+        anchor: LineageAnchor {
+            address: GAME_1,
+            l2_block_number: 10,
+        },
+        games: Arc::default(),
+        submissions: Arc::clone(&submissions),
+        resolution_statuses: Arc::default(),
+        resolutions: Arc::default(),
+        closures: Arc::default(),
+        submission_failures: Arc::default(),
+        unfinalized_games: Arc::new(Mutex::new(HashSet::from([GAME_1]))),
+    };
+    let proposer = WorldChainProposer::new(
+        ProposerConfig {
+            recovery_parent: Some(ANCHOR),
+            ..config()
+        },
+        contracts,
+        MockOutputRoots {
+            roots: HashMap::from([(0, B256::ZERO), (10, B256::repeat_byte(0x10))]),
+            finalized_l2_block: 10,
+        },
+    );
+    let scan = proposer.scan_selected_lineage().await.unwrap();
+    advance_proposal(&proposer, &scan).await.unwrap();
+    let proposal = submissions.lock().expect("not poisoned")[0];
+    assert_eq!(proposal.parent_ref, ANCHOR);
+    assert_eq!(proposal.l2_block_number, 10);
+    assert_eq!(proposal.attempt, 0);
 }

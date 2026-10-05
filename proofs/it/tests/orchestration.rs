@@ -22,6 +22,7 @@ use world_chain_prover_service::{ProofBackend, ProverServiceConfig};
 
 fn proposer_config() -> ProposerConfig {
     ProposerConfig {
+        recovery_parent: None,
         poll_interval: Duration::from_secs(1),
         max_resolutions_per_tick: 1,
     }
@@ -84,6 +85,11 @@ async fn fake_resolution_matches_contract_transition_semantics() {
         .await
         .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
+    let parent = chain.recovery_parent(game).await.unwrap();
+    assert_eq!(parent.root_claim, canonical_root);
+    assert_eq!(parent.anchor.l2_block_number, BLOCK_INTERVAL);
+    assert!(!parent.eligible);
+    assert!(!chain.lineage_anchor_claim_valid(game).await.unwrap());
     chain.challenge_game(game);
 
     chain
@@ -109,6 +115,8 @@ async fn fake_resolution_matches_contract_transition_semantics() {
         .expect("resolution status available");
     assert!(!finalized.resolvable);
     assert_eq!(finalized.outcome, GameStatus::DefenderWins);
+    assert!(chain.recovery_parent(game).await.unwrap().eligible);
+    assert!(chain.lineage_anchor_claim_valid(game).await.unwrap());
     assert!(ProposerClient::resolve_game(&chain, game).await.is_err());
 }
 

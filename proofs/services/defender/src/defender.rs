@@ -110,10 +110,14 @@ where
     P: ProofRequester + Sync,
 {
     /// Reconstructs the valid lineage selected by the same transition rule as the proposer.
-    // Same-domain implementation rotations keep old games discoverable here. Domain-changing
-    // cutovers need a separate retirement or legacy-lineage policy before they can be supported.
+    // Domain-changing recovery uses the same operator-selected parent as the proposer.
     async fn selected_lineage(&self) -> Result<Vec<GameMetadata>, DefenderError> {
-        let lineage = select_lineage(&self.execution_provider, &self.consensus_provider).await?;
+        let lineage = select_lineage(
+            &self.execution_provider,
+            &self.consensus_provider,
+            self.config.recovery_parent,
+        )
+        .await?;
         let mut games = Vec::with_capacity(lineage.games().len());
 
         for selected in lineage.games() {

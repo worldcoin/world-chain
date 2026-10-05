@@ -46,7 +46,12 @@ where
     pub async fn scan_selected_lineage(&self) -> Result<ProposerScan, ProposerError> {
         self.config.validate()?;
 
-        let lineage = select_lineage(&self.execution_provider, &self.consensus_provider).await?;
+        let lineage = select_lineage(
+            &self.execution_provider,
+            &self.consensus_provider,
+            self.config.recovery_parent,
+        )
+        .await?;
         let selected_l2_block_number = lineage
             .games()
             .last()
