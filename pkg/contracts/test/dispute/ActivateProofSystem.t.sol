@@ -6,6 +6,7 @@ import {MultiProofGame} from "../../src/dispute/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
 import {OPStackFixtures} from "./OPStackFixtures.sol";
 
+import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 
 contract ActivateProofSystemHarness is ActivateProofSystem {
@@ -40,6 +41,18 @@ contract ActivateProofSystemTest is OPStackFixtures {
 
         vm.expectRevert("ActivateProofSystem: fresh bootstrap has anchor game");
         activation.validate(_activationConfig(true), IMultiProofGame(address(gameImpl)));
+    }
+
+    function test_validate_acceptsBlacklistedAnchor() public {
+        MultiProofGame game = _proposeAtAnchor();
+        _resolveUnchallenged(game);
+        _passAirgap(game);
+        asr.setAnchorState(game);
+
+        vm.prank(vm.addr(GUARDIAN_KEY));
+        asr.blacklistDisputeGame(IDisputeGame(address(game)));
+
+        activation.validate(_activationConfig(false), IMultiProofGame(address(gameImpl)));
     }
 
     function test_validate_rejectsRetiredAnchor() public {
