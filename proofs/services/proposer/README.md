@@ -51,6 +51,31 @@ become resolvable as `INVALID_PARENT`; the bond manager keeps proposer-owned gam
 those descendants as their parents settle, and closes them to release their bonds. Retry creation remains
 logged at warn level for operator visibility.
 
+## Recovering from an unusable anchor
+
+Restart both proposer and defender with `--recovery-parent <P>` (or `RECOVERY_PARENT=<P>`),
+where P is an eligible ancestor of the unusable anchor. While the ASR anchor is unusable,
+both services select the replacement lineage from P using the active implementation's domain.
+The proposer creates and resolves replacement games; the defender supplies their proofs.
+Existing replacement games are rediscovered across ticks and restarts.
+
+P must be a registered, proper, respected game resolved with `DEFENDER_WINS`, and its root must
+match the canonical finalized L2 root. Eligibility and root checks are repeated while P is used.
+Invalid parents or failed RPC reads stop that scan without falling back to the unusable anchor.
+The ASR sentinel and zero address cannot be recovery parents.
+
+Both services automatically resume from the ASR once it has a claim-valid anchor at a block
+above P. A replacement at the old anchor's block cannot advance the ASR; a later replacement
+must resolve and pass the registry finality delay. Remove the flag after recovery to avoid
+reusing P during a subsequent incident. `lineage.recovery_active` reports whether recovery
+selection is active, and startup logs include the configured parent.
+
+The flag does not change onchain state or bypass parent and retry checks. Replacing a blacklisted
+successful game with the same root and parent requires a new proof domain to avoid its occupied
+factory UUID. Activate that domain through governance before restarting the services. Keep the
+block interval unchanged for this recovery procedure; the flag does not reconcile cadence changes.
+If P is retired or no eligible game parent exists, onchain recovery is required.
+
 ### `root_claim`
 
 - rpc request to a consensus client - i.e. `optimism_outputAtBlock`

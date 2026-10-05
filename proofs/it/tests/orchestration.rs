@@ -22,6 +22,7 @@ use world_chain_prover_service::{ProofBackend, ProverServiceConfig};
 
 fn proposer_config() -> ProposerConfig {
     ProposerConfig {
+        recovery_parent: None,
         poll_interval: Duration::from_secs(1),
         max_resolutions_per_tick: 1,
     }

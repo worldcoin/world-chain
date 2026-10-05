@@ -30,6 +30,8 @@ pub const RPC_ENDPOINT_VERIFYING: &str = "verifying";
 pub const METRICS_WALLET_BALANCE_ETH: &str = "wallet.balance_eth";
 /// Latest finalized L2 block reported by the OP consensus client.
 pub const METRICS_L2_FINALIZED_BLOCK_NUMBER: &str = "l2.finalized_block_number";
+/// Whether lineage selection is using the configured recovery parent.
+pub const METRICS_LINEAGE_RECOVERY_ACTIVE: &str = "lineage.recovery_active";
 /// Completed outbound RPC requests.
 pub const METRICS_RPC_CLIENT_REQUESTS: &str = "rpc.client.requests";
 /// Confirmed challenge transactions.
@@ -70,6 +72,11 @@ pub const METRICS_SP1_NETWORK_BALANCE_SUFFICIENT: &str = "sp1_network_balance_su
 
 /// Registers shared metric descriptions.
 pub fn describe_metrics() {
+    metrics::describe_gauge!(
+        METRICS_LINEAGE_RECOVERY_ACTIVE,
+        metrics::Unit::Count,
+        "Whether lineage selection is using the configured recovery parent."
+    );
     metrics::describe_gauge!(
         METRICS_WALLET_BALANCE_ETH,
         metrics::Unit::Count,
@@ -177,6 +184,11 @@ pub fn describe_metrics() {
         metrics::Unit::Count,
         "SP1 range proofs bisected after the network reported them unexecutable."
     );
+}
+
+/// Records whether the service is selecting a lineage from its recovery parent.
+pub fn record_lineage_recovery_active(active: bool) {
+    metrics::gauge!(METRICS_LINEAGE_RECOVERY_ACTIVE).set(if active { 1.0 } else { 0.0 });
 }
 
 /// Records one bisection of an unexecutable SP1 range proof.

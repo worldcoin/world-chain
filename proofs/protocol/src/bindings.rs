@@ -139,6 +139,7 @@ sol! {
         function isGameBlacklisted(address game) external view returns (bool);
         function isGameRetired(address game) external view returns (bool);
         function isGameProper(address game) external view returns (bool);
+        function isGameRespected(address game) external view returns (bool);
         function isGameResolved(address game) external view returns (bool);
         function isGameFinalized(address game) external view returns (bool);
         function isGameClaimValid(address game) external view returns (bool);

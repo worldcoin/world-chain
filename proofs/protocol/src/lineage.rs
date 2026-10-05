@@ -18,6 +18,15 @@ pub struct LineageAnchor {
     pub l2_block_number: u64,
 }
 
+/// Registry eligibility and claim of an operator-selected recovery parent.
+#[derive(Debug, Clone, Copy)]
+pub struct RecoveryParent {
+    pub anchor: LineageAnchor,
+    pub root_claim: B256,
+    /// Registered, proper, respected, and resolved with `DEFENDER_WINS`.
+    pub eligible: bool,
+}
+
 /// Expected state transition at one proposal interval.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineageTransition {
@@ -104,6 +113,10 @@ impl SelectedLineage {
 /// Failure while reading or reconstructing the selected proposal lineage.
 #[derive(Debug, Error)]
 pub enum LineageError {
+    #[error("recovery parent {0} must be a registered, proper, respected defender-winning game")]
+    InvalidRecoveryParent(Address),
+    #[error("recovery parent {0} does not match the canonical finalized L2 root")]
+    NonCanonicalRecoveryParent(Address),
     #[error("contract error: {0}")]
     Contract(String),
     #[error("l2 block number overflow: parent {parent_block} + interval {block_interval}")]
@@ -129,6 +142,19 @@ pub trait LineageProvider: Send + Sync {
 
     async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError>;
 
+    /// Optional recovery reads; implementations without recovery support fail explicitly.
+    async fn recovery_parent(&self, game: Address) -> Result<RecoveryParent, LineageError> {
+        Err(LineageError::Contract(format!(
+            "recovery parent reads are unsupported for {game}"
+        )))
+    }
+
+    async fn lineage_anchor_claim_valid(&self, game: Address) -> Result<bool, LineageError> {
+        Err(LineageError::Contract(format!(
+            "anchor eligibility reads are unsupported for {game}"
+        )))
+    }
+
     async fn game_for_transition(
         &self,
         transition: LineageTransition,
@@ -144,6 +170,7 @@ pub trait LineageProvider: Send + Sync {
 pub async fn select_lineage<E, C>(
     execution: &E,
     consensus: &C,
+    recovery_parent: Option<Address>,
 ) -> Result<SelectedLineage, LineageError>
 where
     E: LineageProvider,
@@ -154,8 +181,32 @@ where
         return Err(LineageError::ZeroBlockInterval);
     }
 
-    let anchor = execution.lineage_anchor().await?;
+    let mut anchor = execution.lineage_anchor().await?;
     let finalized_block = consensus.latest_l2_finalized_block().await?;
+    world_chain_proof_metrics::record_lineage_recovery_active(false);
+    if let Some(address) = recovery_parent {
+        if address == Address::ZERO {
+            return Err(LineageError::InvalidRecoveryParent(address));
+        }
+        let recovery = execution.recovery_parent(address).await?;
+        let recovered = anchor.l2_block_number > recovery.anchor.l2_block_number
+            && execution.lineage_anchor_claim_valid(anchor.address).await?;
+        if !recovered {
+            world_chain_proof_metrics::record_lineage_recovery_active(true);
+            if !recovery.eligible {
+                return Err(LineageError::InvalidRecoveryParent(address));
+            }
+            if recovery.anchor.l2_block_number > finalized_block
+                || consensus
+                    .output_root_at_block(recovery.anchor.l2_block_number)
+                    .await?
+                    != recovery.root_claim
+            {
+                return Err(LineageError::NonCanonicalRecoveryParent(address));
+            }
+            anchor = recovery.anchor;
+        }
+    }
     let mut parent = anchor;
     let mut games = Vec::new();
 
@@ -207,6 +258,45 @@ where
             l2_block_number,
         };
     }
+}
+
+/// Reads recovery eligibility using only the standard dispute-game ABI, including legacy parents.
+pub async fn read_recovery_parent<P>(
+    provider: &P,
+    registry: &IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
+    address: Address,
+) -> Result<RecoveryParent, LineageError>
+where
+    P: Provider + Clone,
+{
+    if address == Address::ZERO || address == *registry.address() {
+        return Err(LineageError::InvalidRecoveryParent(address));
+    }
+    let game = IMultiProofGame::IMultiProofGameInstance::new(address, provider.clone());
+    let (proper, respected, status, root_claim, block_number) = provider
+        .multicall()
+        .add(registry.isGameProper(address))
+        .add(registry.isGameRespected(address))
+        .add(game.status())
+        .add(game.rootClaim())
+        .add(game.l2SequenceNumber())
+        .aggregate()
+        .await
+        .map_err(|error| {
+            LineageError::Contract(format!("read recovery parent {address}: {error}"))
+        })?;
+    Ok(RecoveryParent {
+        anchor: LineageAnchor {
+            address,
+            l2_block_number: block_number.try_into().map_err(|_| {
+                LineageError::Contract(format!(
+                    "recovery parent {address} block number overflows u64"
+                ))
+            })?,
+        },
+        root_claim,
+        eligible: proper && respected && GameStatus::try_from(status)? == GameStatus::DefenderWins,
+    })
 }
 
 /// Reads the current game-or-registry anchor sentinel.

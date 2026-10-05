@@ -3009,6 +3009,7 @@ async fn start_world_chain_proposer(
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let registered = contracts.registered_lineage_config();
     let config = ProposerConfig {
+        recovery_parent: None,
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
         max_resolutions_per_tick: ProposerConfig::default().max_resolutions_per_tick,
     };

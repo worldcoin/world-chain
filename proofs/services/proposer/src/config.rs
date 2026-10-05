@@ -1,3 +1,4 @@
+use alloy_primitives::Address;
 use std::time::Duration;
 
 use crate::ProposerError;
@@ -52,6 +53,8 @@ impl Default for BondManagerConfig {
 /// when creating a game and locking its proposer bond.
 #[derive(Debug, Clone)]
 pub struct ProposerConfig {
+    /// Eligible game to extend while recovering from an unusable ASR anchor.
+    pub recovery_parent: Option<Address>,
     /// Delay between periodic proposal attempts.
     pub poll_interval: Duration,
     /// Maximum number of game-resolution transactions submitted per proposer tick.
@@ -77,6 +80,7 @@ impl ProposerConfig {
 impl Default for ProposerConfig {
     fn default() -> Self {
         Self {
+            recovery_parent: None,
             poll_interval: Duration::from_secs(12),
             max_resolutions_per_tick: 1,
         }
