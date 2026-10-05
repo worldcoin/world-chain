@@ -142,18 +142,10 @@ pub trait LineageProvider: Send + Sync {
 
     async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError>;
 
-    /// Optional recovery reads; implementations without recovery support fail explicitly.
-    async fn recovery_parent(&self, game: Address) -> Result<RecoveryParent, LineageError> {
-        Err(LineageError::Contract(format!(
-            "recovery parent reads are unsupported for {game}"
-        )))
-    }
+    /// Reads the claim and registry eligibility of a recovery parent.
+    async fn recovery_parent(&self, game: Address) -> Result<RecoveryParent, LineageError>;
 
-    async fn lineage_anchor_claim_valid(&self, game: Address) -> Result<bool, LineageError> {
-        Err(LineageError::Contract(format!(
-            "anchor eligibility reads are unsupported for {game}"
-        )))
-    }
+    async fn lineage_anchor_claim_valid(&self, game: Address) -> Result<bool, LineageError>;
 
     async fn game_for_transition(
         &self,

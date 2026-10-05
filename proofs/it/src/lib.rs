@@ -23,7 +23,7 @@ use world_chain_proof_protocol::{
     ClaimData, ConsensusError, ConsensusProvider, GameCreation, GameStatus, InvalidationReason,
     LineageAnchor, LineageError, LineageGame, LineageProvider, LineageTransition, MAX_ATTEMPT_SCAN,
     PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane, ProposalCommitment,
-    ProposalStatus, ResolutionStatus, RootCommitment, has_threshold,
+    ProposalStatus, RecoveryParent, ResolutionStatus, RootCommitment, has_threshold,
 };
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proposer::{
@@ -340,6 +340,30 @@ impl LineageProvider for FakeExecution {
             .lock()
             .expect("fake execution mutex poisoned")
             .anchor)
+    }
+
+    async fn recovery_parent(&self, game: Address) -> Result<RecoveryParent, LineageError> {
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get(&game)
+            .ok_or(LineageError::InvalidRecoveryParent(game))?;
+        Ok(RecoveryParent {
+            anchor: LineageAnchor {
+                address: game,
+                l2_block_number: record.creation.l2_block_number,
+            },
+            root_claim: record.creation.root_claim,
+            eligible: record.state == GameLifecycle::Finalized,
+        })
+    }
+
+    async fn lineage_anchor_claim_valid(&self, game: Address) -> Result<bool, LineageError> {
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        Ok(state
+            .games_by_address
+            .get(&game)
+            .is_some_and(|record| record.state == GameLifecycle::Finalized))
     }
 
     async fn game_for_transition(
