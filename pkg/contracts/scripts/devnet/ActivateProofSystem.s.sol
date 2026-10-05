@@ -16,9 +16,11 @@ import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Registers and activates a WIP-1006 implementation after verifying that its
-///         wiring, vault and current ASR anchor allow new games to be created safely.
-/// @dev This script never changes the ASR retirement timestamp. A nonzero anchor must satisfy
-///      the same parent-validity conditions enforced by `MultiProofGame.initialize()`.
+///         wiring, vault, and ASR pointer are consistent enough for factory rotation.
+/// @dev This script never changes the ASR retirement timestamp. A nonzero anchor must still be
+///      registered, respected, and not retired. Blacklisting the current anchor is an incident
+///      recovery case: the occupied factory UUID requires a new proof domain, so this script
+///      must still be able to register the replacement implementation.
 contract ActivateProofSystem is Script {
     struct Config {
         uint256 guardianKey;
@@ -167,10 +169,6 @@ contract ActivateProofSystem is Script {
             require(
                 config.anchorStateRegistry.isGameRespected(anchorGame),
                 "ActivateProofSystem: anchor game was not respected"
-            );
-            require(
-                !config.anchorStateRegistry.isGameBlacklisted(anchorGame),
-                "ActivateProofSystem: anchor game blacklisted"
             );
             require(!config.anchorStateRegistry.isGameRetired(anchorGame), "ActivateProofSystem: anchor game retired");
             require(anchorGame.status() != GameStatus.CHALLENGER_WINS, "ActivateProofSystem: anchor game invalid");
