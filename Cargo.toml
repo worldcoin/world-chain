@@ -69,7 +69,7 @@ codegen-units = 1
 inherits = "release"
 lto = "fat"
 strip = "none"
-panic = "abort"
+panic = "unwind"
 
 [profile.dev-tracing]
 inherits = "dev"
