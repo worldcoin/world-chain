@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Script} from "forge-std/Script.sol";
+import {Governance} from "./Governance.s.sol";
 import {console} from "forge-std/console.sol";
 import {CertManager} from "@nitro-validator/CertManager.sol";
 import {ICertManager} from "@nitro-validator/ICertManager.sol";
@@ -67,9 +67,17 @@ import {NitroProofVerifier} from "../../src/dispute/nitro/NitroProofVerifier.sol
 ///           `newPcr0` reject old-image signers. Optionally revoke the old PCR
 ///           set to stop future old-image registrations. Revoke an individual
 ///           signer only if its key may be compromised.
-contract DeployNitro is Script {
-    function run() external {
-        address owner = vm.envAddress("OWNER");
+contract DeployNitro is Governance {
+    struct Deployment {
+        CertManager certManager;
+        NitroAttestationVerifier verifier;
+        NitroEnclaveKeyRegistry registry;
+        NitroProofVerifier proofVerifier;
+    }
+
+    function run() external returns (Deployment memory deployment) {
+        address owner = _safeMode() ? address(_governanceSafe()) : vm.envAddress("OWNER");
+        require(owner != address(0), "DeployNitro: owner required");
 
         vm.startBroadcast();
 
@@ -92,6 +100,7 @@ contract DeployNitro is Script {
         console.log("NitroProofVerifier:", address(proofVerifier));
 
         vm.stopBroadcast();
+        deployment = Deployment(certManager, verifier, registry, proofVerifier);
 
         _writeDeployment(
             address(p384Verifier), address(certManager), address(verifier), address(registry), address(proofVerifier)
@@ -153,6 +162,7 @@ contract DeployNitro is Script {
         }
 
         // Write each address to its own key, preserving any existing fields.
+        vm.writeJson(vm.toString(_safeMode() ? address(_governanceSafe()) : vm.envAddress("OWNER")), out, ".owner");
         vm.writeJson(vm.toString(p384Verifier), out, ".p384Verifier");
         vm.writeJson(vm.toString(certManager), out, ".certManager");
         vm.writeJson(vm.toString(nitroAttestationVerifier), out, ".nitroAttestationVerifier");

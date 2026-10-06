@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Script} from "forge-std/Script.sol";
+import {Governance} from "./Governance.s.sol";
 
 import {
     SecurityCouncilVerifier
@@ -31,7 +31,7 @@ import {
 ///      through EIP-1271, which only exists on `CompatibilityFallbackHandler`. A Safe set up with
 ///      a zero handler makes every council `verify` return false and silently disables the lane,
 ///      so this script refuses to configure one.
-contract DeployCouncilSafe is Script {
+contract DeployCouncilSafe is Governance {
     struct Deployment {
         Safe councilSafe;
         SecurityCouncilVerifier verifier;
@@ -44,8 +44,30 @@ contract DeployCouncilSafe is Script {
 
     function run() external returns (Deployment memory deployment) {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
-        address[] memory owners = vm.envAddress("COUNCIL_OWNERS", ",");
-        uint256 threshold = vm.envUint("COUNCIL_THRESHOLD");
+        address[] memory owners;
+        uint256 threshold;
+        if (_safeMode()) {
+            (uint256 firstKey, uint256 secondKey) = _signerKeys();
+            require(firstKey != 0 && secondKey != 0 && firstKey != secondKey, "Governance: two distinct keys required");
+            owners = new address[](2);
+            owners[0] = vm.addr(firstKey);
+            owners[1] = vm.addr(secondKey);
+            threshold = 2;
+        } else {
+            owners = vm.envAddress("COUNCIL_OWNERS", ",");
+            threshold = vm.envOr("COUNCIL_THRESHOLD", uint256(1));
+        }
+        address existingSafe = _safeMode() ? _safeAddress() : address(0);
+        if (_safeMode() && existingSafe != address(0)) {
+            deployment.councilSafe = _governanceSafe();
+            deployment.threshold = threshold;
+            vm.startBroadcast(privateKey);
+            deployment.verifier = new SecurityCouncilVerifier(existingSafe);
+            vm.stopBroadcast();
+            _validateCouncil(deployment);
+            _writeDeployment(deployment, owners);
+            return deployment;
+        }
         // Bump to get a fresh Safe address for the same owner set (CREATE2 salt input).
         uint256 saltNonce = vm.envOr("COUNCIL_SAFE_SALT_NONCE", uint256(0));
 
@@ -144,7 +166,25 @@ contract DeployCouncilSafe is Script {
             "DeployCouncilSafe: verifier not bound to the council Safe"
         );
 
+        if (_safeMode()) {
+            _validateSafe(deployment.councilSafe);
+        }
+        _validateCouncil(deployment);
         _writeDeployment(deployment, owners);
+    }
+
+    function _validateCouncil(Deployment memory deployment) internal view {
+        bytes32 rootId = keccak256("devnet council configuration check");
+        (bool success, bytes memory result) = address(deployment.councilSafe).staticcall(
+            abi.encodeWithSignature("getMessageHash(bytes)", abi.encode(deployment.verifier.attestationDigest(rootId)))
+        );
+        require(success && result.length == 32, "DeployCouncilSafe: compatibility handler required");
+        if (_safeMode()) {
+            require(
+                deployment.verifier.verify(_safeSignatures(abi.decode(result, (bytes32))), bytes32(0), abi.encode(rootId)),
+                "DeployCouncilSafe: council signature check failed"
+            );
+        }
     }
 
     function _writeDeployment(

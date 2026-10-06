@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Script} from "forge-std/Script.sol";
+import {Governance} from "./Governance.s.sol";
 
 import {SecurityCouncilVerifier} from "../../src/dispute/council/SecurityCouncilVerifier.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
@@ -14,25 +14,32 @@ interface ICouncilSafe {
 }
 
 /// @notice Testing-only helper that signs and submits the Security Council lane for one game.
-/// @dev Supports only a 1-of-1 council Safe; production councils require signature aggregation.
-contract SubmitSecurityCouncilProof is Script {
+/// @dev EOA mode uses the existing 1-of-1 council; Safe mode uses the governance 2-of-2.
+contract SubmitSecurityCouncilProof is Governance {
+    function _firstSignerKey() internal view returns (uint256 key) {
+        (key,) = _signerKeys();
+    }
+
     function run() external {
         IMultiProofGame game = IMultiProofGame(vm.envAddress("GAME_ADDRESS"));
-        uint256 signerKey = vm.envUint("COUNCIL_SIGNER_KEY");
+        uint256 signerKey = _safeMode() ? _firstSignerKey() : vm.envUint("COUNCIL_SIGNER_KEY");
 
         SecurityCouncilVerifier verifier = SecurityCouncilVerifier(address(game.securityCouncil()));
         ICouncilSafe council = ICouncilSafe(verifier.council());
         address signer = vm.addr(signerKey);
 
-        require(council.getThreshold() == 1, "Council threshold is not 1");
-        require(council.isOwner(signer), "Signer is not a council owner");
+        if (_safeMode()) {
+            require(address(council) == address(_governanceSafe()), "Council is not the governance Safe");
+        } else {
+            require(council.getThreshold() == 1, "Council threshold is not 1");
+            require(council.isOwner(signer), "Signer is not a council owner");
+        }
 
         bytes32 rootId = game.rootId();
         bytes32 attestationDigest = verifier.attestationDigest(rootId);
         // The Safe handler expects abi.encode(attestationDigest) wrapped as a SafeMessage.
         bytes32 safeMessageHash = council.getMessageHash(abi.encode(attestationDigest));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, safeMessageHash);
-        bytes memory proof = abi.encodePacked(r, s, v);
+        bytes memory proof = _safeMode() ? _safeSignatures(safeMessageHash) : _sign(signerKey, safeMessageHash);
 
         require(verifier.verify(proof, bytes32(0), abi.encode(rootId)), "Council proof verification failed");
 

@@ -91,3 +91,52 @@ The `FeeEscrow` contract handles the conversion of ETH to WLD for burning. Key f
 - Includes slippage protection (0.03%) to ensure fair execution
 
 The burn mechanism requires executors to implement the `IBurnCallback` interface, providing flexibility in how the ETH-to-WLD swap is performed (e.g., via Uniswap V3).
+
+## Devnet governance
+
+`GOVERNANCE_MODE=eoa` is the default. Existing EOA keys (`DGF_OWNER_KEY`,
+`GUARDIAN_KEY`, `OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY`, Nitro `OWNER` / `OWNER_KEY`)
+continue to work, and council deployment defaults to threshold one.
+
+`GOVERNANCE_MODE=safe` uses `GOVERNANCE_SAFE` and two distinct
+`GOVERNANCE_SIGNER_1_PRIVATE_KEY` / `GOVERNANCE_SIGNER_2_PRIVATE_KEY` values. The
+Safe must have exactly these two owners, threshold two and no enabled modules.
+`PRIVATE_KEY` is only the transaction relayer/deployer in this mode. Vault
+initialization and game activation execute signed Safe calls and keep the factory /
+vault ProxyAdmin owner equality check. The security council verifier must point to
+this same Safe. The compatibility fallback handler is required for ERC-1271 council
+attestations. Keys stay in the operator's environment, outside deployment records.
+
+- `just proof-deploy-council <env>` deploys the council Safe/verifier; in Safe mode it
+  uses the governance signers and can bind a new verifier to an existing `GOVERNANCE_SAFE`.
+  In EOA mode, set `COUNCIL_OWNERS` or `ADMIN_PRIVATE_KEY`; the threshold defaults to one.
+- `just proof-deploy-nitro <env>` assigns the selected owner to CertManager (including
+  its revoker), NitroAttestationVerifier and NitroEnclaveKeyRegistry.
+- `just proof-governance-call` sends `GOVERNANCE_CALLDATA` to `GOVERNANCE_TARGET`,
+  using `OWNER_KEY` in EOA mode or both Safe signatures in Safe mode. Use it for PCR
+  revocation, enclave-signer revocation, certificate administration and other privileged calls.
+- `just proof-approve-pcrs <env>` uses the same execution path; PCR inputs must be
+  48-byte hex values.
+- `just proof-submit-council` signs a game's council attestation with
+  `COUNCIL_SIGNER_KEY` for a 1-of-1 Safe in EOA mode, or both governance signers in
+  Safe mode. Set `GAME_ADDRESS`, and optionally `PRIVATE_KEY` / `PROOF_RECIPIENT`.
+
+Reused Nitro contracts require an explicit ownership handoff. Set
+`CERT_MANAGER_ADDRESS`, `NITRO_ATTESTATION_VERIFIER`, `NITRO_ENCLAVE_KEY_REGISTRY`
+(or supply the matching `<env>-nitro.json`), and `NEW_NITRO_OWNER`. Set
+`GOVERNANCE_MODE` and keys for the **current** authority, then simulate:
+
+```bash
+just dry_run=true proof-transfer-nitro-ownership alphanet
+```
+
+The recipe broadcasts by default when `dry_run` is omitted. It moves all three
+owners and the CertManager revoker, checks the wiring, and supports resuming a
+partially completed handoff. It preserves verifier addresses and existing games'
+Nitro identities. Moving Nitro authority does not revoke approved PCRs or registered
+keys. Existing games keep their council verifier; a new council address is selected
+by deploying/activating a new game implementation.
+
+The devnet repository orchestrates these settings before `just setup <network>`.
+This changes governance testing; existing proof parameters and mock bond-token
+configuration remain development settings.
