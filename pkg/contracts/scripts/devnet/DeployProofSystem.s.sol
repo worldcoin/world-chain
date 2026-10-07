@@ -125,6 +125,11 @@ contract DeployProofSystem is Governance {
                     )
                 )
             );
+            if (_preparingSafe()) {
+                // MultiProofGame reads the vault's initialized wiring in its constructor.
+                _writeDeployment(deployment, config);
+                return deployment;
+            }
         } else {
             deployment.bondVault = config.existingBondVault;
         }

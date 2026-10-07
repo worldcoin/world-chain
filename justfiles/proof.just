@@ -266,6 +266,9 @@ proof-deploy-system env="alphanet":
     else
         export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.dryrun.json"
     fi
+    if [ "${GOVERNANCE_MODE:-eoa}" = "safe" ]; then
+        export SAFE_TX_OUT="${SAFE_TX_OUT:-${PROOF_SYSTEM_DEPLOYMENT_OUT%.json}.safe.json}"
+    fi
     echo "Deploying proof system contracts (deployment → $PROOF_SYSTEM_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
         --rpc-url "$L1_RPC_URL" --rpc-timeout "${TIMEOUT:-50}" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
@@ -325,6 +328,14 @@ proof-activate-system env="alphanet":
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
+    fi
+    if [ "${GOVERNANCE_MODE:-eoa}" = "safe" ]; then
+        if [ "{{dry_run}}" = "true" ]; then
+            export SAFE_TX_OUT="${SAFE_TX_OUT:-deployments/{{env}}-activation.dryrun.safe.json}"
+        else
+            export SAFE_TX_OUT="${SAFE_TX_OUT:-deployments/{{env}}-activation.safe.json}"
+        fi
+        BROADCAST_FLAG=""
     fi
     echo "Registering and activating WIP-1006 implementation $GAME_IMPLEMENTATION (require fresh anchor: $REQUIRE_FRESH_ANCHOR)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
     cd pkg/contracts && forge script scripts/devnet/ActivateProofSystem.s.sol:ActivateProofSystem \
@@ -420,6 +431,10 @@ proof-approve-pcrs env="alphanet":
     GOVERNANCE_CALLDATA="$(cast calldata 'approvePCRSet(bytes32,bytes32,bytes32)' "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")")"
     export GOVERNANCE_CALLDATA
     just dry_run={{dry_run}} proof-governance-call
+    if [ "${GOVERNANCE_MODE:-eoa}" = "safe" ]; then
+        echo "PCR approval prepared; execute the exported transaction in Safe before using these measurements."
+        exit 0
+    fi
     if [ "{{dry_run}}" != "true" ]; then
         # Record which measurements are actually approved on this verifier. DeployNitro only
         # writes addresses, so without this the deployment file cannot tell an approved
@@ -439,7 +454,7 @@ proof-approve-pcrs env="alphanet":
         echo "PCR set approved."
     fi
 
-# A plain Safe with the ERC-1271 handler; Safe mode uses both governance signers.
+# Safe mode reuses GOVERNANCE_SAFE; the default EOA council is a 1-of-1 Safe.
 [group('proof')]
 proof-deploy-council env="alphanet":
     #!/usr/bin/env bash
@@ -468,6 +483,10 @@ proof-governance-call:
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then BROADCAST_FLAG="--broadcast"; fi
+    if [ "${GOVERNANCE_MODE:-eoa}" = "safe" ]; then
+        export SAFE_TX_OUT="${SAFE_TX_OUT:-deployments/governance.safe.json}"
+        BROADCAST_FLAG=""
+    fi
     cd pkg/contracts && forge script scripts/devnet/Governance.s.sol:ExecuteGovernance \
         --rpc-url "$L1_RPC_URL" --rpc-timeout "${TIMEOUT:-50}" $BROADCAST_FLAG --slow
 
@@ -486,8 +505,16 @@ proof-transfer-nitro-ownership env="alphanet":
     fi
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then BROADCAST_FLAG="--broadcast"; fi
+    if [ "${GOVERNANCE_MODE:-eoa}" = "safe" ]; then
+        export SAFE_TX_OUT="${SAFE_TX_OUT:-deployments/{{env}}-nitro-handoff.safe.json}"
+        BROADCAST_FLAG=""
+    fi
     (cd pkg/contracts && forge script scripts/devnet/TransferNitroOwnership.s.sol:TransferNitroOwnership \
         --rpc-url "$L1_RPC_URL" --rpc-timeout "${TIMEOUT:-50}" $BROADCAST_FLAG --slow)
+    if [ "${GOVERNANCE_MODE:-eoa}" = "safe" ]; then
+        echo "Handoff prepared; execute in Safe, then verify owners and CertManager revoker."
+        exit 0
+    fi
     if [ "{{dry_run}}" = "false" ]; then
         for contract in "$CERT_MANAGER_ADDRESS" "$NITRO_ATTESTATION_VERIFIER" "$NITRO_ENCLAVE_KEY_REGISTRY"; do
             ACTUAL_OWNER="$(cast call "$contract" 'owner()(address)' --rpc-url "$L1_RPC_URL" --rpc-timeout "${TIMEOUT:-50}")"
@@ -513,3 +540,8 @@ proof-submit-council:
     if [ "{{dry_run}}" = "false" ]; then BROADCAST_FLAG="--broadcast"; fi
     cd pkg/contracts && forge script scripts/devnet/SubmitSecurityCouncilProof.s.sol:SubmitSecurityCouncilProof \
         --rpc-url "$L1_RPC_URL" --rpc-timeout "${TIMEOUT:-50}" $BROADCAST_FLAG --slow
+
+# Prepare calldata, or propose a council transaction with one owner's wallet; never execute.
+[group('proof')]
+safe-operation *args:
+    python3 scripts/safe-operation.py "$@"

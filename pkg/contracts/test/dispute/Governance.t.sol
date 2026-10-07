@@ -164,6 +164,8 @@ contract GovernanceTest is OPStackFixtures {
     function setUp() public override {
         super.setUp();
         executor = new GovernanceHarness();
+        vm.setEnv("SAFE_TX_OUT", "");
+        vm.setEnv("COUNCIL_SIGNATURES", "");
         vm.setEnv("PRIVATE_KEY", vm.toString(RELAYER_KEY));
         vm.setEnv("COUNCIL_DEPLOYMENT_OUT", "");
         CouncilDeploymentHarness deployer = new CouncilDeploymentHarness();
@@ -196,8 +198,8 @@ contract GovernanceTest is OPStackFixtures {
     function test_environmentSafeConfigurationAndCouncilCheck() public {
         vm.setEnv("GOVERNANCE_MODE", "safe");
         vm.setEnv("GOVERNANCE_SAFE", vm.toString(address(safe)));
-        vm.setEnv("GOVERNANCE_SIGNER_1_PRIVATE_KEY", vm.toString(FIRST_KEY));
-        vm.setEnv("GOVERNANCE_SIGNER_2_PRIVATE_KEY", vm.toString(SECOND_KEY));
+        vm.setEnv("GOVERNANCE_SIGNER_1_PRIVATE_KEY", "");
+        vm.setEnv("GOVERNANCE_SIGNER_2_PRIVATE_KEY", "");
         vm.setEnv("SECURITY_COUNCIL_VERIFIER", vm.toString(address(council)));
         CheckGovernance checker = new CheckGovernance();
         checker.run();
@@ -205,6 +207,91 @@ contract GovernanceTest is OPStackFixtures {
         vm.expectRevert("Governance: invalid mode");
         checker.run();
         vm.setEnv("GOVERNANCE_MODE", "eoa");
+    }
+
+    function test_preparesSafeCallsWithoutKeysOrExecution() public {
+        vm.setEnv("SAFE_TX_OUT", "cache/governance-test.safe.json");
+        executor.configure(true, address(safe), 0, 0);
+        bytes memory data = abi.encodeWithSignature("setInitBond(uint32,uint256)", uint32(1), uint256(42));
+        uint256 beforeBond = dgf.initBonds(GameType.wrap(1));
+        executor.execute(0, address(dgf), data);
+        executor.execute(0, address(dgf), data);
+        string memory json = vm.readFile("cache/governance-test.safe.json");
+        assertEq(vm.parseJsonString(json, ".chainId"), vm.toString(block.chainid));
+        assertEq(vm.parseJsonAddress(json, ".meta.createdFromSafeAddress"), address(safe));
+        assertEq(vm.parseJsonAddress(json, ".transactions[0].to"), address(dgf));
+        assertEq(vm.parseJsonBytes(json, ".transactions[1].data"), data);
+        assertEq(dgf.initBonds(GameType.wrap(1)), beforeBond);
+        assertEq(safe.nonce(), 0);
+        vm.setEnv("SAFE_TX_OUT", "");
+    }
+
+    function test_reusesCouncilSafeWithoutSignerKeys() public {
+        CouncilDeploymentHarness deployer = new CouncilDeploymentHarness();
+        deployer.configure(true, address(safe), 0, 0);
+        DeployCouncilSafe.Deployment memory deployed = deployer.run();
+        assertEq(address(deployed.councilSafe), address(safe));
+        assertEq(deployed.verifier.council(), address(safe));
+        assertEq(safe.nonce(), 0);
+    }
+
+    function test_safeVaultAndActivationApprovalCheckpoints() public {
+        vm.prank(address(safe));
+        dgf.setImplementation(WC_GAME_TYPE, IDisputeGame(address(0)));
+        vm.prank(address(safe));
+        asr.setRespectedGameType(GameType.wrap(1));
+        SafeDeploymentHarness deployer = new SafeDeploymentHarness();
+        deployer.configure(true, address(safe), 0, 0);
+        DeployProofSystem.Config memory config = _deploymentConfig();
+        deployer.setConfig(config);
+        vm.setEnv("SAFE_TX_OUT", "cache/vault-test.safe.json");
+        DeployProofSystem.Deployment memory deployed = deployer.run();
+        assertEq(address(deployed.gameImpl), address(0));
+        assertEq(safe.nonce(), 0);
+        string memory vaultJson = vm.readFile("cache/vault-test.safe.json");
+        vm.setEnv("SAFE_TX_OUT", "");
+        executor.execute(
+            0,
+            vm.parseJsonAddress(vaultJson, ".transactions[0].to"),
+            vm.parseJsonBytes(vaultJson, ".transactions[0].data")
+        );
+        config.existingBondVault = deployed.bondVault;
+        deployer.setConfig(config);
+        deployed = deployer.run();
+        assertEq(address(deployed.bondVault.token()), address(bondToken));
+        SafeActivationHarness activation = new SafeActivationHarness();
+        activation.configure(true, address(safe), 0, 0);
+        activation.setConfig(
+            ActivateProofSystem.Config({
+                guardianKey: 0,
+                dgfOwnerKey: 0,
+                disputeGameFactory: dgf,
+                anchorStateRegistry: asr,
+                systemConfig: ISystemConfig(address(systemConfig)),
+                proxyAdmin: proxyAdmin,
+                bondToken: bondToken,
+                gameImplementation: IMultiProofGame(address(deployed.gameImpl)),
+                requireFreshAnchor: true
+            })
+        );
+        vm.setEnv("SAFE_TX_OUT", "cache/activation-test.safe.json");
+        activation.run();
+        assertEq(address(dgf.gameImpls(WC_GAME_TYPE)), address(0));
+        assertEq(asr.respectedGameType().raw(), 1);
+        assertEq(safe.nonce(), 1);
+        string memory activationJson = vm.readFile("cache/activation-test.safe.json");
+        vm.setEnv("SAFE_TX_OUT", "");
+        for (uint256 i; i < 3; i++) {
+            string memory prefix = string.concat(".transactions[", vm.toString(i), "]");
+            executor.execute(
+                0,
+                vm.parseJsonAddress(activationJson, string.concat(prefix, ".to")),
+                vm.parseJsonBytes(activationJson, string.concat(prefix, ".data"))
+            );
+        }
+        assertEq(address(dgf.gameImpls(WC_GAME_TYPE)), address(deployed.gameImpl));
+        assertEq(asr.respectedGameType().raw(), 1006);
+        assertEq(safe.nonce(), 4);
     }
 
     function test_safeRejectsDuplicateSigners() public {
@@ -334,8 +421,15 @@ contract GovernanceTest is OPStackFixtures {
         vm.setEnv("GAME_ADDRESS", vm.toString(address(game)));
         CouncilSubmissionHarness submission = new CouncilSubmissionHarness();
         submission.configure(true, address(safe), FIRST_KEY, SECOND_KEY);
+        bytes32 messageHash = council.attestationDigest(game.rootId());
+        (bool success, bytes memory result) =
+            address(safe).staticcall(abi.encodeWithSignature("getMessageHash(bytes)", abi.encode(messageHash)));
+        assertTrue(success);
+        vm.setEnv("COUNCIL_SIGNATURES", vm.toString(executor.signatures(abi.decode(result, (bytes32)))));
+        submission.configure(true, address(safe), 0, 0);
         submission.run();
         assertEq(Bitmap.unwrap(game.proofBitmap()), 4);
+        vm.setEnv("COUNCIL_SIGNATURES", "");
     }
 
     function _deploymentConfig() internal view returns (DeployProofSystem.Config memory config) {

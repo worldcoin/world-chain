@@ -68,6 +68,7 @@ contract TransferNitroOwnership is Governance {
                 ownerKey, address(registry), abi.encodeWithSignature("transferOwnership(address)", newOwner)
             );
         }
+        if (_preparingSafe()) return;
         require(
             certManager.owner() == newOwner && certManager.revoker() == newOwner,
             "Nitro handoff: CertManager handoff failed"

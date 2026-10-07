@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Script} from "forge-std/Script.sol";
 import {Safe} from "@safe-global/safe-contracts/contracts/Safe.sol";
 import {Enum} from "@safe-global/safe-contracts/contracts/common/Enum.sol";
+import {console} from "forge-std/console.sol";
 
 /// @notice Shared EOA / 2-of-2 Safe execution for devnet administration.
 abstract contract Governance is Script {
@@ -27,13 +28,22 @@ abstract contract Governance is Script {
     function _validateSafe(Safe account) internal view {
         require(address(account).code.length > 0, "Governance: Safe has no code");
         require(account.getThreshold() == 2 && account.getOwners().length == 2, "Governance: expected 2-of-2 Safe");
-        (uint256 firstKey, uint256 secondKey) = _signerKeys();
-        require(firstKey != 0 && secondKey != 0 && firstKey != secondKey, "Governance: two distinct keys required");
-        require(
-            account.isOwner(vm.addr(firstKey)) && account.isOwner(vm.addr(secondKey)), "Governance: signer mismatch"
-        );
         (address[] memory modules,) = account.getModulesPaginated(address(1), 1);
         require(modules.length == 0, "Governance: modules bypass threshold");
+        bytes memory message = abi.encode(keccak256("devnet council configuration check"));
+        bytes32 expected = keccak256(
+            abi.encodePacked(
+                hex"1901",
+                account.domainSeparator(),
+                keccak256(abi.encode(keccak256("SafeMessage(bytes message)"), keccak256(message)))
+            )
+        );
+        (bool success, bytes memory result) =
+            address(account).staticcall(abi.encodeWithSignature("getMessageHash(bytes)", message));
+        require(
+            success && result.length == 32 && abi.decode(result, (bytes32)) == expected,
+            "Governance: compatibility handler required"
+        );
     }
 
     function _safeAddress() internal view virtual returns (address) {
@@ -55,8 +65,46 @@ abstract contract Governance is Script {
 
     function _safeSignatures(bytes32 digest) internal view returns (bytes memory) {
         (uint256 firstKey, uint256 secondKey) = _signerKeys();
+        require(firstKey != 0 && secondKey != 0 && firstKey != secondKey, "Governance: two distinct keys required");
+        Safe account = _governanceSafe();
+        require(
+            account.isOwner(vm.addr(firstKey)) && account.isOwner(vm.addr(secondKey)), "Governance: signer mismatch"
+        );
         if (vm.addr(firstKey) > vm.addr(secondKey)) (firstKey, secondKey) = (secondKey, firstKey);
         return bytes.concat(_sign(firstKey, digest), _sign(secondKey, digest));
+    }
+
+    function _preparingSafe() internal view returns (bool) {
+        return _safeMode() && bytes(vm.envOr("SAFE_TX_OUT", string(""))).length != 0;
+    }
+
+    string private preparedTransactions;
+
+    function _prepareCall(address target, bytes memory data) internal {
+        _governanceSafe();
+        if (bytes(preparedTransactions).length != 0) preparedTransactions = string.concat(preparedTransactions, ",");
+        preparedTransactions = string.concat(
+            preparedTransactions,
+            '{"to":"',
+            vm.toString(target),
+            '","value":"0","data":"',
+            vm.toString(data),
+            '","contractMethod":null,"contractInputsValues":null}'
+        );
+        string memory out = vm.envString("SAFE_TX_OUT");
+        vm.writeFile(
+            out,
+            string.concat(
+                '{"version":"1.0","chainId":"',
+                vm.toString(block.chainid),
+                '","createdAt":0,"meta":{"name":"Devnet governance","createdFromSafeAddress":"',
+                vm.toString(_safeAddress()),
+                '"},"transactions":[',
+                preparedTransactions,
+                "]}"
+            )
+        );
+        console.log("Safe approval required; import into Transaction Builder:", out);
     }
 
     function _executeGovernance(uint256 eoaKey, address target, bytes memory data) internal {
@@ -69,6 +117,10 @@ abstract contract Governance is Script {
             if (!success) {
                 assembly ("memory-safe") { revert(add(result, 32), mload(result)) }
             }
+            return;
+        }
+        if (_preparingSafe()) {
+            _prepareCall(target, data);
             return;
         }
         Safe account = _governanceSafe();
@@ -111,12 +163,5 @@ contract CheckGovernance is Governance {
         (success, result) = address(account)
             .staticcall(abi.encodeWithSignature("getMessageHash(bytes)", abi.encode(abi.decode(result, (bytes32)))));
         require(success && result.length == 32, "Governance: compatibility handler required");
-        bytes memory signatures = _safeSignatures(abi.decode(result, (bytes32)));
-        (success, result) = verifier.staticcall(
-            abi.encodeWithSignature("verify(bytes,bytes32,bytes)", signatures, bytes32(0), abi.encode(rootId))
-        );
-        require(
-            success && result.length == 32 && abi.decode(result, (bool)), "Governance: council signature check failed"
-        );
     }
 }

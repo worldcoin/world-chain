@@ -65,6 +65,7 @@ contract NitroGovernanceTest is Test {
     GovernanceHarness internal executor;
 
     function setUp() public {
+        vm.setEnv("SAFE_TX_OUT", "");
         vm.setEnv("PRIVATE_KEY", vm.toString(uint256(0xCAFE)));
         vm.setEnv("OWNER", vm.toString(vm.addr(ADMIN_KEY)));
         vm.setEnv("NITRO_DEPLOYMENT_OUT", "");
@@ -110,6 +111,23 @@ contract NitroGovernanceTest is Test {
                 NitroAttestationVerifier.approvePCRSet, (bytes32(uint256(1)), bytes32(uint256(2)), bytes32(uint256(3)))
             )
         );
+    }
+
+    function test_preparesPCRApprovalWithoutExecuting() public {
+        deployer.configure(true, address(safe), 0, 0);
+        DeployNitro.Deployment memory deployed = deployer.run();
+        executor.configure(true, address(safe), 0, 0);
+        vm.setEnv("SAFE_TX_OUT", "cache/nitro-test.safe.json");
+        executor.execute(
+            0,
+            address(deployed.verifier),
+            abi.encodeCall(
+                NitroAttestationVerifier.approvePCRSet, (bytes32(uint256(1)), bytes32(uint256(2)), bytes32(uint256(3)))
+            )
+        );
+        assertFalse(deployed.verifier.isPCRSetApproved(bytes32(uint256(1)), bytes32(uint256(2)), bytes32(uint256(3))));
+        assertEq(safe.nonce(), 0);
+        vm.setEnv("SAFE_TX_OUT", "");
     }
 
     function test_handoffBothDirectionsAndRetry() public {

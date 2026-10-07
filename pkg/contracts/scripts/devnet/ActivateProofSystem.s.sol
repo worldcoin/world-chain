@@ -57,6 +57,17 @@ contract ActivateProofSystem is Governance {
             abi.encodeCall(IDisputeGameFactory.setInitBond, (GameTypes.MULTI_PROOF_GAME_TYPE, 0))
         );
 
+        if (_preparingSafe()) {
+            if (config.anchorStateRegistry.respectedGameType().raw() != GameTypes.MULTI_PROOF_GAME_TYPE.raw()) {
+                _executeGovernance(
+                    config.guardianKey,
+                    address(config.anchorStateRegistry),
+                    abi.encodeCall(IAnchorStateRegistry.setRespectedGameType, (GameTypes.MULTI_PROOF_GAME_TYPE))
+                );
+            }
+            return gameImpl;
+        }
+
         require(
             address(config.disputeGameFactory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE)) == address(gameImpl),
             "ActivateProofSystem: game implementation not registered"

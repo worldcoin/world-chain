@@ -41,15 +41,12 @@ import {NitroProofVerifier} from "../../src/dispute/nitro/NitroProofVerifier.sol
 ///      for every approved EIF. The raw PCRs are the 48-byte SHA-384 hashes
 ///      reported by `nitro-cli describe-eif`.
 ///
-///      ## Operator pre-warm step (required before first registerKey)
+///      ## Certificate prewarming before first registerKey
 ///      `CertManager` caches verified certificates so the expensive X.509 +
-///      P-384 chain check is paid only once per intermediate. Operators MUST
-///      pre-warm by calling `verifyCACertWithHints(cert, parentCertHash, hints)`
-///      for every intermediate in the AWS Nitro PKI (root → top-level
-///      intermediate → … → leaf's immediate issuer) in separate transactions
-///      before any user calls `NitroEnclaveKeyRegistry.registerKey`.
-///      Use `lib/nitro-validator/tools/hinted_attestation_calls.js` to
-///      generate the full call sequence with pre-computed hints.
+///      P-384 chain check is paid only once per intermediate. The Nitro proof
+///      worker handles this automatically at startup with `AUTO_REGISTER=true`,
+///      before registering its enclave signer. Manual operators can instead use
+///      `lib/nitro-validator/tools/hinted_attestation_calls.js` for the call sequence.
 ///
 ///      ## Enclave image upgrade flow
 ///      When a new enclave image (EIF) is built:
@@ -106,42 +103,11 @@ contract DeployNitro is Governance {
             address(p384Verifier), address(certManager), address(verifier), address(registry), address(proofVerifier)
         );
 
-        // ════════════════════════════════════════════════════════════════════
-        // IMPORTANT: NEXT STEP — pre-warm CertManager *before* any user call
-        // ════════════════════════════════════════════════════════════════════
-        // CertManager caches verified X.509 certs so the expensive chain check
-        // is paid once per intermediate, not once per attestation. Skipping
-        // the pre-warm means the FIRST `NitroEnclaveKeyRegistry.registerKey`
-        // call will attempt full chain validation inside a single tx and OOG.
-        //
-        // Use `lib/nitro-validator/tools/hinted_attestation_calls.js` to
-        // generate the full pre-warm + registration call sequence with hints.
-        //
-        // Owner script outline (run before opening up registerKey):
-        //
-        //   bytes memory rootHints = <p384_hints.js cert --cert root.der --pubkey root_pubkey.hex>;
-        //   bytes32 rootHash = certManager.verifyCACertWithHints(rootCertDer, 0, rootHints);
-        //   bytes memory imHints = <p384_hints.js cert --cert im.der --pubkey rootPubKey.hex>;
-        //   bytes32 imHash   = certManager.verifyCACertWithHints(intermediateDer, rootHash, imHints);
-        //   bytes memory issHints = <p384_hints.js cert --cert iss.der --pubkey imPubKey.hex>;
-        //   bytes32 issHash  = certManager.verifyCACertWithHints(issuerDer, imHash, issHints);
-        //   // …repeat for every additional intermediate, parent-hash chained.
-        //
-        // Then approve at least one PCR set so verifyAttestation can succeed:
-        //
-        //   verifier.approvePCRSet(
-        //       keccak256(rawPcr0), keccak256(rawPcr1), keccak256(rawPcr2)
-        //   );
-        //
-        // (rawPcr* are the 48-byte SHA-384 values from `nitro-cli describe-eif`.)
-        // ════════════════════════════════════════════════════════════════════
         console.log("");
-        console.log("NEXT STEPS (owner) -- mandatory before any registerKey call:");
-        console.log("  1. certManager.verifyCACertWithHints(cert, parentHash, hints) for each cert");
-        console.log("     in the AWS Nitro PKI chain (root -> intermediates -> issuer).");
-        console.log("     Use tools/hinted_attestation_calls.js to generate calls + hints.");
-        console.log("     Without this, the first registerKey will OOG.");
-        console.log("  2. verifier.approvePCRSet(pcr0, pcr1, pcr2) for each approved EIF.");
+        console.log("NEXT STEPS:");
+        console.log("  1. Owner: approvePCRSet(keccak256(rawPCR0), keccak256(rawPCR1), keccak256(rawPCR2)).");
+        console.log("  2. Start the Nitro proof worker with AUTO_REGISTER=true.");
+        console.log("     It prewarms CertManager and registers the enclave signer automatically.");
     }
 
     /// @notice Writes deployed addresses to a JSON file if NITRO_DEPLOYMENT_OUT is set.

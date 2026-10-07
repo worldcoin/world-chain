@@ -22,7 +22,10 @@ contract SubmitSecurityCouncilProof is Governance {
 
     function run() external {
         IMultiProofGame game = IMultiProofGame(vm.envAddress("GAME_ADDRESS"));
-        uint256 signerKey = _safeMode() ? _firstSignerKey() : vm.envUint("COUNCIL_SIGNER_KEY");
+        bytes memory suppliedProof = vm.envOr("COUNCIL_SIGNATURES", bytes(""));
+        uint256 signerKey = _safeMode()
+            ? (suppliedProof.length == 0 ? _firstSignerKey() : vm.envUint("PRIVATE_KEY"))
+            : vm.envUint("COUNCIL_SIGNER_KEY");
 
         SecurityCouncilVerifier verifier = SecurityCouncilVerifier(address(game.securityCouncil()));
         ICouncilSafe council = ICouncilSafe(verifier.council());
@@ -39,7 +42,9 @@ contract SubmitSecurityCouncilProof is Governance {
         bytes32 attestationDigest = verifier.attestationDigest(rootId);
         // The Safe handler expects abi.encode(attestationDigest) wrapped as a SafeMessage.
         bytes32 safeMessageHash = council.getMessageHash(abi.encode(attestationDigest));
-        bytes memory proof = _safeMode() ? _safeSignatures(safeMessageHash) : _sign(signerKey, safeMessageHash);
+        bytes memory proof = suppliedProof.length != 0
+            ? suppliedProof
+            : (_safeMode() ? _safeSignatures(safeMessageHash) : _sign(signerKey, safeMessageHash));
 
         require(verifier.verify(proof, bytes32(0), abi.encode(rootId)), "Council proof verification failed");
 
