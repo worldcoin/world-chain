@@ -1,9 +1,9 @@
 {
-  "p384Verifier": "0x937f4d3B2560dCd5F5Bc20a6cA4C34E3555C27bA",
-  "certManager": "0x6Dde293815EEe33522CAA5e31705a2EB323dbC58",
-  "nitroAttestationVerifier": "0xbabc1a3B2b239C3b73008a8f8B7D2800e40911BA",
-  "nitroEnclaveKeyRegistry": "0xbD9536a734756A92f7598CB6e4f837273Fc7A300",
-  "nitroProofVerifier": "0x1E21Ac0cdC246ED3A6f705d2a1EE923d02213649",
+  "p384Verifier": "0xE5Da4f6D83c7954b988973AE77c944ea63128438",
+  "certManager": "0xb4F086822516adB5B50b9a622cd1D49e6c5F5260",
+  "nitroAttestationVerifier": "0xa22d3dDC3BF4fE4329F4dF93A52d89FCDa05DE4E",
+  "nitroEnclaveKeyRegistry": "0x8242A5Dc01B0B181a40582d943349bbc2475D8ab",
+  "nitroProofVerifier": "0x4D7313543cF99712223733F6f20B2f4701AE2ED6",
   "approvedPCRSets": [
     {
       "verifier": "0xbabc1a3B2b239C3b73008a8f8B7D2800e40911BA",
@@ -35,5 +35,6 @@
       "pcr1": "0xab92a79f22cbca162b415c97f3406327ab858f9a73ffd4f7720710529eee87f085d21c3dd2819ef63263b0dad0b4a9d6",
       "pcr2": "0xaf4a041a0fb5566cf3cf7fed205acd80315aaa22566681e812bc8ec26a7c1d617041ce23d94142be5ab0dbd3fc479148"
     }
-  ]
+  ],
+  "owner": "0x3EEAC67cf59Eb61A995F9F34859F042DA819E27A"
 }
