@@ -133,6 +133,14 @@ to the same Safe as the owners and guardian.
   `--browser` when appropriate. No signature files or shared owner keys are needed.
   Nonce conflicts fail before signing; `council-submit --nonce <unused-nonce>` can
   queue after existing proposals. The tool never executes a transaction.
+- When using MetaMask as a standard EOA executor,
+  [revert smart account functionality](https://support.metamask.io/configure/accounts/switch-to-or-revert-from-a-smart-account/)
+  for that account on Sepolia and confirm the revocation transaction. Disabling
+  smart account requests alone does not clear existing EIP-7702 delegation. Check
+  `cast code <owner> --rpc-url "$L1_RPC_URL" --rpc-timeout 20`: standard EOA code is
+  `0x`; `0xef0100...` indicates an active delegation. Safe still enforces its
+  two-owner threshold. The executing wallet estimates outer transaction gas;
+  Transaction Builder files only supply the calls.
 - Council proposals support Sepolia Safes 1.3.0, 1.4.1 and 1.5.0. Library addresses
   and code hashes are pinned to the official Safe deployment registry. Other
   versions fail explicitly until their audited library entries are added.
