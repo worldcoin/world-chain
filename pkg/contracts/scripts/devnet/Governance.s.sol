@@ -58,6 +58,10 @@ abstract contract Governance is Script {
         return vm.envUint("PRIVATE_KEY");
     }
 
+    function _safeTxOut() internal view virtual returns (string memory) {
+        return vm.envOr("SAFE_TX_OUT", string(""));
+    }
+
     function _sign(uint256 key, bytes32 digest) internal pure returns (bytes memory) {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
         return abi.encodePacked(r, s, v);
@@ -75,7 +79,7 @@ abstract contract Governance is Script {
     }
 
     function _preparingSafe() internal view returns (bool) {
-        return _safeMode() && bytes(vm.envOr("SAFE_TX_OUT", string(""))).length != 0;
+        return _safeMode() && bytes(_safeTxOut()).length != 0;
     }
 
     string private preparedTransactions;
@@ -91,7 +95,7 @@ abstract contract Governance is Script {
             vm.toString(data),
             '","contractMethod":null,"contractInputsValues":null}'
         );
-        string memory out = vm.envString("SAFE_TX_OUT");
+        string memory out = _safeTxOut();
         vm.writeFile(
             out,
             string.concat(

@@ -22,12 +22,22 @@ abstract contract TestGovernanceConfig is Governance {
     address internal safeAddress;
     uint256 internal firstKey = 0xA11CE;
     uint256 internal secondKey = 0xB0B;
+    string internal safeTxOut;
 
     function configure(bool mode, address account, uint256 first, uint256 second) public {
         safeMode = mode;
         safeAddress = account;
         firstKey = first;
         secondKey = second;
+    }
+
+    function setSafeTxOut(string memory path) public {
+        safeTxOut = path;
+    }
+
+    // Process-wide environment mutations race between parallel Forge tests.
+    function _safeTxOut() internal view virtual override returns (string memory) {
+        return safeTxOut;
     }
 
     function _safeMode() internal view virtual override returns (bool) {
@@ -48,6 +58,10 @@ abstract contract TestGovernanceConfig is Governance {
 }
 
 contract CouncilDeploymentHarness is DeployCouncilSafe, TestGovernanceConfig {
+    function _safeTxOut() internal view override(Governance, TestGovernanceConfig) returns (string memory) {
+        return safeTxOut;
+    }
+
     function _safeMode() internal view override(Governance, TestGovernanceConfig) returns (bool) {
         return safeMode;
     }
@@ -66,6 +80,10 @@ contract CouncilDeploymentHarness is DeployCouncilSafe, TestGovernanceConfig {
 }
 
 contract CouncilSubmissionHarness is SubmitSecurityCouncilProof, TestGovernanceConfig {
+    function _safeTxOut() internal view override(Governance, TestGovernanceConfig) returns (string memory) {
+        return safeTxOut;
+    }
+
     function _safeMode() internal view override(Governance, TestGovernanceConfig) returns (bool) {
         return safeMode;
     }
@@ -84,6 +102,10 @@ contract CouncilSubmissionHarness is SubmitSecurityCouncilProof, TestGovernanceC
 }
 
 contract SafeDeploymentHarness is DeployProofSystem, TestGovernanceConfig {
+    function _safeTxOut() internal view override(Governance, TestGovernanceConfig) returns (string memory) {
+        return safeTxOut;
+    }
+
     function _safeMode() internal view override(Governance, TestGovernanceConfig) returns (bool) {
         return safeMode;
     }
@@ -112,6 +134,10 @@ contract SafeDeploymentHarness is DeployProofSystem, TestGovernanceConfig {
 }
 
 contract SafeActivationHarness is ActivateProofSystem, TestGovernanceConfig {
+    function _safeTxOut() internal view override(Governance, TestGovernanceConfig) returns (string memory) {
+        return safeTxOut;
+    }
+
     function _safeMode() internal view override(Governance, TestGovernanceConfig) returns (bool) {
         return safeMode;
     }
@@ -164,7 +190,6 @@ contract GovernanceTest is OPStackFixtures {
     function setUp() public override {
         super.setUp();
         executor = new GovernanceHarness();
-        vm.setEnv("SAFE_TX_OUT", "");
         vm.setEnv("COUNCIL_SIGNATURES", "");
         vm.setEnv("PRIVATE_KEY", vm.toString(RELAYER_KEY));
         vm.setEnv("COUNCIL_DEPLOYMENT_OUT", "");
@@ -210,7 +235,7 @@ contract GovernanceTest is OPStackFixtures {
     }
 
     function test_preparesSafeCallsWithoutKeysOrExecution() public {
-        vm.setEnv("SAFE_TX_OUT", "cache/governance-test.safe.json");
+        executor.setSafeTxOut("cache/governance-test.safe.json");
         executor.configure(true, address(safe), 0, 0);
         bytes memory data = abi.encodeWithSignature("setInitBond(uint32,uint256)", uint32(1), uint256(42));
         uint256 beforeBond = dgf.initBonds(GameType.wrap(1));
@@ -223,7 +248,7 @@ contract GovernanceTest is OPStackFixtures {
         assertEq(vm.parseJsonBytes(json, ".transactions[1].data"), data);
         assertEq(dgf.initBonds(GameType.wrap(1)), beforeBond);
         assertEq(safe.nonce(), 0);
-        vm.setEnv("SAFE_TX_OUT", "");
+        executor.setSafeTxOut("");
     }
 
     function test_reusesCouncilSafeWithoutSignerKeys() public {
@@ -244,12 +269,12 @@ contract GovernanceTest is OPStackFixtures {
         deployer.configure(true, address(safe), 0, 0);
         DeployProofSystem.Config memory config = _deploymentConfig();
         deployer.setConfig(config);
-        vm.setEnv("SAFE_TX_OUT", "cache/vault-test.safe.json");
+        deployer.setSafeTxOut("cache/vault-test.safe.json");
         DeployProofSystem.Deployment memory deployed = deployer.run();
         assertEq(address(deployed.gameImpl), address(0));
         assertEq(safe.nonce(), 0);
         string memory vaultJson = vm.readFile("cache/vault-test.safe.json");
-        vm.setEnv("SAFE_TX_OUT", "");
+        deployer.setSafeTxOut("");
         executor.execute(
             0,
             vm.parseJsonAddress(vaultJson, ".transactions[0].to"),
@@ -274,13 +299,13 @@ contract GovernanceTest is OPStackFixtures {
                 requireFreshAnchor: true
             })
         );
-        vm.setEnv("SAFE_TX_OUT", "cache/activation-test.safe.json");
+        activation.setSafeTxOut("cache/activation-test.safe.json");
         activation.run();
         assertEq(address(dgf.gameImpls(WC_GAME_TYPE)), address(0));
         assertEq(asr.respectedGameType().raw(), 1);
         assertEq(safe.nonce(), 1);
         string memory activationJson = vm.readFile("cache/activation-test.safe.json");
-        vm.setEnv("SAFE_TX_OUT", "");
+        activation.setSafeTxOut("");
         for (uint256 i; i < 3; i++) {
             string memory prefix = string.concat(".transactions[", vm.toString(i), "]");
             executor.execute(

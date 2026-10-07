@@ -12,6 +12,10 @@ import {NitroAttestationVerifier} from "../../src/dispute/nitro/NitroAttestation
 import {Safe} from "@safe-global/safe-contracts/contracts/Safe.sol";
 
 contract NitroDeploymentHarness is DeployNitro, TestGovernanceConfig {
+    function _safeTxOut() internal view override(Governance, TestGovernanceConfig) returns (string memory) {
+        return safeTxOut;
+    }
+
     function _safeMode() internal view override(Governance, TestGovernanceConfig) returns (bool) {
         return safeMode;
     }
@@ -30,6 +34,10 @@ contract NitroDeploymentHarness is DeployNitro, TestGovernanceConfig {
 }
 
 contract NitroHandoffHarness is TransferNitroOwnership, TestGovernanceConfig {
+    function _safeTxOut() internal view override(Governance, TestGovernanceConfig) returns (string memory) {
+        return safeTxOut;
+    }
+
     Config internal config;
 
     function setConfig(Config memory value) external {
@@ -65,7 +73,6 @@ contract NitroGovernanceTest is Test {
     GovernanceHarness internal executor;
 
     function setUp() public {
-        vm.setEnv("SAFE_TX_OUT", "");
         vm.setEnv("PRIVATE_KEY", vm.toString(uint256(0xCAFE)));
         vm.setEnv("OWNER", vm.toString(vm.addr(ADMIN_KEY)));
         vm.setEnv("NITRO_DEPLOYMENT_OUT", "");
@@ -117,7 +124,7 @@ contract NitroGovernanceTest is Test {
         deployer.configure(true, address(safe), 0, 0);
         DeployNitro.Deployment memory deployed = deployer.run();
         executor.configure(true, address(safe), 0, 0);
-        vm.setEnv("SAFE_TX_OUT", "cache/nitro-test.safe.json");
+        executor.setSafeTxOut("cache/nitro-test.safe.json");
         executor.execute(
             0,
             address(deployed.verifier),
@@ -127,7 +134,7 @@ contract NitroGovernanceTest is Test {
         );
         assertFalse(deployed.verifier.isPCRSetApproved(bytes32(uint256(1)), bytes32(uint256(2)), bytes32(uint256(3))));
         assertEq(safe.nonce(), 0);
-        vm.setEnv("SAFE_TX_OUT", "");
+        executor.setSafeTxOut("");
     }
 
     function test_handoffBothDirectionsAndRetry() public {
