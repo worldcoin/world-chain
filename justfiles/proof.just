@@ -467,7 +467,8 @@ proof-deploy-council env="alphanet":
     fi
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
-        BROADCAST_FLAG="--broadcast"
+        # Use RPC gas estimates because local EVM pricing can lag L1 upgrades.
+        BROADCAST_FLAG="--broadcast --skip-simulation"
         export COUNCIL_DEPLOYMENT_OUT="deployments/{{env}}-council.json"
     else
         export COUNCIL_DEPLOYMENT_OUT="deployments/{{env}}-council.dryrun.json"
