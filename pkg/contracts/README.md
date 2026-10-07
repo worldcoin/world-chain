@@ -91,3 +91,88 @@ The `FeeEscrow` contract handles the conversion of ETH to WLD for burning. Key f
 - Includes slippage protection (0.03%) to ensure fair execution
 
 The burn mechanism requires executors to implement the `IBurnCallback` interface, providing flexibility in how the ETH-to-WLD swap is performed (e.g., via Uniswap V3).
+
+## Devnet governance
+
+`GOVERNANCE_MODE=eoa` is the default. Existing EOA keys (`DGF_OWNER_KEY`,
+`GUARDIAN_KEY`, `OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY`, Nitro `OWNER` / `OWNER_KEY`)
+continue to work, and council deployment defaults to threshold one.
+
+`GOVERNANCE_MODE=safe` uses a manually created `GOVERNANCE_SAFE` with two owners,
+threshold two, no enabled modules, and the compatibility fallback handler for
+ERC-1271 council attestations. Bootstrap requires its address and never needs either
+owner's private key. `PRIVATE_KEY` funds deployments. The council verifier is bound
+to the same Safe as the owners and guardian.
+
+- `just proof-deploy-council <env>` binds a new verifier to an existing Safe. In EOA
+  mode it deploys a council Safe from `COUNCIL_OWNERS` or `ADMIN_PRIVATE_KEY`, with
+  threshold one by default.
+- `just proof-deploy-nitro <env>` assigns the selected owner immediately to
+  CertManager (including its revoker), NitroAttestationVerifier and NitroEnclaveKeyRegistry.
+- In Safe mode, `proof-deploy-system` exports the new vault initialization and stops
+  before deploying the game. After Safe execution, resume with `ERC20_STAKING_VAULT`
+  set to the initialized vault. `proof-activate-system` exports registration,
+  zero native bond and respected-game-type calls as a Transaction Builder batch.
+- `proof-governance-call`, `proof-approve-pcrs`, and `proof-transfer-nitro-ownership`
+  export Safe transactions; preparation never reports an approval as executed.
+  Their EOA paths still broadcast by default unless `dry_run=true`.
+- `just safe-operation --out /tmp/operation.json call <target> '<signature>' <args>`
+  prepares a zero-value CALL for Transaction Builder. Supply `GOVERNANCE_SAFE` and
+  `L1_RPC_URL`, and optionally `L1_CHAIN_ID` (default Sepolia). World-chain recipes
+  do not load devnet's env files; devnet's `just safe-operation <network> ...` does.
+- `council-submit --game <address>` prepares one atomic Safe transaction: approve
+  the exact council attestation through `SignMessageLib`, then call the game's
+  `submitProofLane` with an empty proof body. The tool validates game registration,
+  council, active proof state, and canonical version-matched library code, then
+  simulates the batch without persisting state. The output is a Safe transaction
+  proposal, not a Transaction Builder import; the approval requires DELEGATECALL.
+- `just safe-operation propose --transaction <file> --sender <owner> --browser`
+  signs the prepared council transaction as one owner and publishes it to the Safe
+  Transaction Service. The other owner confirms and executes in the Safe UI. Use
+  `--interactive`, `--account <keystore>`, `--ledger` or `--trezor` instead of
+  `--browser` when appropriate. No signature files or shared owner keys are needed.
+  Nonce conflicts fail before signing; `council-submit --nonce <unused-nonce>` can
+  queue after existing proposals. The tool never executes a transaction.
+- When using MetaMask as a standard EOA executor,
+  [revert smart account functionality](https://support.metamask.io/configure/accounts/switch-to-or-revert-from-a-smart-account/)
+  for that account on Sepolia and confirm the revocation transaction. Disabling
+  smart account requests alone does not clear existing EIP-7702 delegation. Check
+  `cast code <owner> --rpc-url "$L1_RPC_URL" --rpc-timeout 20`: standard EOA code is
+  `0x`; `0xef0100...` indicates an active delegation. Safe still enforces its
+  two-owner threshold. The executing wallet estimates outer transaction gas;
+  Transaction Builder files only supply the calls.
+- Council proposals support Sepolia Safes 1.3.0, 1.4.1 and 1.5.0. Library addresses
+  and code hashes are pinned to the official Safe deployment registry. Other
+  versions fail explicitly until their audited library entries are added.
+  `SAFE_TRANSACTION_SERVICE_URL` defaults to the official Sepolia API base URL;
+  set `SAFE_TRANSACTION_SERVICE_API_KEY` for authenticated access if needed.
+  Service calls have bounded timeouts and never automatically retry proposals.
+- `proof-submit-council` retains the default EOA council's `COUNCIL_SIGNER_KEY` flow.
+  Supplied combined `COUNCIL_SIGNATURES` can still be relayed with `PRIVATE_KEY`.
+
+The direct Forge scripts retain their earlier two-key execution path for existing
+callers without `SAFE_TX_OUT`. The recipes above always prepare transactions in Safe
+mode. Use the manual workflow to test independent approvals.
+
+Reused Nitro contracts require an explicit ownership handoff. Set
+`CERT_MANAGER_ADDRESS`, `NITRO_ATTESTATION_VERIFIER`, `NITRO_ENCLAVE_KEY_REGISTRY`
+(or supply the matching `<env>-nitro.json`), and `NEW_NITRO_OWNER`. Set
+`GOVERNANCE_MODE` and keys for the **current** authority, then simulate:
+
+```bash
+just dry_run=true proof-transfer-nitro-ownership alphanet
+```
+
+In EOA mode the recipe broadcasts by default when `dry_run` is omitted. In Safe
+mode it exports a batch for review and execution. It moves all three owners and
+the CertManager revoker, checks the wiring, and supports resuming a partially
+completed handoff. It preserves verifier addresses and existing games'
+Nitro identities. Moving Nitro authority does not revoke approved PCRs or registered
+keys. Existing games keep their council verifier; a new council address is selected
+by deploying/activating a new game implementation.
+
+The devnet repository orchestrates these settings before `just setup <network>`.
+Safe mode pauses with exit status 75 and prints the file to approve. Execute it in
+Safe, then use `just resume-setup <network>`; resume never resets the OP Stack state.
+See [the full reset runbook](../../docs/proof/devnet-reset.md) for both modes.
+Existing proof parameters and mock bond tokens remain development settings.

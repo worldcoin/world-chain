@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Script} from "forge-std/Script.sol";
+import {SecurityCouncilVerifier} from "../../src/dispute/council/SecurityCouncilVerifier.sol";
+import {Governance} from "./Governance.s.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
@@ -48,7 +49,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///
 /// Requires `just build-opstack` first: the 0.8.15 OP Proxy deploys from the
 /// `opstack/out` artifacts via `deployCode`.
-contract DeployProofSystem is Script {
+contract DeployProofSystem is Governance {
     using SafeCast for uint256;
 
     struct Deployment {
@@ -109,17 +110,26 @@ contract DeployProofSystem is Script {
             );
             vm.stopBroadcast();
 
-            vm.startBroadcast(config.proxyAdminOwnerKey);
-            config.proxyAdmin
-                .upgradeAndCall(
-                    payable(address(deployment.bondVault)),
-                    address(vaultImpl),
-                    abi.encodeCall(
-                        IERC20StakingVault.initialize,
-                        (config.bondToken, config.systemConfig, config.disputeGameFactory)
+            _executeGovernance(
+                config.proxyAdminOwnerKey,
+                address(config.proxyAdmin),
+                abi.encodeCall(
+                    IProxyAdmin.upgradeAndCall,
+                    (
+                        payable(address(deployment.bondVault)),
+                        address(vaultImpl),
+                        abi.encodeCall(
+                            IERC20StakingVault.initialize,
+                            (config.bondToken, config.systemConfig, config.disputeGameFactory)
+                        )
                     )
-                );
-            vm.stopBroadcast();
+                )
+            );
+            if (_preparingSafe()) {
+                // MultiProofGame reads the vault's initialized wiring in its constructor.
+                _writeDeployment(deployment, config);
+                return deployment;
+            }
         } else {
             deployment.bondVault = config.existingBondVault;
         }
@@ -134,7 +144,7 @@ contract DeployProofSystem is Script {
         _writeDeployment(deployment, config);
     }
 
-    function _readConfig() internal view returns (Config memory config) {
+    function _readConfig() internal view virtual returns (Config memory config) {
         config.privateKey = vm.envUint("PRIVATE_KEY");
         config.l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
         config.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
@@ -187,6 +197,12 @@ contract DeployProofSystem is Script {
             "DeployProofSystem: proof lane verifiers must be distinct"
         );
 
+        if (_safeMode()) {
+            require(
+                SecurityCouncilVerifier(address(config.securityCouncil)).council() == address(_governanceSafe()),
+                "DeployProofSystem: council must be governance Safe"
+            );
+        }
         require(
             address(config.anchorStateRegistry.disputeGameFactory()) == address(config.disputeGameFactory),
             "DeployProofSystem: ASR factory mismatch"
@@ -208,9 +224,8 @@ contract DeployProofSystem is Script {
             require(config.existingBondVault == currentBondVault, "DeployProofSystem: must reuse current ERC-20 vault");
         }
         if (address(config.existingBondVault) == address(0)) {
-            require(config.proxyAdminOwnerKey != 0, "DeployProofSystem: ProxyAdmin owner key required");
             require(
-                vm.addr(config.proxyAdminOwnerKey) == config.proxyAdmin.owner(),
+                _governanceAddress(config.proxyAdminOwnerKey) == config.proxyAdmin.owner(),
                 "DeployProofSystem: ProxyAdmin owner key mismatch"
             );
         } else {
