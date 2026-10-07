@@ -41,6 +41,7 @@
 #
 # Simulation mode (no on-chain broadcast):
 #   dry_run=true   Simulate without broadcasting (all other steps still run)
+# Broadcasts use RPC gas estimates because local EVM pricing can lag L1 upgrades.
 # ==============================================================================
 
 # Set dry_run=true on the command line to simulate without broadcasting.
@@ -143,7 +144,7 @@ proof-deploy-nitro env="alphanet":
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
-        BROADCAST_FLAG="--broadcast"
+        BROADCAST_FLAG="--broadcast --skip-simulation"
     fi
     # A dry run must not overwrite the record of the live Nitro stack: the simulated addresses
     # are never deployed, and this file is what proof-approve-pcrs and proof-register-key read.
@@ -166,7 +167,7 @@ proof-deploy-mock-bond-token env="alphanet":
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
-        BROADCAST_FLAG="--broadcast"
+        BROADCAST_FLAG="--broadcast --skip-simulation"
     fi
     if [ -n "$BROADCAST_FLAG" ]; then
         export MOCK_BOND_TOKEN_DEPLOYMENT_OUT="deployments/{{env}}-mock-bond-token.json"
@@ -190,7 +191,7 @@ proof-deploy-mocks env="alphanet":
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
-        BROADCAST_FLAG="--broadcast"
+        BROADCAST_FLAG="--broadcast --skip-simulation"
     fi
     # Same reasoning as proof-deploy-system: a dry run must not clobber a real record.
     if [ -n "$BROADCAST_FLAG" ]; then
@@ -247,7 +248,7 @@ proof-deploy-system env="alphanet":
     fi
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
-        BROADCAST_FLAG="--broadcast"
+        BROADCAST_FLAG="--broadcast --skip-simulation"
     fi
     echo "Proof-system parameters:" >&2
     echo "  challenge period: $CHALLENGE_PERIOD seconds" >&2
@@ -294,7 +295,7 @@ proof-fund-mock-bonds env="alphanet":
     export VAULT_BALANCE_TARGET="${VAULT_BALANCE_TARGET:-10000000000000000000000}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
-        BROADCAST_FLAG="--broadcast"
+        BROADCAST_FLAG="--broadcast --skip-simulation"
     fi
     echo "WARNING: minting unrestricted mock bond tokens for proof-system accounts on '{{env}}'." >&2
     echo "  accounts: $BOND_ACCOUNTS" >&2
@@ -327,7 +328,7 @@ proof-activate-system env="alphanet":
     export REQUIRE_FRESH_ANCHOR="${REQUIRE_FRESH_ANCHOR:-false}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
-        BROADCAST_FLAG="--broadcast"
+        BROADCAST_FLAG="--broadcast --skip-simulation"
     fi
     if [ "${GOVERNANCE_MODE:-eoa}" = "safe" ]; then
         if [ "{{dry_run}}" = "true" ]; then
@@ -391,7 +392,7 @@ proof-certmanager-prewarm env="alphanet":
     BROADCAST_FLAG=""
     PREWARM_SKIP_IF_UNDEPLOYED="false"
     if [ "{{dry_run}}" = "false" ]; then
-        BROADCAST_FLAG="--broadcast"
+        BROADCAST_FLAG="--broadcast --skip-simulation"
     else
         PREWARM_SKIP_IF_UNDEPLOYED="true"
     fi
@@ -467,7 +468,6 @@ proof-deploy-council env="alphanet":
     fi
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
-        # Use RPC gas estimates because local EVM pricing can lag L1 upgrades.
         BROADCAST_FLAG="--broadcast --skip-simulation"
         export COUNCIL_DEPLOYMENT_OUT="deployments/{{env}}-council.json"
     else
@@ -483,7 +483,7 @@ proof-governance-call:
     set -euo pipefail
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     BROADCAST_FLAG=""
-    if [ "{{dry_run}}" = "false" ]; then BROADCAST_FLAG="--broadcast"; fi
+    if [ "{{dry_run}}" = "false" ]; then BROADCAST_FLAG="--broadcast --skip-simulation"; fi
     if [ "${GOVERNANCE_MODE:-eoa}" = "safe" ]; then
         export SAFE_TX_OUT="${SAFE_TX_OUT:-deployments/governance.safe.json}"
         BROADCAST_FLAG=""
@@ -505,7 +505,7 @@ proof-transfer-nitro-ownership env="alphanet":
         export NITRO_ENCLAVE_KEY_REGISTRY="${NITRO_ENCLAVE_KEY_REGISTRY:-$(jq -r '.nitroEnclaveKeyRegistry' "$DEPLOYMENTS_FILE")}"
     fi
     BROADCAST_FLAG=""
-    if [ "{{dry_run}}" = "false" ]; then BROADCAST_FLAG="--broadcast"; fi
+    if [ "{{dry_run}}" = "false" ]; then BROADCAST_FLAG="--broadcast --skip-simulation"; fi
     if [ "${GOVERNANCE_MODE:-eoa}" = "safe" ]; then
         export SAFE_TX_OUT="${SAFE_TX_OUT:-deployments/{{env}}-nitro-handoff.safe.json}"
         BROADCAST_FLAG=""
@@ -538,7 +538,7 @@ proof-submit-council:
     set -euo pipefail
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     BROADCAST_FLAG=""
-    if [ "{{dry_run}}" = "false" ]; then BROADCAST_FLAG="--broadcast"; fi
+    if [ "{{dry_run}}" = "false" ]; then BROADCAST_FLAG="--broadcast --skip-simulation"; fi
     cd pkg/contracts && forge script scripts/devnet/SubmitSecurityCouncilProof.s.sol:SubmitSecurityCouncilProof \
         --rpc-url "$L1_RPC_URL" --rpc-timeout "${TIMEOUT:-50}" $BROADCAST_FLAG --slow
 
