@@ -17,6 +17,16 @@ ignore = [
 multiple-versions = "deny"
 # Version-epoch splits inherited from the alloy/revm/kona upstreams
 skip = [
+    # Kona uses Arkworks 0.5; revm-precompile 42 uses 0.6.
+    { name = "ark-bls12-381", version = "=0.5.0" },
+    { name = "ark-ec", version = "=0.5.0" },
+    { name = "ark-ff", version = "=0.5.0" },
+    { name = "ark-ff-asm", version = "=0.5.0" },
+    { name = "ark-ff-macros", version = "=0.5.0" },
+    { name = "ark-poly", version = "=0.5.0" },
+    { name = "ark-serialize", version = "=0.5.0" },
+    { name = "ark-serialize-derive", version = "=0.5.0" },
+    { name = "ark-std", version = "=0.5.0" },
     "block-buffer",
     "cpufeatures",
     "crypto-common",
@@ -25,6 +35,8 @@ skip = [
     "hashbrown",
     "itertools",
     "num-bigint",
+    # The proof stack uses SHA-2 0.10; revm-precompile 42 uses 0.11.
+    { name = "sha2", version = "=0.10.9" },
     "spin",
     "syn",
     "windows-sys",
