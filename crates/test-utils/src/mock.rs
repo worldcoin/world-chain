@@ -32,10 +32,11 @@ use reth_provider::{
     HashedPostStateProvider, HeaderProvider, ProviderError, ProviderResult, ReceiptProvider,
     ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider, providers::ConsistentViewError,
+    TransactionVariant, TransactionsProvider,
 };
 use reth_revm::revm;
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_errors::provider::ConsistentViewError;
 use reth_trie::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput, updates::TrieUpdates,
@@ -698,8 +699,11 @@ impl StateProofProvider for MockEthProvider {
 }
 
 impl HashedPostStateProvider for MockEthProvider {
-    fn hashed_post_state(&self, _state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::default()
+    fn hashed_post_state(
+        &self,
+        _state: &revm::database::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
     }
 }
 

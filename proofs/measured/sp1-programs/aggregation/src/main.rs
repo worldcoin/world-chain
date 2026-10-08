@@ -13,7 +13,7 @@ use alloy_sol_types::SolValue;
 use sha2::{Digest, Sha256};
 use world_chain_proof_core::{
     boot::TransitionPublicValues,
-    types::{AggregationInputs, AggregationPublicValues, u32_to_u8},
+    types::{AggregationInputs, AggregationPublicValues},
 };
 
 pub fn main() {
@@ -67,8 +67,7 @@ pub fn main() {
     }
 
     let first = &agg_inputs.transition_public_values[0];
-    let last =
-        &agg_inputs.transition_public_values[agg_inputs.transition_public_values.len() - 1];
+    let last = &agg_inputs.transition_public_values[agg_inputs.transition_public_values.len() - 1];
     let aggregated_transition_public_values = TransitionPublicValues {
         l1Head: agg_inputs.latest_l1_checkpoint_head,
         l2PreRoot: first.l2PreRoot,
@@ -78,7 +77,12 @@ pub fn main() {
         rollupConfigHash: last.rollupConfigHash,
     };
 
-    let multi_block_vkey_b256 = B256::from(u32_to_u8(agg_inputs.multi_block_vkey));
+    let multi_block_vkey_b256 = B256::from_slice(
+        agg_inputs
+            .multi_block_vkey
+            .map(u32::to_be_bytes)
+            .as_flattened(),
+    );
     let aggregation_public_values = AggregationPublicValues {
         transitionPublicValues: aggregated_transition_public_values,
         multiBlockVKey: multi_block_vkey_b256,

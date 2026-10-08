@@ -1197,10 +1197,13 @@ impl reth_provider::StateProofProvider for TestStateProvider {
 }
 
 impl reth_provider::HashedPostStateProvider for TestStateProvider {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> reth_trie_common::HashedPostState {
-        reth_trie_common::HashedPostState::from_bundle_state::<reth_trie_common::KeccakKeyHasher>(
-            bundle_state.state(),
-        )
+    fn hashed_post_state(
+        &self,
+        bundle_state: &BundleState,
+    ) -> ProviderResult<reth_trie_common::HashedPostState> {
+        Ok(reth_trie_common::HashedPostState::from_bundle_state::<
+            reth_trie_common::KeccakKeyHasher,
+        >(bundle_state.state()))
     }
 }
 
@@ -1453,7 +1456,7 @@ impl reth_provider::StateProofProvider for BenchProvider {
 }
 
 impl reth_provider::HashedPostStateProvider for BenchProvider {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState> {
         self.inner.hashed_post_state(bundle_state)
     }
 }
