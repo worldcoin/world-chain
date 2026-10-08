@@ -94,11 +94,11 @@ version = "0.2.37"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-consensus]]
-version = "2.1.1"
+version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-consensus-any]]
-version = "2.1.1"
+version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-eip2124]]
@@ -117,16 +117,20 @@ criteria = "safe-to-deploy"
 version = "0.4.8"
 criteria = "safe-to-deploy"
 
+[[exemptions.alloy-eip8141]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.alloy-eips]]
-version = "2.1.1"
+version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-evm]]
-version = "0.37.1"
+version = "0.38.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-genesis]]
-version = "2.1.1"
+version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-hardforks]]
@@ -138,15 +142,15 @@ version = "1.6.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-network-primitives]]
-version = "2.1.1"
+version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-op-evm]]
-version = "0.32.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.32.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-op-hardforks]]
-version = "0.5.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.5.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-primitives]]
@@ -162,15 +166,15 @@ version = "0.3.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-rpc-types-engine]]
-version = "2.1.1"
+version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-rpc-types-eth]]
-version = "2.1.1"
+version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-serde]]
-version = "2.4.1"
+version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-sol-macro]]
@@ -194,11 +198,11 @@ version = "1.6.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-trie]]
-version = "0.9.5"
+version = "0.9.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.alloy-tx-macros]]
-version = "2.4.1"
+version = "2.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ambassador]]
@@ -217,12 +221,20 @@ criteria = "safe-to-deploy"
 version = "0.5.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.ark-bls12-381]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.ark-bn254]]
-version = "0.5.0"
+version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ark-ec]]
 version = "0.5.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.ark-ec]]
+version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ark-ff]]
@@ -275,6 +287,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.ark-poly]]
 version = "0.5.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.ark-poly]]
+version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ark-serialize]]
@@ -434,7 +450,7 @@ version = "2.1.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.cc]]
-version = "1.4.4"
+version = "1.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.cfg-if]]
@@ -622,7 +638,7 @@ version = "0.13.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.find-msvc-tools]]
-version = "0.1.11"
+version = "0.1.14"
 criteria = "safe-to-deploy"
 
 [[exemptions.fixed-cache]]
@@ -790,7 +806,7 @@ version = "0.1.35"
 criteria = "safe-to-deploy"
 
 [[exemptions.js-sys]]
-version = "0.3.104"
+version = "0.3.103"
 criteria = "safe-to-deploy"
 
 [[exemptions.k256]]
@@ -806,51 +822,51 @@ version = "0.1.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-derive]]
-version = "0.4.5@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.4.5@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-driver]]
-version = "0.4.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.4.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-executor]]
-version = "0.4.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.4.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-genesis]]
-version = "0.4.5@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.4.5@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-hardforks]]
-version = "0.4.5@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.4.5@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-interop]]
-version = "0.4.5@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.4.5@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-macros]]
-version = "0.1.2@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.1.2@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-mpt]]
-version = "0.3.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.3.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-preimage]]
-version = "0.3.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.3.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-proof]]
-version = "0.3.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.3.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-protocol]]
-version = "0.4.5@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.4.5@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.kona-registry]]
-version = "0.4.5@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "0.4.5@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.konst]]
@@ -986,23 +1002,23 @@ version = "1.21.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.op-alloy]]
-version = "2.0.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "2.0.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.op-alloy-consensus]]
-version = "2.0.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "2.0.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.op-alloy-rpc-types]]
-version = "2.0.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "2.0.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.op-alloy-rpc-types-engine]]
-version = "2.0.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "2.0.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.op-revm]]
-version = "20.0.0@git:96ffbb2a94f19886fe7e27c45f3310e64ccd18b3"
+version = "20.0.0@git:da6d3252491754837a778061db0cc47236ec13c6"
 criteria = "safe-to-deploy"
 
 [[exemptions.p256]]
@@ -1190,7 +1206,7 @@ version = "4.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rcgen]]
-version = "0.14.9"
+version = "0.14.8"
 criteria = "safe-to-run"
 
 [[exemptions.redox_syscall]]
@@ -1218,63 +1234,63 @@ version = "0.5.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.reth-codecs]]
-version = "0.5.2"
+version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.reth-codecs-derive]]
-version = "0.5.2"
+version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.reth-zstd-compressors]]
-version = "0.5.2"
+version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm]]
-version = "41.0.0"
+version = "42.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-bytecode]]
-version = "41.0.0"
+version = "42.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-context]]
-version = "41.0.0"
+version = "42.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-context-interface]]
-version = "41.0.0"
+version = "42.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-database]]
-version = "41.0.0"
+version = "42.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-database-interface]]
-version = "41.0.0"
+version = "42.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-handler]]
-version = "41.0.0"
+version = "42.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-inspector]]
-version = "41.0.0"
+version = "42.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-interpreter]]
-version = "41.0.0"
+version = "42.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-precompile]]
-version = "41.0.0"
+version = "42.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-primitives]]
-version = "41.0.0"
+version = "42.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.revm-state]]
-version = "41.0.0"
+version = "42.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rfc6979]]
@@ -1286,7 +1302,7 @@ version = "0.17.14"
 criteria = "safe-to-deploy"
 
 [[exemptions.ripemd]]
-version = "0.1.3"
+version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rkyv]]
@@ -1417,6 +1433,10 @@ criteria = "safe-to-deploy"
 version = "0.10.9"
 criteria = "safe-to-deploy"
 
+[[exemptions.sha2]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.sha3]]
 version = "0.11.0"
 criteria = "safe-to-deploy"
@@ -1514,7 +1534,7 @@ version = "2.0.119"
 criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
-version = "3.0.4"
+version = "3.0.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.syn-solidity]]
@@ -1618,7 +1638,7 @@ version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.uuid]]
-version = "1.25.0"
+version = "1.26.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.valuable]]
@@ -1638,19 +1658,19 @@ version = "0.11.1+wasi-snapshot-preview1"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen]]
-version = "0.2.127"
+version = "0.2.126"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-macro]]
-version = "0.2.127"
+version = "0.2.126"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-macro-support]]
-version = "0.2.127"
+version = "0.2.126"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-shared]]
-version = "0.2.127"
+version = "0.2.126"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-core]]
