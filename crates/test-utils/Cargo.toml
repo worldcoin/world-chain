@@ -28,6 +28,7 @@ reth-optimism-primitives.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
+reth-storage-errors.workspace = true
 reth-chainspec.workspace = true
 reth-transaction-pool.workspace = true
 reth-node-ethereum.workspace = true

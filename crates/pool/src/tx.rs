@@ -66,6 +66,10 @@ where
 }
 
 impl OpPooledTx for WorldChainPooledTransaction {
+    fn set_op_fee_reservation(&mut self, fee: U256) {
+        self.inner.set_op_fee_reservation(fee);
+    }
+
     fn encoded_2718(&self) -> std::borrow::Cow<'_, Bytes> {
         Cow::Borrowed(self.inner.encoded_2718())
     }

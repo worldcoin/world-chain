@@ -3,8 +3,9 @@ use reth_evm::{
     Evm,
     block::{BlockExecutionError, BlockExecutionResult, BlockExecutor, ExecutableTx},
 };
-use reth_revm::{State, witness::ExecutionWitnessRecord};
+use reth_revm::State;
 use revm::context::Block;
+use revm_database::{EmptyDB, states::bundle_state::BundleRetention};
 use tracing::error;
 
 use crate::BlockExecutionWitness;
@@ -18,24 +19,28 @@ pub struct WorldChainBlockExecutor<E> {
     pub(crate) sender: Option<Sender<BlockExecutionWitness>>,
 }
 
-/// Records an [`ExecutionWitnessRecord`] from a database when it is a [`State`] cache.
+/// Snapshots execution state from a database when it is a [`State`] cache.
 trait MaybeWitness {
-    /// Returns the recorded witness if `self` is backed by a [`State`] cache.
-    fn witness(&self) -> Option<ExecutionWitnessRecord>;
+    /// Returns a state snapshot if `self` is backed by a [`State`] cache.
+    fn witness(&self) -> Option<State<EmptyDB>>;
 }
 
 impl<T> MaybeWitness for T {
-    default fn witness(&self) -> Option<ExecutionWitnessRecord> {
+    default fn witness(&self) -> Option<State<EmptyDB>> {
         None
     }
 }
 
 impl<DB> MaybeWitness for &mut State<DB> {
-    fn witness(&self) -> Option<ExecutionWitnessRecord> {
-        Some(ExecutionWitnessRecord::from_executed_state(
-            self,
-            Default::default(),
-        ))
+    fn witness(&self) -> Option<State<EmptyDB>> {
+        let mut snapshot = State::builder()
+            .with_cached_prestate(self.cache.clone())
+            .with_block_hashes(self.block_hashes.clone())
+            .build();
+        snapshot.bundle_state = self.bundle_state.clone();
+        snapshot.transition_state = self.transition_state.clone();
+        snapshot.merge_transitions(BundleRetention::PlainState);
+        Some(snapshot)
     }
 }
 
@@ -66,10 +71,11 @@ where
     fn finish(
         self,
     ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
+        let (evm, result) = self.inner.finish()?;
         if let Some(sender) = self.sender
-            && let Some(record) = self.inner.evm().db().witness()
+            && let Some(record) = evm.db().witness()
         {
-            let block_number = self.inner.evm().block().number();
+            let block_number = evm.block().number();
 
             let captured = BlockExecutionWitness {
                 block_number: block_number.to(),
@@ -81,7 +87,7 @@ where
             });
         }
 
-        self.inner.finish()
+        Ok((evm, result))
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
@@ -94,5 +100,48 @@ where
 
     fn receipts(&self) -> &[Self::Receipt] {
         self.inner.receipts()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MaybeWitness;
+    use alloy_primitives::{Address, B256, U256};
+    use reth_revm::State;
+    use revm::{
+        DatabaseCommit,
+        state::{Account, AccountInfo},
+    };
+
+    #[test]
+    fn witness_snapshot_preserves_pending_destruction_and_block_hash_reads() {
+        let address = Address::with_last_byte(1);
+        let mut state = State::builder().with_bundle_update().build();
+        state.insert_account(
+            address,
+            AccountInfo {
+                balance: U256::from(1),
+                ..Default::default()
+            },
+        );
+        let mut destroyed = Account::default();
+        destroyed.mark_touch();
+        destroyed.mark_selfdestruct();
+        state.commit([(address, destroyed)].into_iter().collect());
+        state.block_hashes.insert(42, B256::with_last_byte(2));
+
+        let state_ref = &mut state;
+        let snapshot = state_ref
+            .witness()
+            .expect("state cache produces a witness snapshot");
+        assert!(snapshot.bundle_state.state[&address].was_destroyed());
+        assert_eq!(snapshot.block_hashes.get(42), Some(B256::with_last_byte(2)));
+        assert!(state.bundle_state.state.is_empty());
+        assert!(
+            state
+                .transition_state
+                .as_ref()
+                .is_some_and(|transitions| !transitions.transitions.is_empty())
+        );
     }
 }

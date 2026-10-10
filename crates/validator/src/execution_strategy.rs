@@ -515,7 +515,6 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
             execution_output: Arc::new(execution_output),
             hashed_state: Arc::new(hashed_state),
             trie_updates: Arc::new(trie_updates),
-            changed_paths: None,
         };
 
         Ok(OpBuiltPayload::new(
@@ -690,7 +689,6 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             execution_output: Arc::new(execution_output),
             hashed_state: Arc::new(hashed_state),
             trie_updates: Arc::new(trie_updates),
-            changed_paths: None,
         };
 
         Ok(OpBuiltPayload::new(

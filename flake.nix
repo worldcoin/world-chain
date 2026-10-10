@@ -9,7 +9,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     optimism = {
-      url = "github:ethereum-optimism/optimism/96ffbb2a94f19886fe7e27c45f3310e64ccd18b3";
+      url = "github:ethereum-optimism/optimism/da6d3252491754837a778061db0cc47236ec13c6";
       flake = false;
     };
     nitro-util = {

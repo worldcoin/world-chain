@@ -45,7 +45,8 @@ use reth_evm::{
 use reth_optimism_evm::{ConfigurePostExecEvm, PostExecExecutorExt, PostExecMode};
 use reth_optimism_payload_builder::OpExecData;
 use reth_primitives_traits::{Block, BlockBody, NodePrimitives, SealedBlock, SealedHeader};
-use reth_revm::{State, witness::ExecutionWitnessRecord};
+use reth_revm::State;
+use revm_database::EmptyDB;
 
 use crate::factory::WorldChainBlockExecutorFactory;
 
@@ -76,12 +77,12 @@ impl<T> ProviderBounds for T where
 }
 
 /// A captured execution witness for a single block.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BlockExecutionWitness {
     /// Number of the block this witness was captured for.
     pub block_number: u64,
-    /// The recorded execution witness.
-    pub record: ExecutionWitnessRecord,
+    /// Finalized execution state retained until the block becomes canonical.
+    pub record: State<EmptyDB>,
 }
 
 /// The underlying OP EVM configuration that [`WorldChainEvmConfig`] defaults to, fixed to World

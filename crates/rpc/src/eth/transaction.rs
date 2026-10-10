@@ -6,8 +6,10 @@ use alloy_primitives::{B256, Bytes, TxHash};
 use reth_node_api::BlockBody;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError};
-use reth_primitives_traits::{Recovered, SignerRecoverable, TransactionMeta};
-use reth_provider::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
+use reth_primitives_traits::{Recovered, RecoveredBlock, SignerRecoverable, TransactionMeta};
+use reth_provider::{
+    ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider,
+};
 use reth_rpc_eth_api::{
     EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore, RpcNodeCoreExt,
     helpers::{
@@ -73,6 +75,7 @@ where
             TransactionMeta,
             ProviderReceipt<Self::Provider>,
             Option<Arc<Vec<ProviderReceipt<Self::Provider>>>>,
+            Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
         )>,
         Self::Error,
     >
@@ -88,7 +91,13 @@ where
             if let Some(all_receipts) = cached.receipts.clone()
                 && let Some(receipt) = all_receipts.get(cached.tx_index).cloned()
             {
-                return Ok(Some((tx, meta, receipt, Some(all_receipts))));
+                return Ok(Some((
+                    tx,
+                    meta,
+                    receipt,
+                    Some(all_receipts),
+                    Some(cached.block),
+                )));
             }
 
             // Block still cached but receipts evicted — fetch via cache since
@@ -101,7 +110,13 @@ where
                 .map_err(Self::Error::from_eth_err)?
                 && let Some(receipt) = receipts.get(cached.tx_index).cloned()
             {
-                return Ok(Some((tx, meta, receipt, Some(receipts))));
+                return Ok(Some((
+                    tx,
+                    meta,
+                    receipt,
+                    Some(receipts),
+                    Some(cached.block),
+                )));
             }
         }
 
@@ -113,7 +128,7 @@ where
                     .transactions_iter()
                     .position(|t| *t.tx_hash() == hash)
             {
-                let receipt = &receipts[pos];
+                let receipt = receipts[pos].clone();
                 let tx = block
                     .clone()
                     .body()
@@ -135,7 +150,13 @@ where
                     .try_into_recovered_unchecked()
                     .map_err(Self::Error::from_eth_err)?;
 
-                return Ok(Some((tx, meta, receipt.clone(), None)));
+                return Ok(Some((
+                    tx,
+                    meta,
+                    receipt,
+                    Some(receipts),
+                    Some(block.clone()),
+                )));
             }
 
             let provider = this.provider();
@@ -159,7 +180,7 @@ where
                 None => return Ok(None),
             };
 
-            Ok(Some((tx, meta, receipt, None)))
+            Ok(Some((tx, meta, receipt, None, None)))
         })
         .await
     }

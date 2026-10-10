@@ -25,5 +25,3 @@ sol! {
         bytes32 multiBlockVKey;
     }
 }
-
-pub use kona_sp1_client_utils::types::u32_to_u8;
