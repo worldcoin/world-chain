@@ -125,7 +125,7 @@ impl L2TxSender {
                     "{label}: expected submission rejection for tx {hash:?}, got receipt success={} in block {:?}",
                     receipt.status(),
                     receipt.block_number
-                )
+                );
             }
             Err(err) => {
                 info!(
