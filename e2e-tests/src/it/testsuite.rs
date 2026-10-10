@@ -749,8 +749,63 @@ async fn test_flashblocks() -> eyre::Result<()> {
     Ok(())
 }
 
+async fn assert_receipt_l1_costs(
+    clients: Vec<jsonrpsee::http_client::HttpClient>,
+    expected: Vec<(B256, u128, u128)>,
+    canonical_block: u64,
+) -> eyre::Result<()> {
+    use jsonrpsee::{core::client::ClientT, rpc_params};
+
+    for (node_idx, rpc) in clients.into_iter().enumerate() {
+        let block_number: alloy_primitives::U64 =
+            rpc.request("eth_blockNumber", rpc_params![]).await?;
+        assert_eq!(block_number.to::<u64>(), canonical_block);
+
+        for (hash, l1_fee, l1_gas_used) in &expected {
+            let receipt = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let receipt: Option<op_alloy_rpc_types::OpTransactionReceipt> = rpc
+                        .request("eth_getTransactionReceipt", rpc_params![hash])
+                        .await?;
+                    if let Some(receipt) = receipt {
+                        break Ok::<_, eyre::Report>(receipt);
+                    }
+                    sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .map_err(|_| eyre!("node {node_idx}: timed out waiting for receipt {hash} at canonical block {canonical_block}"))??;
+            assert_eq!(receipt.inner.block_number, Some(1));
+            assert_eq!(receipt.l1_block_info.l1_fee, Some(*l1_fee));
+            assert_eq!(receipt.l1_block_info.l1_gas_used, Some(*l1_gas_used));
+        }
+
+        // Batch conversion must not reuse one transaction's cached L1 cost for another.
+        let block_tag = if canonical_block == 0 {
+            "pending"
+        } else {
+            "latest"
+        };
+        let receipts: Vec<op_alloy_rpc_types::OpTransactionReceipt> = rpc
+            .request("eth_getBlockReceipts", rpc_params![block_tag])
+            .await?;
+        for (hash, l1_fee, l1_gas_used) in &expected {
+            let receipt = receipts
+                .iter()
+                .find(|receipt| receipt.inner.transaction_hash == *hash)
+                .ok_or_else(|| eyre!("missing block receipt for {hash}"))?;
+            assert_eq!(receipt.l1_block_info.l1_fee, Some(*l1_fee));
+            assert_eq!(receipt.l1_block_info.l1_gas_used, Some(*l1_gas_used));
+        }
+    }
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_eth_api_receipt() -> eyre::Result<()> {
+    use alloy_eips::eip2718::Decodable2718;
+    use reth_optimism_evm::l1::{RethL1BlockInfo, extract_l1_info_from_tx};
+
     reth_tracing::init_test_tracing();
 
     let (_, nodes, _tasks, mut env, _spammer) = WorldChainTestBuilder::builder()
@@ -760,88 +815,87 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
         .setup::<WorldChainDefaultContext>()
         .await?;
 
-    let ext_context = nodes[0].ext_context.clone();
     let block_hash = nodes[0].node.block_hash(0);
-
-    let authorization_generator =
-        world_chain_test_utils::e2e_harness::setup::create_authorization_generator(
-            block_hash,
-            ext_context
-                .unwrap()
-                .flashblocks_handle
-                .builder_sk()
-                .unwrap()
-                .verifying_key(),
-        );
-
-    let timestamp = world_chain_test_utils::e2e_harness::setup::current_timestamp();
-    let (sender, mut block_rx) = tokio::sync::mpsc::channel(1);
-    let eip1559_params = world_chain_test_utils::e2e_harness::setup::encode_eip1559_params(
-        nodes[0].node.inner.chain_spec().as_ref(),
-        timestamp,
-    )?;
-
-    // Compose a Mine Block action with an eth_getTransactionReceipt action
-    let attributes = world_chain_test_utils::e2e_harness::setup::build_payload_attributes(
-        timestamp,
-        eip1559_params,
-        Some(vec![
-            world_chain_test_utils::e2e_harness::setup::TX_SET_L1_BLOCK.clone(),
-        ]),
-    );
-
-    let cannon_flashblocks_stream = nodes[0]
+    for node in &nodes {
+        node.node.update_forkchoice(block_hash, block_hash).await?;
+    }
+    let builder_vk = nodes[0]
         .ext_context
-        .clone()
+        .as_ref()
         .unwrap()
         .flashblocks_handle
-        .flashblock_stream();
+        .builder_sk()
+        .unwrap()
+        .verifying_key();
+    let authorization_generator =
+        world_chain_test_utils::e2e_harness::setup::create_authorization_generator(
+            block_hash, builder_vk,
+        );
+    let timestamp = world_chain_test_utils::e2e_harness::setup::current_timestamp() + 2;
+    let chain_spec = nodes[0].node.inner.chain_spec().clone();
 
-    let mine_block = world_chain_test_utils::e2e_harness::actions::AssertMineBlock::new(
-        0,
-        None,
-        attributes,
-        authorization_generator,
-        std::time::Duration::from_millis(2000),
-        true,
-        sender,
-    )
-    .await;
+    // Give the Ecotone fixture a nonzero base fee and scalar.
+    let deposit = OpTxEnvelope::decode_2718(&mut TX_SET_L1_BLOCK.as_ref())?;
+    let mut deposit = deposit.as_deposit().unwrap().inner().clone();
+    let mut input = deposit.input.to_vec();
+    input[4..8].copy_from_slice(&1_000_000u32.to_be_bytes());
+    input[36..68].copy_from_slice(&U256::from(1_000_000_000u64).to_be_bytes::<32>());
+    deposit.input = input.into();
+    let deposit = OpTxEnvelope::Deposit(alloy_primitives::Sealed::new(deposit));
 
-    let transaction_receipt = world_chain_test_utils::e2e_harness::actions::GetReceipts::new(
-        vec![0, 1, 2],
-        cannon_flashblocks_stream,
-    )
-    .on_receipts(move |receipts| {
-        for receipts in receipts {
-            world_chain_test_utils::e2e_harness::actions::assert::all_some(
-                &receipts,
-                "transaction receipt",
-            )?;
-        }
+    let mut expected = Vec::new();
+    for (nonce, calldata_len, gas_limit) in [(0, 0, 21_000), (1, 50_000, 600_000)] {
+        let (raw, hash) =
+            create_priority_transaction(0, nonce, calldata_len, gas_limit, 100).await?;
+        // Each transaction gets fresh L1 information, independent of the receipt converter's cache.
+        let mut l1_info = extract_l1_info_from_tx(&deposit)?;
+        let fee = l1_info.l1_tx_data_fee(chain_spec.as_ref(), timestamp, &raw, false)?;
+        let gas = l1_info.l1_data_gas(chain_spec.as_ref(), timestamp, &raw)?;
+        expected.push((hash, fee.to::<u128>(), gas.to::<u128>()));
+        assert_eq!(nodes[0].node.rpc.inject_tx(raw).await?, hash);
+    }
+    assert!(expected[0].1 > 0);
+    assert!(expected[0].2 > 0);
+    assert_ne!(expected[0].1, expected[1].1);
+    assert_ne!(expected[0].2, expected[1].2);
 
-        Ok(())
-    });
-
-    let mut action = world_chain_test_utils::e2e_harness::actions::EthApiAction::new(
-        mine_block,
-        transaction_receipt,
+    let attributes = build_payload_attributes(
+        timestamp,
+        encode_eip1559_params(chain_spec.as_ref(), timestamp)?,
+        Some(vec![deposit.encoded_2718().into()]),
     );
-
-    let fut = async { action.execute(&mut env).await };
-
-    futures::future::try_select(
-        Box::pin(fut),
-        Box::pin(async {
-            block_rx
-                .recv()
-                .await
-                .ok_or(eyre!("failed to fetch envelope"))
-        }),
-    )
-    .await
-    .map_err(|e| eyre!("{}", e.factor_first().0))?;
-
+    let clients: Vec<_> = env
+        .node_clients
+        .iter()
+        .map(|client| client.rpc.clone())
+        .collect();
+    let pending_clients = vec![clients[0].clone()];
+    let pending_expected = expected.clone();
+    let mut driver = world_chain_test_utils::e2e_harness::actions::EngineDriver {
+        builder_idx: 0,
+        follower_idxs: vec![1, 2],
+        initial_parent_hash: Some(block_hash),
+        num_blocks: 1,
+        block_interval: Duration::from_secs(2),
+        flashblocks: true,
+        authorization_gen: move |_, attrs| authorization_generator(attrs),
+        attributes_gen: Box::new(move |_, _| Ok(attributes.clone())),
+        during_build: Some(Box::new(move |_| {
+            Box::pin(assert_receipt_l1_costs(
+                pending_clients.clone(),
+                pending_expected.clone(),
+                0,
+            ))
+        })),
+        on_block: Some(Box::new(move |_, _| {
+            Box::pin(assert_receipt_l1_costs(
+                clients.clone(),
+                expected.clone(),
+                1,
+            ))
+        })),
+    };
+    tokio::time::timeout(Duration::from_secs(30), driver.execute(&mut env)).await??;
     Ok(())
 }
 
