@@ -35,15 +35,15 @@ test-verbose *args='':
 
 [group('lint')]
 clippy:
-    cargo +nightly-2026-07-01 clippy --workspace --all-targets --all-features
+    cargo +nightly-2026-10-10 clippy --workspace --all-targets --all-features
 
 [group('lint')]
 fmt: fmt-fix fmt-check contracts-fmt
 
 [group('lint')]
 fmt-fix:
-    cargo +nightly-2026-07-01 fmt --all
+    cargo +nightly-2026-10-10 fmt --all
 
 [group('lint')]
 fmt-check:
-    cargo +nightly-2026-07-01 fmt --all -- --check
+    cargo +nightly-2026-10-10 fmt --all -- --check

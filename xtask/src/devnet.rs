@@ -597,7 +597,7 @@ fn signal_process(pid: u32, signal: &str) -> Result<()> {
     if status.success() {
         Ok(())
     } else {
-        bail!("failed to send SIG{signal} to pid {pid}")
+        bail!("failed to send SIG{signal} to pid {pid}");
     }
 }
 

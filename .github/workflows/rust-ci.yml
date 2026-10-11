@@ -60,7 +60,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
-          toolchain: nightly-2026-07-01
+          toolchain: nightly-2026-10-10
       - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: just
@@ -110,7 +110,7 @@ jobs:
           tool: just
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
-          toolchain: nightly-2026-07-01
+          toolchain: nightly-2026-10-10
           components: rustfmt, clippy
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
@@ -133,9 +133,9 @@ jobs:
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
       - name: fmt
-        run: cargo +nightly-2026-07-01 fmt --all -- --check
+        run: cargo +nightly-2026-10-10 fmt --all -- --check
       - name: clippy
-        run: cargo +nightly-2026-07-01 clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo +nightly-2026-10-10 clippy --workspace --all-targets --all-features -- -D warnings
 
   cargo-docs:
     runs-on: arc-public-8xlarge-amd64-runner
@@ -153,7 +153,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
-          toolchain: nightly-2026-07-01
+          toolchain: nightly-2026-10-10
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
