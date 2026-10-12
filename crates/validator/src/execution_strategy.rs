@@ -262,6 +262,17 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
             .ok_or(BalValidationError::MissingAccessListData.boxed())
             .map_err(BalExecutorError::from)?;
 
+        // Bind the claimed state changes to the hash that re-execution verifies below.
+        let received_access_list_hash = access_list_hash(&access_list);
+        if received_access_list_hash != expected_access_list_hash {
+            return Err(BalValidationError::ReceivedBalHashMismatch {
+                expected: expected_access_list_hash,
+                got: received_access_list_hash,
+            }
+            .boxed()
+            .into());
+        }
+
         let min_tx_index = access_list.min_tx_index;
         let max_tx_index = access_list.max_tx_index;
         let transactions_offset = committed_state.transactions.len() as u64 + 1;
