@@ -4,13 +4,14 @@ use alloy_consensus::{Header, Transaction};
 use alloy_eip7928::BlockAccessIndex;
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx,
+    block::OpBlockExecutionError,
 };
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::PayloadId;
 use rayon::prelude::*;
 use reth_evm::{
     ConfigureEvm, Evm, EvmEnvFor, EvmFactory,
-    block::{BlockExecutionError, CommitChanges},
+    block::{BlockExecutionError, BlockValidationError, CommitChanges},
     execute::{BlockAssemblerInput, BlockBuilder, BlockExecutor, BlockExecutorFactory},
 };
 use reth_node_api::BuiltPayloadExecutedBlock;
@@ -34,7 +35,7 @@ use crate::{
     state_root_strategy::{StateRootHandle, StateRootStrategy},
     validator::decode_transactions_with_indices,
 };
-use world_chain_chainspec::WorldChainSpec;
+use world_chain_chainspec::{WorldChainHardforks, WorldChainSpec};
 use world_chain_evm::{
     PayloadBuildStage, WorldChainEvmConfig,
     execution::{
@@ -352,8 +353,42 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
         )?;
 
         let basefee = self.ctx.evm_env.block_env.basefee;
+        let block_gas_limit = self.ctx.evm_env.block_env.gas_limit;
+        let is_jovian = self
+            .ctx
+            .chain_spec
+            .is_jovian_active_at_timestamp(self.ctx.evm_env.block_env.timestamp.saturating_to());
         let mut fees = U256::ZERO;
         for output in worker_outputs {
+            // Mirror OP admission checks because workers start with zero cumulative block usage.
+            let block_available_gas =
+                block_gas_limit.saturating_sub(canonical_executor.evm_gas_used);
+            let transaction_gas_limit = output.transaction.gas_limit();
+            if (canonical_executor.is_regolith || !output.result.is_deposit)
+                && transaction_gas_limit > block_available_gas
+            {
+                return Err(BlockExecutionError::Validation(
+                    BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                        transaction_gas_limit,
+                        block_available_gas,
+                    },
+                )
+                .into());
+            }
+            if is_jovian && !output.result.is_deposit && !output.result.is_post_exec {
+                let transaction_da_footprint = output.result.inner.blob_gas_used;
+                let available_block_da_footprint =
+                    block_gas_limit.saturating_sub(canonical_executor.da_footprint_used);
+                if transaction_da_footprint > available_block_da_footprint {
+                    return Err(BlockExecutionError::Validation(BlockValidationError::Other(
+                        Box::new(OpBlockExecutionError::TransactionDaFootprintAboveGasLimit {
+                            transaction_da_footprint,
+                            available_block_da_footprint,
+                        }),
+                    ))
+                    .into());
+                }
+            }
             canonical_executor
                 .evm_mut()
                 .db_mut()

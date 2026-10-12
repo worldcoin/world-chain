@@ -19997,6 +19997,7 @@ dependencies = [
  "metrics",
  "metrics-derive",
  "op-alloy-consensus",
+ "op-revm",
  "parking_lot",
  "rayon",
  "reth-chain-state",
