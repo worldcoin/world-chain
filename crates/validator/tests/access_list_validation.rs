@@ -167,6 +167,48 @@ async fn processor_accepts_consecutive_bal_flashblocks() {
 }
 
 #[tokio::test]
+async fn processor_uses_epoch_gas_limit_for_continuation_with_embedded_base() {
+    let (coordinator, pending_tx, pending_rx) = test_coordinator();
+    let coordinator = Arc::new(coordinator);
+    let mut sequence = build_flashblock_sequence_fixture_eth_transfers(2, 1, true);
+    let mut conflicting_base = sequence[0].base.clone().expect("epoch base");
+    conflicting_base.gas_limit = 0;
+    sequence[1].base = Some(conflicting_base);
+    let expected_hash = sequence[1].diff.block_hash;
+    let events = sequence
+        .into_iter()
+        .map(|flashblock| WorldChainEvent::<()>::Chain(ChainEvent::Pending(Arc::new(flashblock))));
+
+    run_flashblock_processor(
+        coordinator.clone(),
+        futures::stream::iter(events),
+        BenchProvider::new(),
+        EVM_CONFIG.clone(),
+        CHAIN_SPEC.clone(),
+        pending_tx,
+    )
+    .await;
+
+    assert_eq!(
+        coordinator
+            .latest_payload()
+            .expect("continuation accepted using the epoch base")
+            .block()
+            .hash(),
+        expected_hash
+    );
+    assert_eq!(
+        pending_rx
+            .borrow()
+            .as_ref()
+            .expect("continuation published as pending")
+            .recovered_block()
+            .hash(),
+        expected_hash
+    );
+}
+
+#[tokio::test]
 async fn rejects_unexecuted_balance_change_with_honest_access_list_hash() {
     let flashblock = flashblock_with_injected_balance();
     let data = flashblock

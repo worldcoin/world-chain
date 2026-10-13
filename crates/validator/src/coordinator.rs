@@ -15,7 +15,10 @@ use world_chain_p2p::protocol::{
     event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
     handler::FlashblocksHandle,
 };
-use world_chain_primitives::{p2p::AuthorizedPayload, primitives::FlashblocksPayloadV1};
+use world_chain_primitives::{
+    p2p::AuthorizedPayload,
+    primitives::{ExecutionPayloadBaseV1, FlashblocksPayloadV1},
+};
 
 use reth_provider::{
     BlockNumReader, CanonStateSubscriptions, ChainSpecProvider, HeaderProvider,
@@ -74,6 +77,22 @@ pub struct FlashblocksExecutionCoordinatorInner {
     latest_payload: Option<(OpBuiltPayload, u64)>,
     /// Broadcast channel for built payload events
     payload_events: Option<Sender<Events<OpEngineTypes>>>,
+}
+
+impl FlashblocksExecutionCoordinatorInner {
+    fn execution_base<'a>(
+        &'a self,
+        flashblock: &'a FlashblocksPayloadV1,
+    ) -> eyre::Result<&'a ExecutionPayloadBaseV1> {
+        if flashblock.payload_id != *self.flashblocks.payload_id() {
+            flashblock
+                .base
+                .as_ref()
+                .ok_or_else(|| eyre!("New flashblock must contain the base payload"))
+        } else {
+            Ok(self.flashblocks.base())
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -336,11 +355,13 @@ pub async fn run_flashblock_processor<T, S, Provider>(
                             .expect("semaphore is never closed");
 
                         if let Some(data) = &flashblock.diff.access_list_data {
-                            let gas_limit = flashblock.base.as_ref().map_or_else(
-                                || coordinator.inner.read().flashblocks.base().gas_limit,
-                                |base| base.gas_limit,
-                            );
-                            if let Err(err) = data.access_list.validate(gas_limit) {
+                            let gas_limit = coordinator.inner.read()
+                                .execution_base(&flashblock)
+                                .map(|base| base.gas_limit);
+                            let validation = gas_limit.and_then(|gas_limit| {
+                                data.access_list.validate(gas_limit).map_err(Into::into)
+                            });
+                            if let Err(err) = validation {
                                 flashblock_validation_metrics.increment_validation_errors();
                                 error!(payload_id = %flashblock.payload_id, index = flashblock.index, %err, "invalid received flashblock access list");
                                 continue;
@@ -432,11 +453,7 @@ where
                 return Err(err);
             }
         };
-        let base = if is_new {
-            flashblock.base().unwrap().clone()
-        } else {
-            inner.flashblocks.base().clone()
-        };
+        let base = inner.execution_base(&flashblock.flashblock)?.clone();
 
         (base, is_new)
     };
