@@ -43,7 +43,10 @@ use crate::{
     validator::{FlashblocksBlockValidator, into_executed_payload},
 };
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_evm::WorldChainEvmConfig;
+use world_chain_evm::{
+    WorldChainEvmConfig,
+    execution::bal::{BalExecutorError, BalValidationError},
+};
 use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// Task-level permit to ensure only one flashblock is processed at a time.
@@ -318,8 +321,6 @@ pub async fn run_flashblock_processor<T, S, Provider>(
             maybe_event = stream.next(), if !stream_closed => {
                 match maybe_event {
                     Some(WorldChainEvent::Chain(ChainEvent::Pending(flashblock))) => {
-                        let flashblock = Arc::try_unwrap(flashblock).unwrap_or_else(|arc| (*arc).clone());
-
                         trace!(
                             target: "flashblocks::coordinator",
                             payload_id = %flashblock.payload_id,
@@ -333,6 +334,19 @@ pub async fn run_flashblock_processor<T, S, Provider>(
                             .acquire_owned()
                             .await
                             .expect("semaphore is never closed");
+
+                        if let Some(data) = &flashblock.diff.access_list_data {
+                            let gas_limit = flashblock.base.as_ref().map_or_else(
+                                || coordinator.inner.read().flashblocks.base().gas_limit,
+                                |base| base.gas_limit,
+                            );
+                            if let Err(err) = data.access_list.validate(gas_limit) {
+                                flashblock_validation_metrics.increment_validation_errors();
+                                error!(payload_id = %flashblock.payload_id, index = flashblock.index, %err, "invalid received flashblock access list");
+                                continue;
+                            }
+                        }
+                        let flashblock = Arc::try_unwrap(flashblock).unwrap_or_else(|arc| (*arc).clone());
 
                         let provider = provider.clone();
                         let evm_config = evm_config.clone();
@@ -426,6 +440,14 @@ where
 
         (base, is_new)
     };
+
+    // Reject malformed sidecars before cloning the diff or changing the current payload.
+    if let Some(data) = &flashblock.diff().access_list_data {
+        data.access_list.validate(base.gas_limit).map_err(|err| {
+            flashblock_validation_metrics.increment_validation_errors();
+            BalExecutorError::from(BalValidationError::InvalidAccessList(err).boxed())
+        })?;
+    }
 
     // Clear latest_payload on new epoch (brief write lock)
     if is_new_epoch {

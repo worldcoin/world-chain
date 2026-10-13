@@ -7,6 +7,9 @@ use reth_trie_common::{HashedPostState, HashedStorage};
 
 use serde::{Deserialize, Serialize};
 
+mod validation;
+pub use validation::FlashblockAccessListValidationError;
+
 #[derive(
     Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
 )]

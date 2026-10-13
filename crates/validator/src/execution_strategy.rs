@@ -263,6 +263,10 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
             .ok_or(BalValidationError::MissingAccessListData.boxed())
             .map_err(BalExecutorError::from)?;
 
+        access_list
+            .validate(self.ctx.evm_env.block_env.gas_limit)
+            .map_err(|err| BalValidationError::InvalidAccessList(err).boxed())?;
+
         // Bind the claimed state changes to the hash that re-execution verifies below.
         let received_access_list_hash = access_list_hash(&access_list);
         if received_access_list_hash != expected_access_list_hash {

@@ -92,7 +92,7 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
         state: Option<&OpBuiltPayload<OpPrimitives>>,
     ) -> Result<OpBuiltPayload, BalExecutorError> {
         let has_bal = diff.access_list_data.is_some();
-        let diff_clone = diff.clone();
+        let expected_block_hash = diff.block_hash;
         let validation_started = Instant::now();
         let mut attempt_metrics = FlashblockValidationAttemptMetrics::default();
 
@@ -140,7 +140,7 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
                 })?;
 
             let executed = into_executed_payload(executed);
-            self.validate_payload(&executed, diff_clone)
+            self.validate_payload(&executed, expected_block_hash)
                 .map_err(|e| BalExecutorError::Other(Box::from(e.to_string())))
                 .inspect_err(|e| {
                     error!(
@@ -172,13 +172,13 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
     pub fn validate_payload(
         &self,
         block: &ExecutedBlock<OpPrimitives>,
-        diff: ExecutionPayloadFlashblockDeltaV1,
+        expected_block_hash: alloy_primitives::B256,
     ) -> eyre::Result<()> {
         // make sure the block matches the diff
-        if block.sealed_block().hash() != diff.block_hash {
+        if block.sealed_block().hash() != expected_block_hash {
             bail!(
                 "Block hash mismatch: expected {}, got {}",
-                diff.block_hash,
+                expected_block_hash,
                 block.sealed_block().hash()
             );
         }
