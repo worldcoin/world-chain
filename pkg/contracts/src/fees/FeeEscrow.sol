@@ -135,9 +135,17 @@ contract FeeEscrow is ReentrancyGuardTransient, Ownable {
         uint128 currentPrice = price();
         uint256 balance = address(this).balance;
 
-        uint256 expectedBurn = ((uint256(currentPrice) * balance) * (SCALE - SLIPPAGE_TOLERANCE_BASIS_POINTS) / SCALE);
-
         if (balance == 0) revert NothingToBurn();
+
+        // `currentPrice` is a 64.64 fixed-point value. Scale it by `balance` (and apply the
+        // slippage factor) *before* shifting the 64 fractional bits back out, so the fractional
+        // part of the price is carried through the multiplication instead of being truncated away.
+        uint256 expectedBurn =
+            ((uint256(currentPrice) * balance) * (SCALE - SLIPPAGE_TOLERANCE_BASIS_POINTS) / SCALE) >> 64;
+
+        // Guard against a degenerate zero target: a zero `expectedBurn` would let the burn pass the
+        // `totalBurned < expectedBurn` check while nothing is actually sent to DEAD_ADDRESS.
+        if (expectedBurn == 0) revert NothingToBurn();
 
         uint256 burnBalanceBefore = IERC20(WLD).balanceOf(DEAD_ADDRESS);
 
@@ -179,10 +187,12 @@ contract FeeEscrow is ReentrancyGuardTransient, Ownable {
         uint256 ethScale = ETH_USDC_SCALE;
 
         assembly ("memory-safe") {
-            // (ethUsdPrice * wldScale )/ (wldUsdPrice * ethScale)
+            // 64.64 fixed-point ETH/WLD price: (ethUsdPrice * wldScale << 64) / (wldUsdPrice * ethScale).
+            // The `<< 64` is retained in the returned value (it is NOT shifted back out here) so the
+            // fractional part of the price survives; the caller removes it after scaling by balance.
             let numerator := shl(64, mul(ethUsdPrice, wldScale))
             let denominator := mul(wldUsdPrice, ethScale)
-            currentPrice := shr(64, div(numerator, denominator))
+            currentPrice := div(numerator, denominator)
         }
     }
 
