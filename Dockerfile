@@ -90,10 +90,6 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
   /tmp/aws/install && \
   rm -rf /tmp/aws /tmp/awscliv2.zip
 
-# Install s3fcp
-RUN curl -L "https://github.com/Dzejkop/s3fcp/releases/download/v0.3.0/s3fcp-linux-x86_64" -o "/usr/local/bin/s3fcp" && \
-  chmod +x /usr/local/bin/s3fcp
-
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 ARG PROFILE="maxperf"
 COPY --from=builder /app/target/${PROFILE}/${WORLD_CHAIN_BUILDER_BIN} /usr/local/bin/
