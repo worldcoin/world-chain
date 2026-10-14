@@ -121,6 +121,15 @@ impl PBHPayload {
             &self.proof.0
         };
 
+        // `verify_proof` panics on coordinates outside the BN254 base field.
+        if proof
+            .flatten()
+            .iter()
+            .any(|word| *word >= semaphore_rs_proof::compression::P)
+        {
+            return Err(PBHValidationError::InvalidProof);
+        }
+
         if verify_proof(
             self.root,
             self.nullifier_hash,
@@ -253,6 +262,22 @@ mod test {
         };
 
         pbh_payload.validate(signal, &[tree.root()], 10).unwrap();
+    }
+
+    #[test]
+    fn proof_coordinate_out_of_field_is_rejected() {
+        let root = Field::from(1u64);
+        let mut flat = [U256::from(1u64); 8];
+        flat[0] = semaphore_rs_proof::compression::P;
+        let pbh_payload = PBHPayload {
+            root,
+            external_nullifier: ExternalNullifier::with_date_marker(DateMarker::from(Utc::now()), 0),
+            proof: Proof(semaphore_rs::protocol::Proof::from_flat(flat)),
+            ..Default::default()
+        };
+
+        let res = pbh_payload.validate(U256::ZERO, &[root], 10);
+        assert!(matches!(res, Err(PBHValidationError::InvalidProof)));
     }
 
     #[test]
