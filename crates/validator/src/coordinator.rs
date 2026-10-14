@@ -359,7 +359,7 @@ pub async fn run_flashblock_processor<T, S, Provider>(
                                 .execution_base(&flashblock)
                                 .map(|base| base.gas_limit);
                             let validation = gas_limit.and_then(|gas_limit| {
-                                data.access_list.validate(gas_limit).map_err(Into::into)
+                                data.access_list.validate_gas_limit(gas_limit).map_err(Into::into)
                             });
                             if let Err(err) = validation {
                                 flashblock_validation_metrics.increment_validation_errors();
@@ -458,12 +458,14 @@ where
         (base, is_new)
     };
 
-    // Reject malformed sidecars before cloning the diff or changing the current payload.
+    // Reject oversized sidecars before cloning the diff or changing the current payload.
     if let Some(data) = &flashblock.diff().access_list_data {
-        data.access_list.validate(base.gas_limit).map_err(|err| {
-            flashblock_validation_metrics.increment_validation_errors();
-            BalExecutorError::from(BalValidationError::InvalidAccessList(err).boxed())
-        })?;
+        data.access_list
+            .validate_gas_limit(base.gas_limit)
+            .map_err(|err| {
+                flashblock_validation_metrics.increment_validation_errors();
+                BalExecutorError::from(BalValidationError::BalGasLimitExceeded(err).boxed())
+            })?;
     }
 
     // Clear latest_payload on new epoch (brief write lock)

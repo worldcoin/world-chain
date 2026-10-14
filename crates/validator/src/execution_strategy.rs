@@ -264,8 +264,8 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
             .map_err(BalExecutorError::from)?;
 
         access_list
-            .validate(self.ctx.evm_env.block_env.gas_limit)
-            .map_err(|err| BalValidationError::InvalidAccessList(err).boxed())?;
+            .validate_gas_limit(self.ctx.evm_env.block_env.gas_limit)
+            .map_err(|err| BalValidationError::BalGasLimitExceeded(err).boxed())?;
 
         // Bind the claimed state changes to the hash that re-execution verifies below.
         let received_access_list_hash = access_list_hash(&access_list);

@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use alloy_eip7928::{
-    AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, MAX_CODE_SIZE, SlotChanges,
+    AccountChanges, BalanceChange, BlockAccessIndex, BlockAccessListGasError, SlotChanges,
     StorageChange,
 };
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, U256};
 use alloy_rpc_types_engine::PayloadId;
 use reth_chain_state::ExecutedBlock;
 use reth_optimism_primitives::OpPrimitives;
@@ -16,9 +16,7 @@ use world_chain_p2p::protocol::{
     handler::FlashblocksHandle,
 };
 use world_chain_primitives::{
-    access_list::{FlashblockAccessListValidationError, access_list_hash},
-    ed25519_dalek::SigningKey,
-    primitives::FlashblocksPayloadV1,
+    access_list::access_list_hash, ed25519_dalek::SigningKey, primitives::FlashblocksPayloadV1,
 };
 use world_chain_test_utils::builder::{
     BLOCK_EXECUTION_CTX, BenchProvider, CHAIN_SPEC, EVM_CONFIG, EVM_ENV, SEALED_HEADER,
@@ -283,10 +281,7 @@ async fn rejects_unexecuted_balance_change_with_matching_received_hash() {
     assert!(pending_rx.borrow().is_none());
 }
 
-fn assert_structure_rejected(
-    flashblock: FlashblocksPayloadV1,
-    expected: FlashblockAccessListValidationError,
-) {
+fn rejected_bal_error(flashblock: FlashblocksPayloadV1) -> Box<BalValidationError> {
     let (coordinator, pending_tx, pending_rx) = test_coordinator();
     let initial_flashblocks = coordinator.flashblocks();
     let (events_tx, mut events_rx) = tokio::sync::broadcast::channel(16);
@@ -301,14 +296,11 @@ fn assert_structure_rejected(
         pending_tx,
         Arc::new(FlashblockValidationMetrics::default()),
     )
-    .expect_err("invalid BAL must be rejected before execution");
+    .expect_err("invalid BAL must be rejected");
 
     let BalExecutorError::BalValidationError(error) = error.downcast().expect("BAL error") else {
         panic!("expected BAL validation error");
     };
-    assert!(
-        matches!(error.as_ref(), BalValidationError::InvalidAccessList(got) if *got == expected)
-    );
     assert!(coordinator.latest_payload().is_none());
     assert!(pending_rx.borrow().is_none());
     assert_eq!(coordinator.flashblocks(), initial_flashblocks);
@@ -316,50 +308,60 @@ fn assert_structure_rejected(
         events_rx.try_recv(),
         Err(tokio::sync::broadcast::error::TryRecvError::Empty)
     ));
+    error
 }
 
 #[tokio::test]
-async fn rejects_duplicate_accounts_before_hashing_or_parent_lookup() {
+async fn rejects_duplicate_accounts_through_reexecution() {
     let mut flashblock = build_flashblock_fixture_eth_transfers(1, true);
     let data = flashblock
         .diff
         .access_list_data
         .as_mut()
         .expect("BAL sidecar");
-    let account = data.access_list.changes[0].clone();
-    let address = account.address;
-    data.access_list.changes.insert(0, account);
-    data.access_list_hash = alloy_primitives::B256::ZERO;
-    flashblock.base.as_mut().expect("base payload").parent_hash =
-        alloy_primitives::B256::repeat_byte(0xff);
+    data.access_list
+        .changes
+        .insert(0, data.access_list.changes[0].clone());
+    data.access_list_hash = access_list_hash(&data.access_list);
 
-    assert_structure_rejected(
-        flashblock,
-        FlashblockAccessListValidationError::InvalidOrder {
-            address,
-            field: "accounts",
-        },
-    );
+    assert!(matches!(
+        rejected_bal_error(flashblock).as_ref(),
+        BalValidationError::BalHashMismatch { .. }
+    ));
 }
 
 #[tokio::test]
-async fn rejects_internal_index_above_the_flashblock_maximum() {
+async fn rejects_noncanonical_account_order_through_reexecution() {
     let mut flashblock = build_flashblock_fixture_eth_transfers(1, true);
     let data = flashblock
         .diff
         .access_list_data
         .as_mut()
         .expect("BAL sidecar");
-    let min = data.access_list.min_tx_index;
-    let max = data.access_list.max_tx_index;
+    data.access_list.changes.reverse();
+    data.access_list_hash = access_list_hash(&data.access_list);
+
+    assert!(matches!(
+        rejected_bal_error(flashblock).as_ref(),
+        BalValidationError::BalHashMismatch { .. }
+    ));
+}
+
+#[tokio::test]
+async fn rejects_internal_index_above_the_flashblock_maximum_through_reexecution() {
+    let mut flashblock = build_flashblock_fixture_eth_transfers(1, true);
+    let data = flashblock
+        .diff
+        .access_list_data
+        .as_mut()
+        .expect("BAL sidecar");
+    let index = data.access_list.max_tx_index + 1;
     let account = data
         .access_list
         .changes
         .iter_mut()
         .find(|account| !account.balance_changes.is_empty())
         .expect("balance changes");
-    let address = account.address;
-    let index = max + 1;
     account
         .balance_changes
         .last_mut()
@@ -367,69 +369,76 @@ async fn rejects_internal_index_above_the_flashblock_maximum() {
         .block_access_index = BlockAccessIndex::new(index);
     data.access_list_hash = access_list_hash(&data.access_list);
 
-    assert_structure_rejected(
-        flashblock,
-        FlashblockAccessListValidationError::ChangeIndexOutOfRange {
-            address,
-            field: "balance",
-            index,
-            min,
-            max,
-        },
-    );
+    assert!(matches!(
+        rejected_bal_error(flashblock).as_ref(),
+        BalValidationError::BalHashMismatch { .. }
+    ));
 }
 
 #[tokio::test]
-async fn rejects_oversized_code_before_constructing_execution_state() {
+async fn rejects_minimum_index_that_does_not_match_committed_transactions() {
     let mut flashblock = build_flashblock_fixture_eth_transfers(1, true);
     let data = flashblock
         .diff
         .access_list_data
         .as_mut()
         .expect("BAL sidecar");
-    let account = &mut data.access_list.changes[0];
-    let address = account.address;
-    let index = data.access_list.min_tx_index;
-    let size = MAX_CODE_SIZE + 1;
-    account.code_changes = vec![CodeChange::new(
-        BlockAccessIndex::new(index),
-        Bytes::from(vec![0; size]),
-    )];
+    data.access_list.min_tx_index = 1;
     data.access_list_hash = access_list_hash(&data.access_list);
 
-    assert_structure_rejected(
-        flashblock,
-        FlashblockAccessListValidationError::CodeTooLarge {
-            address,
-            index,
-            size,
-        },
-    );
+    assert!(matches!(
+        rejected_bal_error(flashblock).as_ref(),
+        BalValidationError::BalIndexMismatch {
+            index: "min",
+            expected: 0,
+            got: 1
+        }
+    ));
 }
 
 #[tokio::test]
-async fn rejects_item_cost_above_the_block_gas_limit() {
+async fn rejects_maximum_index_that_does_not_match_diff_transactions() {
     let mut flashblock = build_flashblock_fixture_eth_transfers(1, true);
     let data = flashblock
         .diff
         .access_list_data
-        .as_ref()
+        .as_mut()
+        .expect("BAL sidecar");
+    assert_eq!(data.access_list.max_tx_index, 2);
+    data.access_list.max_tx_index = 3;
+    data.access_list_hash = access_list_hash(&data.access_list);
+
+    assert!(matches!(
+        rejected_bal_error(flashblock).as_ref(),
+        BalValidationError::BalIndexMismatch {
+            index: "max",
+            expected: 2,
+            got: 3
+        }
+    ));
+}
+
+#[tokio::test]
+async fn rejects_item_cost_above_the_block_gas_limit_before_hashing_or_parent_lookup() {
+    let mut flashblock = build_flashblock_fixture_eth_transfers(1, true);
+    let data = flashblock
+        .diff
+        .access_list_data
+        .as_mut()
         .expect("BAL sidecar");
     let items = alloy_eip7928::total_bal_items(&data.access_list.changes);
-    flashblock.base.as_mut().expect("base payload").gas_limit =
-        items * alloy_eip7928::ITEM_COST as u64 - 1;
+    let gas_limit = items * alloy_eip7928::ITEM_COST as u64 - 1;
+    data.access_list_hash = alloy_primitives::B256::ZERO;
+    let base = flashblock.base.as_mut().expect("base payload");
+    base.gas_limit = gas_limit;
+    base.parent_hash = alloy_primitives::B256::repeat_byte(0xff);
 
-    assert_structure_rejected(
-        flashblock,
-        FlashblockAccessListValidationError::ItemLimit {
-            items,
-            limit: items - 1,
-        },
-    );
+    assert!(matches!(rejected_bal_error(flashblock).as_ref(),
+        BalValidationError::BalGasLimitExceeded(error) if *error == BlockAccessListGasError::new(items, gas_limit)));
 }
 
 #[test]
-fn rejects_read_write_overlap_without_the_coordinator() {
+fn rejects_read_write_overlap_through_reexecution_without_the_coordinator() {
     let mut flashblock = build_flashblock_fixture_eth_transfers(1, true);
     let data = flashblock
         .diff
@@ -437,7 +446,6 @@ fn rejects_read_write_overlap_without_the_coordinator() {
         .as_mut()
         .expect("BAL sidecar");
     let account = &mut data.access_list.changes[0];
-    let address = account.address;
     let slot = U256::from(1);
     account.storage_reads = vec![slot];
     account.storage_changes = vec![SlotChanges::new(
@@ -462,14 +470,51 @@ fn rejects_read_write_overlap_without_the_coordinator() {
             CommittedState::try_from(None).expect("no previous flashblock"),
             PayloadId::new([0; 8]),
         )
-        .expect_err("direct execution must validate the received BAL too");
+        .expect_err("the received sidecar must match canonical re-execution");
 
     let BalExecutorError::BalValidationError(error) = error else {
         panic!("expected BAL validation error");
     };
-    assert!(
-        matches!(error.as_ref(), BalValidationError::InvalidAccessList(
-        FlashblockAccessListValidationError::StorageReadWriteOverlap { address: got_address, slot: got_slot }
-    ) if *got_address == address && *got_slot == slot)
-    );
+    assert!(matches!(
+        error.as_ref(),
+        BalValidationError::BalHashMismatch { .. }
+    ));
+}
+
+#[test]
+fn rejects_excessive_item_cost_without_the_coordinator() {
+    let flashblock = build_flashblock_fixture_eth_transfers(1, true);
+    let data = flashblock
+        .diff
+        .access_list_data
+        .as_ref()
+        .expect("BAL sidecar");
+    let items = alloy_eip7928::total_bal_items(&data.access_list.changes);
+    let gas_limit = items * alloy_eip7928::ITEM_COST as u64 - 1;
+    let mut evm_env = EVM_ENV.clone();
+    evm_env.block_env.gas_limit = gas_limit;
+    let mut metrics = FlashblockValidationAttemptMetrics::default();
+
+    let error = FlashblocksBalExecutionStrategy
+        .execute(
+            ValidationCtx {
+                parent: &SEALED_HEADER,
+                attempt_metrics: &mut metrics,
+                chain_spec: CHAIN_SPEC.clone(),
+                evm_env,
+                execution_context: BLOCK_EXECUTION_CTX.clone(),
+                state_root_strategy: SyncStateRootStrategy,
+            },
+            BenchProvider::new(),
+            flashblock.diff,
+            CommittedState::try_from(None).expect("no previous flashblock"),
+            PayloadId::new([0; 8]),
+        )
+        .expect_err("direct execution must enforce the BAL item budget");
+
+    let BalExecutorError::BalValidationError(error) = error else {
+        panic!("expected BAL validation error");
+    };
+    assert!(matches!(error.as_ref(),
+        BalValidationError::BalGasLimitExceeded(error) if *error == BlockAccessListGasError::new(items, gas_limit)));
 }

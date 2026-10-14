@@ -1,4 +1,6 @@
-use alloy_eip7928::{AccountChanges, BlockAccessList};
+use alloy_eip7928::{
+    AccountChanges, BlockAccessList, BlockAccessListGasError, ITEM_COST, total_bal_items,
+};
 use alloy_primitives::{B256, keccak256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_primitives_traits::Account;
@@ -6,9 +8,6 @@ use reth_storage_api::{StateProvider, errors::provider::ProviderResult};
 use reth_trie_common::{HashedPostState, HashedStorage};
 
 use serde::{Deserialize, Serialize};
-
-mod validation;
-pub use validation::FlashblockAccessListValidationError;
 
 #[derive(
     Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
@@ -35,6 +34,15 @@ pub struct FlashblockAccessList {
 }
 
 impl FlashblockAccessList {
+    /// Validates the EIP-7928 item budget using borrowed account changes.
+    pub fn validate_gas_limit(&self, gas_limit: u64) -> Result<(), BlockAccessListGasError> {
+        let items = total_bal_items(&self.changes);
+        if items > gas_limit / ITEM_COST as u64 {
+            return Err(BlockAccessListGasError::new(items, gas_limit));
+        }
+        Ok(())
+    }
+
     /// Creates a flashblock access list sidecar from an upstream block access list.
     pub fn from_block_access_list(
         changes: BlockAccessList,
@@ -176,17 +184,61 @@ pub fn access_list_hash(access_list: &FlashblockAccessList) -> B256 {
 
 #[cfg(test)]
 mod tests {
-    use super::account_post_state;
+    use super::{FlashblockAccessList, account_post_state};
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_eip7928::{
         AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
-        StorageChange,
+        StorageChange, block_access_list::bal::Bal,
     };
     use alloy_primitives::{Address, Bytes, U256, keccak256};
     use reth_primitives_traits::Account;
 
     fn addr() -> Address {
         Address::with_last_byte(0x42)
+    }
+
+    #[test]
+    fn gas_item_limit_matches_alloy_at_the_boundary() {
+        let access_list = FlashblockAccessList::from_block_access_list(
+            vec![
+                AccountChanges::new(addr())
+                    .with_storage_read(U256::from(1))
+                    .with_storage_change(SlotChanges::new(
+                        U256::from(2),
+                        vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(1))],
+                    )),
+            ],
+            (0, 2),
+        );
+        let alloy_bal = Bal::new(access_list.as_block_access_list());
+        for gas_limit in [0, 5_999, 6_000, 6_001] {
+            assert_eq!(
+                access_list.validate_gas_limit(gas_limit),
+                alloy_bal.validate_gas_limit(gas_limit)
+            );
+        }
+    }
+
+    #[test]
+    fn empty_access_list_fits_zero_gas() {
+        assert_eq!(
+            FlashblockAccessList::default().validate_gas_limit(0),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn gas_item_limit_does_not_validate_code_sizes_or_indices() {
+        let access_list = FlashblockAccessList::from_block_access_list(
+            vec![
+                AccountChanges::new(addr()).with_code_change(CodeChange::new(
+                    BlockAccessIndex::new(u64::MAX),
+                    vec![0; 32_768].into(),
+                )),
+            ],
+            (u64::MAX, 0),
+        );
+        assert_eq!(access_list.validate_gas_limit(2_000), Ok(()));
     }
 
     #[test]

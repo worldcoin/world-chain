@@ -93,8 +93,9 @@ pub fn pre_refund_gas_used<'a>(
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
 pub enum BalValidationError {
-    #[error("Invalid received BAL: {0}")]
-    InvalidAccessList(world_chain_primitives::access_list::FlashblockAccessListValidationError),
+    #[error(transparent)]
+    #[serde(skip_serializing)]
+    BalGasLimitExceeded(#[from] alloy_eip7928::BlockAccessListGasError),
     #[error("Received BAL hash mismatch: expected {expected:?}, got {got:?}")]
     ReceivedBalHashMismatch {
         expected: FixedBytes<32>,
