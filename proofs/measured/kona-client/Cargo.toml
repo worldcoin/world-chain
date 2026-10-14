@@ -80,3 +80,6 @@ revm.workspace = true
 spin.workspace = true
 tracing.workspace = true
 world-chain-proof-core.workspace = true
+
+[dev-dependencies]
+serde_json = "1"
