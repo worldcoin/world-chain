@@ -135,11 +135,14 @@ and Actions. The separate membership client uses `REVIEW_POLICY_TEAM_TOKEN` only
 read-only team lookups. No OpenAI API key is needed.
 
 Checks are posted on the PR head explicitly. Each PR is serialized, and the head
-and target commit are rechecked before publishing. Before all gates can pass, the
-controller rereads AI results, human confirmations, permissions and CI results.
-Two consecutive snapshots must have the same fingerprint, which is recorded in
-the check summary. A revoked author confirmation, dismissed approval or failed CI rerun during
-the AI wait therefore blocks clearance. Repeatedly changing evidence fails closed
+and target commit are rechecked before publishing. Every poll rereads AI results,
+human confirmations, permissions and CI results. Human clearance requires two
+consecutive snapshots with the same fingerprint of human review decisions, the
+author's approval command state, permissions, ownership, risk and commit identity.
+The verified human fingerprint is recorded in the check summary. AI/CI progress,
+reactions, review body edits and ordinary discussion do not invalidate it. A revoked
+author confirmation, dismissed approval or failed CI rerun during the AI wait still
+blocks its corresponding gate. Repeatedly changing human evidence fails closed
 and requires a rerun. GitHub API reads and check publication are not atomic; later
 events trigger a new evaluation.
 

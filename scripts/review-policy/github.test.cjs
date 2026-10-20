@@ -81,7 +81,7 @@ test('trusted controller publishes four successful checks on PR head, never on m
     const check = result.checks.find((check) => check.name === name);
     assert.equal(check.head_sha, head);
     assert.equal(check.conclusion, 'success', name);
-    assert.match(check.output.summary, /Verified evidence fingerprint: [a-f0-9]{64}/);
+    assert.match(check.output.summary, /Verified human evidence fingerprint: [a-f0-9]{64}/);
   }
   assert(result.calls.every((call) => call.args.request.timeout === 20000));
 });
@@ -180,7 +180,7 @@ test('human clearance is independently verified and revoked while both AI review
     const human = fixture.checks.find((check) => check.name === 'human-review-gate');
     if (++sleeps === 1) {
       assert.equal(human.conclusion, 'success');
-      assert.match(human.output.summary, /Verified evidence fingerprint: [a-f0-9]{64}/);
+      assert.match(human.output.summary, /Verified human evidence fingerprint: [a-f0-9]{64}/);
       options.comments.push({ ...authorApproval, id: 2, body: '/unapprove', created_at: new Date(now + 30000).toISOString() });
     } else {
       assert.equal(human.conclusion, 'failure');
@@ -192,6 +192,48 @@ test('human clearance is independently verified and revoked while both AI review
   assert.deepEqual(result.failures, []);
   assert.equal(sleeps, 2);
   assert.equal(result.checks.find((check) => check.name === 'human-review-gate').conclusion, 'failure');
+});
+
+test('AI and CI progress updates cannot invalidate unchanged human clearance', async () => {
+  let revision = 0;
+  let pending = true;
+  let sleeps = 0;
+  const result = await run({ files: [{ filename: 'ordinary-config.yaml' }], comments: [authorApproval], sleepMs: 30000,
+    respond: (route, _args, data) => {
+      const progress = `Progress update ${++revision}`;
+      const updatedAt = new Date(now + revision).toISOString();
+      if (route === 'GET /repos/{owner}/{repo}/actions/runs') {
+        for (const run of data.workflow_runs) Object.assign(run, { updated_at: updatedAt,
+          ...(pending ? { status: 'in_progress', conclusion: null } : {}) });
+      }
+      if (route === 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs') {
+        const cursor = data.check_runs.find((check) => check.name === 'Cursor Bugbot');
+        Object.assign(cursor, { output: { summary: progress }, ...(pending ? { status: 'in_progress', conclusion: null } : {}) });
+      }
+      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews') {
+        return [{ ...codexReview, body: progress, ...(pending ? { state: 'PENDING', submitted_at: null } : {}) },
+          { id: 2, user: { login: 'reviewer', type: 'User' }, state: 'APPROVED', submitted_at: at, body: progress }];
+      }
+      if (route === 'GET /repos/{owner}/{repo}/issues/{issue_number}/reactions') {
+        return [{ id: revision, user: { login: 'reviewer', type: 'User' }, content: '+1', created_at: updatedAt }];
+      }
+      if (route === 'GET /repos/{owner}/{repo}/issues/{issue_number}/comments') {
+        return [...data, { id: 2, user: { login: 'cursor[bot]', type: 'Bot' }, body: progress, created_at: at }];
+      }
+      return data;
+    },
+    afterSleep: (fixture) => {
+      sleeps++;
+      assert.equal(fixture.checks.find((check) => check.name === 'human-review-gate').conclusion, 'success');
+      for (const name of ['codex-review-gate', 'bugbot-review-gate', 'required-ci-gate']) {
+        assert.equal(fixture.checks.find((check) => check.name === name).status, 'in_progress');
+      }
+      pending = false;
+    },
+  });
+  assert.deepEqual(result.failures, []);
+  assert.equal(sleeps, 1);
+  for (const name of GATES) assert.equal(result.checks.find((check) => check.name === name).conclusion, 'success', name);
 });
 
 test('dismissal or changes requested during the AI wait replaces the earlier approval', async (t) => {
@@ -241,12 +283,20 @@ test('an author approval removed between final snapshots blocks merge clearance'
   assert(!result.calls.some((call) => call.args.output?.title === 'human-review-gate: success'));
 });
 
-test('evidence that keeps changing cannot produce successful gates', async () => {
+test('discussion-only comment updates cannot invalidate human clearance', async () => {
   let reads = 0;
   const result = await run({ respond: (route, _args, data) => route === 'GET /repos/{owner}/{repo}/issues/{issue_number}/comments'
     ? [{ ...authorApproval, body: `Discussion update ${++reads}` }] : data });
+  assert.deepEqual(result.failures, []);
+  for (const name of GATES) assert.equal(result.checks.find((check) => check.name === name).conclusion, 'success', name);
+});
+
+test('human confirmation evidence that keeps changing cannot produce successful gates', async () => {
+  let reads = 0;
+  const result = await run({ respond: (route, _args, data) => route === 'GET /repos/{owner}/{repo}/issues/{issue_number}/comments'
+    ? (++reads % 2 ? [authorApproval] : []) : data });
   assert.equal(result.failures.length, 1);
-  assert.match(result.failures[0], /Evidence kept changing/);
+  assert.match(result.failures[0], /Human evidence kept changing/);
   for (const name of GATES) assert.equal(result.checks.find((check) => check.name === name).conclusion, 'failure', name);
 });
 

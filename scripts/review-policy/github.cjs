@@ -91,9 +91,9 @@ async function people(api, pr, reviews, paths) {
   return { writable, ownerMembers };
 }
 
-function summary(pr, classification, results, evidenceFingerprint) {
+function summary(pr, classification, results, humanEvidenceFingerprint) {
   const lines = [`PR #${pr.number}; head ${pr.head.sha}; base ${pr.base.sha}; risk: ${classification?.risk || 'unknown'}.`];
-  if (evidenceFingerprint) lines.push(`Verified evidence fingerprint: ${evidenceFingerprint}`);
+  if (humanEvidenceFingerprint) lines.push(`Verified human evidence fingerprint: ${humanEvidenceFingerprint}`);
   if (classification) {
     lines.push('', 'Paths setting the risk:');
     for (const item of classification.details.filter((item) => item.risk === classification.risk).slice(0, 40)) lines.push(`- ${item.path}`);
@@ -213,9 +213,14 @@ async function evaluate({ github, context, core, number, teamGithub,
         'required-ci-gate': policy.ciGate(groups, runs, jobs, workflowIds, pr),
       };
       checkIdentity(await getPr());
-      return { reviews, results: evidenceResults, fingerprint: fingerprint({
-        head: sha, base: pr.base.sha, reviews, comments, reactions, checks: cursorChecks, runs,
-        jobs: [...jobs], writable: [...humans.writable].sort(),
+      const humanReviews = [...policy.latestReviews(reviews)].map(([login, review]) => ({ login, state: review.state }))
+        .sort((a, b) => a.login.localeCompare(b.login));
+      const humanParticipants = new Set([pr.user.login.toLowerCase(), ...humanReviews.map((review) => review.login)]);
+      return { results: evidenceResults, humanFingerprint: fingerprint({
+        head: sha, base: pr.base.sha, risk: classification.risk, paths: owners,
+        author: { login: pr.user.login.toLowerCase(), human: policy.human(pr.user) },
+        authorApproved: policy.authorApproved(comments, pr.user.login), reviews: humanReviews,
+        writable: [...humans.writable].filter((login) => humanParticipants.has(login)).sort(),
         ownerMembers: [...humans.ownerMembers].map(([owner, members]) => [owner, [...members].sort()]).sort(),
       }) };
     }
@@ -224,10 +229,10 @@ async function evaluate({ github, context, core, number, teamGithub,
       for (let attempt = 0; attempt < 3; attempt++) {
         if (candidate.results['human-review-gate'].state !== 'success') return candidate;
         const rechecked = await readEvidence();
-        if (candidate.fingerprint === rechecked.fingerprint) return { ...rechecked, verified: true };
+        if (candidate.humanFingerprint === rechecked.humanFingerprint) return { ...rechecked, verified: true };
         candidate = rechecked;
       }
-      throw new Error('Evidence kept changing during final verification; no merge clearance published. Rerun Review policy.');
+      throw new Error('Human evidence kept changing during final verification; no human clearance published. Rerun Review policy.');
     }
     let published;
     const deadline = now() + 30 * 60 * 1000;
@@ -241,7 +246,7 @@ async function evaluate({ github, context, core, number, teamGithub,
       if (aiWaiting && expired) for (const name of ['codex-review-gate', 'bugbot-review-gate']) {
         if (results[name].state === 'pending') results[name] = { state: 'failure', reason: 'No completed review after 30 minutes; rerun Review policy.' };
       }
-      const text = summary(pr, classification, results, evidence.verified ? evidence.fingerprint : undefined);
+      const text = summary(pr, classification, results, evidence.verified ? evidence.humanFingerprint : undefined);
       if (text !== published) {
         const current = await getPr();
         if (current.head.sha !== sha || current.base.ref !== pr.base.ref || current.state !== 'open') return;
