@@ -15,6 +15,10 @@ By default, every PR to `main` needs all four checks and resolved review convers
 | `human-review-gate` | The risk tier and file ownership requirements below are satisfied. |
 | `required-ci-gate` | Every applicable CI workflow and required job succeeded. |
 
+Global code owners can explicitly bypass the AI review and build/test checks for
+an emergency merge, as described below. Human confirmations and resolved review
+threads remain required.
+
 All review threads must be resolved, including outdated threads and findings from
 either bot. Fix the problem or explain why it is a false positive before resolving
 the thread. A completed AI review can have findings: the separate native thread
@@ -155,19 +159,27 @@ This change does not introduce a merge queue.
 
 ## Emergency CI override
 
-Global code owners can explicitly bypass build/test CI when a pipeline is broken
-or unreliable. In the PR merge box, select GitHub's bypass option and confirm the
-squash merge. This is a manual merge action; failing or pending CI stays visible.
-Codex, Bugbot, the risk-based human confirmations and resolution of all review
-threads remain mandatory. Socket and other independent protections still apply.
+Global code owners can explicitly bypass build/test CI and the Codex and Bugbot
+completion checks when a pipeline or reviewer is broken or unavailable. In the PR
+merge box, select GitHub's bypass option and confirm the squash merge. This is a
+manual merge action; failing or pending checks stay visible and no result is
+changed to success. There is no automatic fallback during an outage: an AI review
+without a completion signal times out after 30 minutes and can be rerun or
+explicitly bypassed. The risk-based human confirmations and resolution of all
+review threads remain mandatory. Socket and other independent protections still
+apply.
+
+Human clearance is verified independently of AI completion and refreshed during
+the wait, so revocations and review changes still block an emergency merge.
 
 The activation script installs two rulesets on `main`:
 
-- `world-chain-review-policy` requires the three review gates and resolved threads,
+- `world-chain-review-policy` requires `human-review-gate` and resolved threads,
   with no bypass actors.
-- `world-chain-ci-policy` requires only `required-ci-gate`. Its bypass list contains
-  `@worldcoin/protocol` as a native **Team** actor, using GitHub's **For pull
-  requests only** mode.
+- `world-chain-ci-policy` requires `required-ci-gate`, `codex-review-gate` and
+  `bugbot-review-gate`. Its bypass list contains `@worldcoin/protocol` as a native
+  **Team** actor, using GitHub's **For pull requests only** mode. The same explicit
+  bypass covers all three checks; it does not grant direct pushes to `main`.
 
 The script derives the actor from the last global `*` rule on the trusted `main`.
 It verifies that an owner team belongs to the repository's organization, is visible
@@ -188,9 +200,10 @@ is the global owner still requires activation to bind the new team ID.
 4. Validate readiness without changing GitHub:
    `node scripts/review-policy/admin.cjs activate --backup /tmp/world-chain-review-before.json --evidence-pr NUMBER`.
 5. Run the same activation command with `--apply` only after readiness passes. It
-   first installs the CI ruleset with owner-only PR bypass, then the review ruleset
-   without bypass, and verifies both before removing the blanket approval/code-owner
-   requirement. Existing Socket and unrelated rules are retained.
+   first installs the CI and AI ruleset with owner-only PR bypass, then the human
+   review and thread ruleset without bypass, and verifies both before removing the
+   blanket approval/code-owner requirement. Existing Socket and unrelated rules
+   are retained.
 
 Activation verifies the deployed files match the local implementation and requires
 a real PR whose four gate checks succeeded. The required checks accept GitHub

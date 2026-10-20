@@ -127,7 +127,7 @@ test('a ruleset not enforced by GitHub cannot relax the original approval requir
   assert.equal(f.mutations.length, 1);
 });
 
-test('only CI permits PR-only bypass, using distinct global owners from main rather than path-specific owners', async (t) => {
+test('build/test CI and both AI gates permit PR-only bypass while human approvals and threads remain mandatory', async (t) => {
   const f = await fixture(t, { codeowners: '* @Alice @Bob @Alice\n/docs/ @Carol\n' });
   await f.run('activate', ['--evidence-pr', '1', '--apply']);
   const [ci, review] = f.mutations.map((item) => item.body);
@@ -136,9 +136,13 @@ test('only CI permits PR-only bypass, using distinct global owners from main rat
     { actor_id: 102, actor_type: 'User', bypass_mode: 'pull_request' },
   ]);
   assert.deepEqual(ci.rules.map((rule) => rule.type), ['required_status_checks']);
-  assert.deepEqual(ci.rules[0].parameters.required_status_checks, [{ context: 'required-ci-gate', integration_id: 15368 }]);
+  assert.deepEqual(ci.rules[0].parameters.required_status_checks, [
+    { context: 'codex-review-gate', integration_id: 15368 },
+    { context: 'bugbot-review-gate', integration_id: 15368 },
+    { context: 'required-ci-gate', integration_id: 15368 },
+  ]);
   assert.deepEqual(review.bypass_actors, []);
-  assert.deepEqual(review.rules[0].parameters.required_status_checks.map((check) => check.context), GATES.filter((gate) => gate !== 'required-ci-gate'));
+  assert.deepEqual(review.rules[0].parameters.required_status_checks, [{ context: 'human-review-gate', integration_id: 15368 }]);
   assert.equal(review.rules[1].parameters.required_review_thread_resolution, true);
   assert(f.reads.includes('contents/CODEOWNERS?ref=base'));
   assert(!f.reads.some((resource) => resource.includes('CODEOWNERS?ref=head')));
@@ -215,6 +219,22 @@ test('migration from the combined ruleset installs CI protection before removing
   assert.deepEqual(f.mutations.map((item) => item.resource), ['rulesets', 'rulesets/50', 'branches/main/protection/required_pull_request_reviews']);
   await f.run('restore', ['--apply']);
   assert.deepEqual([...f.rulesets.values()], f.originalRulesets);
+});
+
+test('extending an existing CI-only bypass installs AI checks before removing their old requirements and restores the old split', async (t) => {
+  const review = { id: 50, ...rulesetBody() };
+  review.rules[0].parameters.required_status_checks = GATES.filter((gate) => gate !== 'required-ci-gate')
+    .map((context) => ({ context, integration_id: 15368 }));
+  const ci = { id: 60, ...ciRulesetBody([{ actor_id: 14554659, actor_type: 'Team', bypass_mode: 'pull_request' }]) };
+  ci.rules[0].parameters.required_status_checks = [{ context: 'required-ci-gate', integration_id: 15368 }];
+  const f = await fixture(t, { codeowners: '* @worldcoin/protocol', existingRulesets: [review, ci] });
+  await f.run('activate', ['--evidence-pr', '1', '--apply']);
+  assert.deepEqual(f.mutations.map((item) => item.resource), ['rulesets/60', 'rulesets/50', 'branches/main/protection/required_pull_request_reviews']);
+  assert.deepEqual(f.rulesets.get(60), { id: 60, ...ciRulesetBody(ci.bypass_actors) });
+  assert.deepEqual(f.rulesets.get(50), { id: 50, ...rulesetBody() });
+  await f.run('restore', ['--apply']);
+  assert.deepEqual([...f.rulesets.values()], f.originalRulesets);
+  assert.deepEqual(f.live, f.original);
 });
 
 test('a target-branch change during owner lookup requires a fresh readiness check', async (t) => {

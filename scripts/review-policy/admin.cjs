@@ -10,7 +10,7 @@ const { readCodeowners } = require('./github.cjs');
 const REPO = 'worldcoin/world-chain';
 const RULESET = 'world-chain-review-policy';
 const CI_RULESET = 'world-chain-ci-policy';
-const REVIEW_GATES = GATES.filter((gate) => gate !== 'required-ci-gate');
+const CI_GATES = GATES.filter((gate) => gate !== 'human-review-gate');
 
 function request(method, path, body) {
   try {
@@ -54,7 +54,7 @@ function rulesetBody() {
     name: RULESET, target: 'branch', enforcement: 'active', bypass_actors: [],
     conditions: { ref_name: { include: ['refs/heads/main'], exclude: [] } },
     rules: [
-      requiredChecks(REVIEW_GATES),
+      requiredChecks(['human-review-gate']),
       { type: 'pull_request', parameters: {
         required_approving_review_count: 0, require_code_owner_review: false,
         dismiss_stale_reviews_on_push: false, require_last_push_approval: false,
@@ -68,7 +68,7 @@ function ciRulesetBody(bypassActors) {
   return {
     name: CI_RULESET, target: 'branch', enforcement: 'active', bypass_actors: bypassActors,
     conditions: { ref_name: { include: ['refs/heads/main'], exclude: [] } },
-    rules: [requiredChecks(['required-ci-gate'])],
+    rules: [requiredChecks(CI_GATES)],
   };
 }
 
@@ -187,7 +187,7 @@ async function main(args = process.argv.slice(2), api = { request, list }, log =
     if (!result.output?.summary?.includes(`base ${main};`)) throw new Error(`Evidence gate ${name} used an older target policy; re-evaluate the PR.`);
   }
   const bypassActors = await ciBypassActors(request, main);
-  log(`Ready to require ${GATES.join(', ')} and resolved threads, then replace the blanket review count with dynamic ownership. Only required-ci-gate permits explicit PR-only bypass by ${bypassActors.length} global CODEOWNERS users/teams. Backup: ${backupPath}`);
+  log(`Ready to require ${GATES.join(', ')} and resolved threads, then replace the blanket review count with dynamic ownership. ${CI_GATES.join(', ')} permit explicit PR-only bypass by ${bypassActors.length} global CODEOWNERS users/teams. Human confirmations and resolved threads cannot be bypassed. Backup: ${backupPath}`);
   if (!apply) { log('Dry run. Add --apply to activate.'); return; }
   const liveProtection = request('GET', 'branches/main/protection');
   if (JSON.stringify(reviewSettings(liveProtection)) !== JSON.stringify(reviewSettings(backup.protection))) {

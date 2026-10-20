@@ -161,6 +161,39 @@ test('author confirmation changes during the AI wait cannot leave a successful h
   });
 });
 
+test('human clearance is independently verified and revoked while both AI reviewers remain unavailable', async () => {
+  let sleeps = 0;
+  let unavailable = true;
+  const options = { files: [{ filename: 'ordinary-config.yaml' }], noCodex: true,
+    comments: [structuredClone(authorApproval)], sleepMs: 30000,
+    respond: (route, _args, data) => {
+      if (unavailable && route === 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs') {
+        data.check_runs = data.check_runs.filter((check) => check.name !== 'Cursor Bugbot');
+      }
+      return data;
+    },
+  };
+  options.afterSleep = (fixture) => {
+    for (const name of ['codex-review-gate', 'bugbot-review-gate']) {
+      assert.equal(fixture.checks.find((check) => check.name === name).status, 'in_progress');
+    }
+    const human = fixture.checks.find((check) => check.name === 'human-review-gate');
+    if (++sleeps === 1) {
+      assert.equal(human.conclusion, 'success');
+      assert.match(human.output.summary, /Verified evidence fingerprint: [a-f0-9]{64}/);
+      options.comments.push({ ...authorApproval, id: 2, body: '/unapprove', created_at: new Date(now + 30000).toISOString() });
+    } else {
+      assert.equal(human.conclusion, 'failure');
+      options.noCodex = false;
+      unavailable = false;
+    }
+  };
+  const result = await run(options);
+  assert.deepEqual(result.failures, []);
+  assert.equal(sleeps, 2);
+  assert.equal(result.checks.find((check) => check.name === 'human-review-gate').conclusion, 'failure');
+});
+
 test('dismissal or changes requested during the AI wait replaces the earlier approval', async (t) => {
   for (const state of ['DISMISSED', 'CHANGES_REQUESTED']) await t.test(state, async () => {
     const approval = { id: 2, user: { login: 'reviewer', type: 'User' }, state: 'APPROVED', commit_id: head, submitted_at: at };
@@ -202,7 +235,7 @@ test('CI completed during the AI wait can pass without another controller run', 
 test('an author approval removed between final snapshots blocks merge clearance', async () => {
   let reads = 0;
   const result = await run({ files: [{ filename: 'ordinary-config.yaml' }], comments: [authorApproval],
-    respond: (route, _args, data) => route === 'GET /repos/{owner}/{repo}/issues/{issue_number}/comments' && ++reads >= 3 ? [] : data });
+    respond: (route, _args, data) => route === 'GET /repos/{owner}/{repo}/issues/{issue_number}/comments' && ++reads >= 2 ? [] : data });
   assert.deepEqual(result.failures, []);
   assert.equal(result.checks.find((check) => check.name === 'human-review-gate').conclusion, 'failure');
   assert(!result.calls.some((call) => call.args.output?.title === 'human-review-gate: success'));
@@ -354,12 +387,12 @@ test('team ownership without a membership credential fails closed with a configu
   for (const name of GATES) assert.equal(result.checks.find((check) => check.name === name).conclusion, 'failure');
 });
 
-test('activation separates CI from review gates without review bypass and preserves native restore settings', () => {
+test('activation permits bypass of AI and CI checks while protecting human approvals and threads', () => {
   const rule = rulesetBody();
   assert.deepEqual(rule.bypass_actors, []);
   const ci = ciRulesetBody([]);
-  assert.deepEqual([...rule.rules[0].parameters.required_status_checks, ...ci.rules[0].parameters.required_status_checks]
-    .map((check) => check.context), GATES);
+  assert.deepEqual(rule.rules[0].parameters.required_status_checks.map((check) => check.context), ['human-review-gate']);
+  assert.deepEqual(ci.rules[0].parameters.required_status_checks.map((check) => check.context), ['codex-review-gate', 'bugbot-review-gate', 'required-ci-gate']);
   assert.equal(rule.rules[1].parameters.required_review_thread_resolution, true);
   assert.equal(rule.rules[1].parameters.dismiss_stale_reviews_on_push, false);
   assert.deepEqual(reviewSettings({ required_pull_request_reviews: { required_approving_review_count: 1, require_code_owner_reviews: true, dismiss_stale_reviews: false, require_last_push_approval: false } }), {

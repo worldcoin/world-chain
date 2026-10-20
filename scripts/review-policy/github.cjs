@@ -222,31 +222,20 @@ async function evaluate({ github, context, core, number, teamGithub,
     async function finalEvidence() {
       let candidate = await readEvidence();
       for (let attempt = 0; attempt < 3; attempt++) {
-        if (!Object.values(candidate.results).every((result) => result.state === 'success')) return candidate;
+        if (candidate.results['human-review-gate'].state !== 'success') return candidate;
         const rechecked = await readEvidence();
         if (candidate.fingerprint === rechecked.fingerprint) return { ...rechecked, verified: true };
         candidate = rechecked;
       }
       throw new Error('Evidence kept changing during final verification; no merge clearance published. Rerun Review policy.');
     }
-    let evidence = await readEvidence();
-    let reviews = evidence.reviews;
     let published;
     const deadline = now() + 30 * 60 * 1000;
     while (true) {
-      const reactions = await api.all('GET /repos/{owner}/{repo}/issues/{issue_number}/reactions', { issue_number: number });
-      const currentChecks = await api.all('GET /repos/{owner}/{repo}/commits/{ref}/check-runs', { ref: sha, filter: 'all' }, 'check_runs');
-      results = {
-        'codex-review-gate': policy.codexGate(reviews, reactions, sha, observation.started_at),
-        'bugbot-review-gate': policy.bugbotGate(currentChecks, reviews, sha),
-        'human-review-gate': evidence.results['human-review-gate'],
-        'required-ci-gate': evidence.results['required-ci-gate'],
-      };
+      // Human clearance must stay current even when AI checks are bypassed.
+      const evidence = await finalEvidence();
+      results = evidence.results;
       const waitingForAI = () => ['codex-review-gate', 'bugbot-review-gate'].some((name) => results[name].state === 'pending');
-      if (!waitingForAI()) {
-        evidence = await finalEvidence();
-        results = evidence.results;
-      }
       const aiWaiting = waitingForAI();
       const expired = now() + 30000 > deadline;
       if (aiWaiting && expired) for (const name of ['codex-review-gate', 'bugbot-review-gate']) {
@@ -263,8 +252,6 @@ async function evaluate({ github, context, core, number, teamGithub,
       if (!aiWaiting || expired) { await core.summary.addRaw(`<pre>${text.replaceAll('&', '&amp;').replaceAll('<', '&lt;')}</pre>`).write(); return; }
       core.info(`Waiting for AI reviews on PR #${number}, ${sha.slice(0, 7)}.`);
       await sleep(30000);
-      // Poll AI signals; reread all requirements before final clearance.
-      reviews = await api.all('GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews', { pull_number: number });
     }
   } catch (error) {
     const reason = `Review policy could not verify requirements: ${error.message}`;
