@@ -14,7 +14,9 @@ const REVIEW_GATES = GATES.filter((gate) => gate !== 'required-ci-gate');
 
 function request(method, path, body) {
   try {
-    return JSON.parse(execFileSync('gh', ['api', `repos/${REPO}/${path}`, '--method', method, ...(body === undefined ? [] : ['--input', '-'])], {
+    const endpoint = path.startsWith('/') ? path.slice(1) : `repos/${REPO}/${path}`;
+    return JSON.parse(execFileSync('gh', ['api', endpoint, '--method', method,
+      '--header', 'Accept: application/vnd.github.v3.repository+json', ...(body === undefined ? [] : ['--input', '-'])], {
       input: body === undefined ? undefined : JSON.stringify(body), encoding: 'utf8', stdio: 'pipe', timeout: 30000, maxBuffer: 16000000,
     }) || 'null');
   } catch (error) {
@@ -82,7 +84,18 @@ async function ciBypassActors(request, ref) {
   if (!owners.length) throw new Error('CI bypass requires a nonempty global * CODEOWNERS rule on main.');
   const actors = [];
   for (const owner of owners) {
-    if (owner.includes('/')) throw new Error(`CI bypass requires individual global code owners; cannot expand ${owner}.`);
+    if (owner.includes('/')) {
+      const [org, slug] = owner.slice(1).split('/');
+      if (org !== REPO.split('/')[0]) throw new Error(`CI bypass team ${owner} must belong to the repository organization.`);
+      const team = request('GET', `/orgs/${org}/teams/${slug}`);
+      const repo = request('GET', `/orgs/${org}/teams/${slug}/repos/${REPO}`);
+      if (!Number.isSafeInteger(team.id) || team.id < 1 || team.slug !== slug || team.privacy !== 'closed'
+        || repo.full_name !== REPO || !repo.permissions?.push) {
+        throw new Error(`CI bypass team ${owner} must be visible and have repository write access.`);
+      }
+      actors.push({ actor_id: team.id, actor_type: 'Team', bypass_mode: 'pull_request' });
+      continue;
+    }
     const login = owner.slice(1);
     const result = request('GET', `collaborators/${login}/permission`);
     if (!human(result.user) || !Number.isSafeInteger(result.user.id) || result.user.id < 1
@@ -174,7 +187,7 @@ async function main(args = process.argv.slice(2), api = { request, list }, log =
     if (!result.output?.summary?.includes(`base ${main};`)) throw new Error(`Evidence gate ${name} used an older target policy; re-evaluate the PR.`);
   }
   const bypassActors = await ciBypassActors(request, main);
-  log(`Ready to require ${GATES.join(', ')} and resolved threads, then replace the blanket review count with dynamic ownership. Only required-ci-gate permits explicit PR-only bypass by ${bypassActors.length} global code owners. Backup: ${backupPath}`);
+  log(`Ready to require ${GATES.join(', ')} and resolved threads, then replace the blanket review count with dynamic ownership. Only required-ci-gate permits explicit PR-only bypass by ${bypassActors.length} global CODEOWNERS users/teams. Backup: ${backupPath}`);
   if (!apply) { log('Dry run. Add --apply to activate.'); return; }
   const liveProtection = request('GET', 'branches/main/protection');
   if (JSON.stringify(reviewSettings(liveProtection)) !== JSON.stringify(reviewSettings(backup.protection))) {

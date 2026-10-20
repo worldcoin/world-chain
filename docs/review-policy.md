@@ -43,6 +43,7 @@ critical. The check summary identifies the paths setting the PR's risk.
 Only a human author with repository write access who owns **every** changed path
 can take the owner fast path. `CODEOWNERS` is read from the current target branch,
 using GitHub's `.github/`, root, then `docs/` precedence and last matching pattern.
+The global owner is `@worldcoin/protocol`; current team members own all files.
 
 | Risk | Author owns every path | Other authors |
 | --- | --- | --- |
@@ -66,10 +67,27 @@ an additional confirmation. Dismissed approvals do not count, and an active
 **Request changes** review from an authorized human blocks the gate. An ordinary
 comment review does not revoke an earlier approval.
 
-Owner usernames are case-insensitive. Individual owners work with the standard
-GitHub token. Team ownership requires readable team membership; inability to verify
-membership fails closed with an explicit message. The current owner list uses only
-individuals. Unsupported CODEOWNERS syntax is rejected instead of being guessed.
+Owner usernames are case-insensitive. Protocol-team membership is fetched live on
+each evidence read, including final verification after AI review. New PRs therefore
+use the current roster without changing this repository or rerunning activation.
+Open PRs pick up membership changes on their next gate evaluation; dispatch
+**Review policy** with the PR number to refresh one immediately. A previous owner
+approval stops counting if that reviewer is no longer an owner at reevaluation.
+Unreadable membership fails closed with an explicit message. Unsupported
+CODEOWNERS syntax is rejected instead of being guessed.
+
+### Team membership credential
+
+Provide the Actions secret `REVIEW_POLICY_TEAM_TOKEN` with read access to Worldcoin
+organization **Members**. A fine-grained personal access token needs only this
+organization permission; repository write or administration permission is not
+needed. An organization secret must be explicitly available to `world-chain`.
+The built-in `GITHUB_TOKEN` does not grant organization membership access.
+
+The controller uses a separate API client for team membership. Repository reads
+and check publication continue to use the job's built-in token. Missing, expired
+or unauthorized membership credentials block the gates rather than treating
+contributors as owners. Team membership includes active members of child teams.
 
 ## AI completion and CI
 
@@ -109,7 +127,8 @@ The privileged controller checks out only an immutable commit of `main`. It neve
 executes PR code or reads artifacts from untrusted workflows. A separate unprivileged
 review-event notifier wakes the controller; the controller reads live API state.
 Its token has checks write access and read access to repository metadata, PRs, issues
-and Actions. No OpenAI API key or permanent token is needed.
+and Actions. The separate membership client uses `REVIEW_POLICY_TEAM_TOKEN` only for
+read-only team lookups. No OpenAI API key is needed.
 
 Checks are posted on the PR head explicitly. Each PR is serialized, and the head
 and target commit are rechecked before publishing. Before all gates can pass, the
@@ -147,22 +166,23 @@ The activation script installs two rulesets on `main`:
 - `world-chain-review-policy` requires the three review gates and resolved threads,
   with no bypass actors.
 - `world-chain-ci-policy` requires only `required-ci-gate`. Its bypass list contains
-  the individual human collaborators with write access named by the last global
-  `*` rule in `CODEOWNERS` on `main`, using GitHub's **For pull requests only** mode.
+  `@worldcoin/protocol` as a native **Team** actor, using GitHub's **For pull
+  requests only** mode.
 
-Path-specific owners, repository roles and broader teams are not added to the CI
-bypass list. Activation rejects missing global owners, team entries, bots or
-owners without write access. GitHub's native bypass list is configured at
-activation time: when the global owner list changes, rerun activation with a
-fresh backup and successful evidence PR to update the list. A `CODEOWNERS` edit
-alone does not synchronize bypass permissions.
+The script derives the actor from the last global `*` rule on the trusted `main`.
+It verifies that an owner team belongs to the repository's organization, is visible
+and has repository write access. It stores the team ID, without copying members.
+Joining or leaving the protocol team automatically updates native CI bypass
+access; no activation rerun is needed for membership changes. Changing which team
+is the global owner still requires activation to bind the new team ID.
 
 ## Rollout and rollback
 
 1. Land the workflows through the existing review process. Do not relax protection
    before the trusted controller is on `main`.
-2. Enable Codex automatic review for all PRs/every push. Observe all four checks on
-   real PRs, including an author confirmation and bot findings resolved as threads.
+2. Configure `REVIEW_POLICY_TEAM_TOKEN`, then enable Codex automatic review for all
+   PRs/every push. Observe all four checks on real PRs, including protocol membership,
+   an author confirmation and bot findings resolved as threads.
 3. Save a fresh snapshot outside the checkout:
    `node scripts/review-policy/admin.cjs snapshot --backup /tmp/world-chain-review-before.json`.
 4. Validate readiness without changing GitHub:
@@ -175,7 +195,7 @@ alone does not synchronize bypass permissions.
 Activation verifies the deployed files match the local implementation and requires
 a real PR whose four gate checks succeeded. The required checks accept GitHub
 Actions as their source. Only the CI ruleset permits bypass, and only for the
-verified global code owners. Automatic stale-review dismissal and last-push
+verified global owner team. Automatic stale-review dismissal and last-push
 approval stay disabled.
 
 For rollback, run

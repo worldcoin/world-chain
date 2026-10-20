@@ -43,7 +43,7 @@ function fake(options = {}) {
     } else if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/files') data = options.files || [{ filename: 'README.md' }];
     else if (route === 'GET /repos/{owner}/{repo}/contents/{path}') {
       if (args.path === '.github/CODEOWNERS') throw Object.assign(new Error('Not found'), { status: 404 });
-      data = { type: 'file', encoding: 'base64', size: 20, content: Buffer.from('* @owner @reviewer').toString('base64') };
+      data = { type: 'file', encoding: 'base64', size: 20, content: Buffer.from(options.codeowners || '* @owner @reviewer').toString('base64') };
     } else if (route === 'GET /repos/{owner}/{repo}/pulls') data = options.duplicate ? [pr, { ...pr, number: 2 }] : [pr];
     else if (route === 'GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}') data = { id: args.workflow_id === 'review-policy-tests.yml' ? 1 : 2 };
     else if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews') data = options.reviews || (options.noCodex ? [] : [codexReview]);
@@ -54,6 +54,7 @@ function fake(options = {}) {
     })) };
     else if (route === 'GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs') data = { jobs: [{ name: args.run_id === 1 ? 'review-policy-tests' : 'check-large-files', status: 'completed', conclusion: 'success' }] };
     else if (route === 'GET /repos/{owner}/{repo}/collaborators/{username}/permission') data = { permission: 'write' };
+    else if (route === 'GET /orgs/{org}/teams/{team_slug}/members') data = options.members || [];
     else throw new Error(`Unexpected API: ${route}`);
     if (options.respond) data = options.respond(route, args, structuredClone(data));
     return { data: structuredClone(data) };
@@ -67,7 +68,8 @@ async function run(options = {}) {
   process.env.REVIEW_POLICY_BASE_SHA = options.base || base;
   const fixture = fake(options);
   let clock = now;
-  await evaluate({ github: fixture.github, context, core: fixture.core, number: 1, now: () => clock,
+  await evaluate({ github: fixture.github, teamGithub: options.teamAccess ? fixture.github : undefined,
+    context, core: fixture.core, number: 1, now: () => clock,
     sleep: async () => { clock += options.sleepMs ?? 31 * 60 * 1000; options.afterSleep?.(fixture); } });
   return fixture;
 }
@@ -280,9 +282,76 @@ test('main advances re-evaluate all open PRs', async () => {
 test('unreadable team membership cannot grant owner fast path', async () => {
   const api = { call: async (route) => {
     if (route.includes('collaborators')) return { permission: 'write' };
+  }, all: async () => {
     throw Object.assign(new Error('Forbidden'), { status: 403 });
   } };
   await assert.rejects(() => people(api, { user: { login: 'owner', type: 'User' } }, [], [{ requiredOwners: ['@worldcoin/team'] }]), /Cannot verify team/);
+});
+
+test('repository operations and team membership use separate authenticated clients', async () => {
+  const repoCalls = [];
+  const teamCalls = [];
+  const api = new Api({ request: async (route, args) => { repoCalls.push({ route, args }); return { data: {} }; } }, repo,
+    { request: async (route, args) => { teamCalls.push({ route, args }); return { data: [] }; } });
+  await api.call('POST /repos/{owner}/{repo}/check-runs', { name: 'human-review-gate' });
+  await api.all('GET /orgs/{org}/teams/{team_slug}/members', { org: 'worldcoin', team_slug: 'protocol' });
+  assert.equal(repoCalls.length, 1);
+  assert.equal(teamCalls.length, 1);
+  assert.equal(repoCalls[0].args.repo, 'world-chain');
+  assert.equal(teamCalls[0].args.repo, undefined);
+  assert.equal(teamCalls[0].args.request.timeout, 20000);
+  await assert.rejects(() => new Api({}, repo).call('GET /orgs/{org}/teams/{team_slug}/members'), /REVIEW_POLICY_TEAM_TOKEN/);
+});
+
+test('protocol members get the owner fast path and outsiders need a protocol owner approval', async () => {
+  const members = ['owner', 'reviewer'].map((login) => ({ login, type: 'User' }));
+  const result = await run({ codeowners: '* @worldcoin/protocol', members, teamAccess: true });
+  assert.deepEqual(result.failures, []);
+  const gate = (value) => value.checks.find((check) => check.name === 'human-review-gate');
+  assert.equal(gate(result).conclusion, 'success');
+  assert.match(gate(result).output.summary, /Owner fast path: true/);
+  const outsider = await run({ codeowners: '* @worldcoin/protocol', members: members.slice(1), teamAccess: true });
+  assert.deepEqual(outsider.failures, []);
+  assert.equal(gate(outsider).conclusion, 'failure');
+  const covered = await run({ codeowners: '* @worldcoin/protocol', members: members.slice(1), teamAccess: true,
+    reviews: [codexReview, { id: 2, user: members[1], state: 'APPROVED', submitted_at: at }] });
+  assert.equal(gate(covered).conclusion, 'success');
+});
+
+test('critical protocol changes still need two distinct humans from the agreed confirmation policy', async () => {
+  const result = await run({ codeowners: '* @worldcoin/protocol', teamAccess: true,
+    members: ['owner', 'reviewer'].map((login) => ({ login, type: 'User' })),
+    files: [{ filename: 'CODEOWNERS' }], comments: [authorApproval],
+    reviews: [codexReview, { id: 2, user: { login: 'reviewer', type: 'User' }, state: 'APPROVED', submitted_at: at }] });
+  const gate = result.checks.find((check) => check.name === 'human-review-gate');
+  assert.equal(gate.conclusion, 'success');
+  assert.match(gate.output.summary, /human confirmations: reviewer, owner; required: 2/);
+});
+
+test('membership removals during AI review invalidate earlier owner privileges', async () => {
+  const members = [{ login: 'owner', type: 'User' }];
+  const result = await run({ codeowners: '* @worldcoin/protocol', members, teamAccess: true, noCodex: true, sleepMs: 30000,
+    afterSleep: () => { members.length = 0; },
+    respond: (route, args, data) => route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews' && !members.length ? [codexReview] : data,
+  });
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.checks.find((check) => check.name === 'human-review-gate').conclusion, 'failure');
+});
+
+test('new team members gain owner privileges on the next evidence read without activation', async () => {
+  const members = [];
+  const result = await run({ codeowners: '* @worldcoin/protocol', members, teamAccess: true, noCodex: true, sleepMs: 30000,
+    afterSleep: () => { members.push({ login: 'owner', type: 'User' }); },
+    respond: (route, args, data) => route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews' && members.length ? [codexReview] : data,
+  });
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.checks.find((check) => check.name === 'human-review-gate').conclusion, 'success');
+});
+
+test('team ownership without a membership credential fails closed with a configuration error', async () => {
+  const result = await run({ codeowners: '* @worldcoin/protocol' });
+  assert.match(result.failures.join('\n'), /REVIEW_POLICY_TEAM_TOKEN/);
+  for (const name of GATES) assert.equal(result.checks.find((check) => check.name === name).conclusion, 'failure');
 });
 
 test('activation separates CI from review gates without review bypass and preserves native restore settings', () => {

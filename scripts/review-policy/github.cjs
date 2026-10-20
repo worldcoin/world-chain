@@ -11,9 +11,12 @@ function fingerprint(value) {
 }
 
 class Api {
-  constructor(github, repo) { this.github = github; this.repo = repo; }
+  constructor(github, repo, teamGithub) { this.github = github; this.repo = repo; this.teamGithub = teamGithub; }
   async call(route, args = {}) {
-    return (await this.github.request(route, { ...this.repo, ...args, request: { timeout: 20000 } })).data;
+    const teamRequest = route.startsWith('GET /orgs/{org}/teams/{team_slug}');
+    const client = teamRequest ? this.teamGithub : this.github;
+    if (!client) throw new Error('Configure REVIEW_POLICY_TEAM_TOKEN with organization Members: read for team ownership checks.');
+    return (await client.request(route, { ...(!teamRequest ? this.repo : {}), ...args, request: { timeout: 20000 } })).data;
   }
   async all(route, args = {}, key) {
     const result = [];
@@ -78,16 +81,12 @@ async function people(api, pr, reviews, paths) {
   for (const owner of new Set(paths.flatMap((path) => path.requiredOwners))) {
     if (!owner.includes('/')) { ownerMembers.set(owner, new Set([owner.slice(1)])); continue; }
     const [org, team_slug] = owner.slice(1).split('/');
-    const members = new Set();
-    for (const username of candidates) {
-      try {
-        const result = await api.call('GET /orgs/{org}/teams/{team_slug}/memberships/{username}', { org, team_slug, username });
-        if (result.state === 'active') members.add(username);
-      } catch (error) {
-        throw new Error(`Cannot verify team ${owner} membership for ${username} (HTTP ${error.status || 'error'}); use individual owners or provide team read access.`);
-      }
+    try {
+      const members = await api.all('GET /orgs/{org}/teams/{team_slug}/members', { org, team_slug });
+      ownerMembers.set(owner, new Set(members.filter(policy.human).map((user) => user.login.toLowerCase())));
+    } catch (error) {
+      throw new Error(`Cannot verify team ${owner} membership: ${error.status ? `HTTP ${error.status}` : error.message}; check REVIEW_POLICY_TEAM_TOKEN (organization Members: read).`);
     }
-    ownerMembers.set(owner, members);
   }
   return { writable, ownerMembers };
 }
@@ -107,8 +106,9 @@ function summary(pr, classification, results, evidenceFingerprint) {
   return lines.join('\n').slice(0, 60000);
 }
 
-async function evaluate({ github, context, core, number, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now }) {
-  const api = new Api(github, context.repo);
+async function evaluate({ github, context, core, number, teamGithub,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now }) {
+  const api = new Api(github, context.repo, teamGithub);
   const fullName = `${context.repo.owner}/${context.repo.repo}`;
   const getPr = async () => {
     const [pull, branch] = await Promise.all([

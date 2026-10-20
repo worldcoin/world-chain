@@ -76,7 +76,10 @@ jobs:
         env:
           REVIEW_POLICY_BASE_SHA: ${{ needs.targets.outputs.base }}
           REVIEW_POLICY_PR: ${{ matrix.pr }}
+          REVIEW_POLICY_TEAM_TOKEN: ${{ secrets.REVIEW_POLICY_TEAM_TOKEN }}
         with:
           script: |
             const { evaluate } = require('./scripts/review-policy/github.cjs');
-            await evaluate({ github, context, core, number: Number(process.env.REVIEW_POLICY_PR) });
+            const token = process.env.REVIEW_POLICY_TEAM_TOKEN;
+            const teamGithub = token ? new github.constructor({ auth: token }) : undefined;
+            await evaluate({ github, teamGithub, context, core, number: Number(process.env.REVIEW_POLICY_PR) });

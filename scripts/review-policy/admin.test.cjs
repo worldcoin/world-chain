@@ -46,6 +46,13 @@ async function fixture(t, options = {}) {
         if (!id) throw new Error(`Unexpected owner: ${login}`);
         return { permission: options.readOnlyOwner ? 'read' : 'write', user: { login, id, type: options.botOwner ? 'Bot' : 'User' } };
       }
+      if (resource === '/orgs/worldcoin/teams/protocol') {
+        if (options.missingTeam) throw Object.assign(new Error('CI bypass team not found'), { status: 404 });
+        return { id: 14554659, slug: 'protocol', privacy: options.secretTeam ? 'secret' : 'closed' };
+      }
+      if (resource === '/orgs/worldcoin/teams/protocol/repos/worldcoin/world-chain') {
+        return { full_name: 'worldcoin/world-chain', permissions: { push: !options.readOnlyTeam } };
+      }
       if (resource === 'pulls/1') return { base: { ref: 'main', sha: options.stalePrBase ? 'older-main' : 'base' }, head: { sha: 'head' } };
       if (resource === 'rulesets' && method === 'POST') {
         const rule = { id: nextId++, ...body }; rulesets.set(rule.id, structuredClone(rule)); return rule;
@@ -144,17 +151,37 @@ test('CI bypass honors CODEOWNERS precedence and the last global rule', async (t
   assert(!f.reads.includes('contents/CODEOWNERS?ref=base'));
 });
 
+test('a global owner team becomes a native team bypass actor without copying its members', async (t) => {
+  const f = await fixture(t, { codeowners: '* @worldcoin/protocol\n' });
+  await f.run('activate', ['--evidence-pr', '1', '--apply']);
+  assert.deepEqual(f.mutations[0].body.bypass_actors, [{ actor_id: 14554659, actor_type: 'Team', bypass_mode: 'pull_request' }]);
+  assert.deepEqual(f.mutations[1].body.bypass_actors, []);
+  assert(!f.reads.some((resource) => resource.includes('/members')));
+  assert(!f.reads.some((resource) => resource.startsWith('collaborators/')));
+  await f.run('restore', ['--apply']);
+  assert.deepEqual(f.live, f.original);
+  assert.equal(f.rulesets.size, 0);
+});
+
 test('GitHub response key order does not change verification of ruleset conditions', async (t) => {
   const f = await fixture(t, { reorderedConditions: true });
   await f.run('activate', ['--evidence-pr', '1', '--apply']);
   assert.equal(f.live.required_pull_request_reviews.required_approving_review_count, 0);
 });
 
-test('missing global owners, teams, non-writable owners, bots and unreadable CODEOWNERS cannot grant bypass', async (t) => {
-  for (const options of [{ codeowners: '/docs/ @Alice' }, { codeowners: '* @worldcoin/protocol' },
+test('missing global owners, non-writable owners, bots and unreadable CODEOWNERS cannot grant bypass', async (t) => {
+  for (const options of [{ codeowners: '/docs/ @Alice' },
     { codeowners: '*' }, { readOnlyOwner: true }, { botOwner: true }, { codeownersError: true }]) {
     const f = await fixture(t, options);
     await assert.rejects(() => f.run('activate', ['--evidence-pr', '1', '--apply']), /CI bypass|CODEOWNERS access denied/);
+    assert.deepEqual(f.mutations, []);
+  }
+});
+
+test('foreign, secret, missing or non-writable teams cannot receive CI bypass', async (t) => {
+  for (const options of [{ codeowners: '* @another-org/protocol' }, { secretTeam: true }, { readOnlyTeam: true }, { missingTeam: true }]) {
+    const f = await fixture(t, { codeowners: '* @worldcoin/protocol', ...options });
+    await assert.rejects(() => f.run('activate', ['--evidence-pr', '1', '--apply']), /CI bypass team/);
     assert.deepEqual(f.mutations, []);
   }
 });
