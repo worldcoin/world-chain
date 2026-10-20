@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { evaluate, targets, Api, readCodeowners, people } = require('./github.cjs');
 const { GATES } = require('./policy.cjs');
-const { rulesetBody, reviewSettings } = require('./admin.cjs');
+const { rulesetBody, ciRulesetBody, reviewSettings } = require('./admin.cjs');
 
 const head = 'a'.repeat(40);
 const base = 'b'.repeat(40);
@@ -285,10 +285,12 @@ test('unreadable team membership cannot grant owner fast path', async () => {
   await assert.rejects(() => people(api, { user: { login: 'owner', type: 'User' } }, [], [{ requiredOwners: ['@worldcoin/team'] }]), /Cannot verify team/);
 });
 
-test('activation requires all gates and resolved threads with no bypass, preserves native settings on restore', () => {
+test('activation separates CI from review gates without review bypass and preserves native restore settings', () => {
   const rule = rulesetBody();
   assert.deepEqual(rule.bypass_actors, []);
-  assert.deepEqual(rule.rules[0].parameters.required_status_checks.map((check) => check.context), GATES);
+  const ci = ciRulesetBody([]);
+  assert.deepEqual([...rule.rules[0].parameters.required_status_checks, ...ci.rules[0].parameters.required_status_checks]
+    .map((check) => check.context), GATES);
   assert.equal(rule.rules[1].parameters.required_review_thread_resolution, true);
   assert.equal(rule.rules[1].parameters.dismiss_stale_reviews_on_push, false);
   assert.deepEqual(reviewSettings({ required_pull_request_reviews: { required_approving_review_count: 1, require_code_owner_reviews: true, dismiss_stale_reviews: false, require_last_push_approval: false } }), {

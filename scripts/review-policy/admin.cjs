@@ -3,15 +3,24 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { GATES } = require('./policy.cjs');
+const { isDeepStrictEqual } = require('node:util');
+const { GATES, human } = require('./policy.cjs');
+const { readCodeowners } = require('./github.cjs');
 
 const REPO = 'worldcoin/world-chain';
 const RULESET = 'world-chain-review-policy';
+const CI_RULESET = 'world-chain-ci-policy';
+const REVIEW_GATES = GATES.filter((gate) => gate !== 'required-ci-gate');
 
 function request(method, path, body) {
-  return JSON.parse(execFileSync('gh', ['api', `repos/${REPO}/${path}`, '--method', method, ...(body === undefined ? [] : ['--input', '-'])], {
-    input: body === undefined ? undefined : JSON.stringify(body), encoding: 'utf8', timeout: 30000, maxBuffer: 16000000,
-  }) || 'null');
+  try {
+    return JSON.parse(execFileSync('gh', ['api', `repos/${REPO}/${path}`, '--method', method, ...(body === undefined ? [] : ['--input', '-'])], {
+      input: body === undefined ? undefined : JSON.stringify(body), encoding: 'utf8', stdio: 'pipe', timeout: 30000, maxBuffer: 16000000,
+    }) || 'null');
+  } catch (error) {
+    error.status = Number(String(error.stderr || '').match(/\(HTTP (\d{3})\)/)?.[1]) || undefined;
+    throw error;
+  }
 }
 
 function list(path, key) {
@@ -31,15 +40,19 @@ function reviewSettings(protection) {
   return Object.fromEntries(['required_approving_review_count', 'require_code_owner_reviews', 'dismiss_stale_reviews', 'require_last_push_approval'].map((key) => [key, reviews[key]]));
 }
 
+function requiredChecks(gates) {
+  return { type: 'required_status_checks', parameters: {
+    strict_required_status_checks_policy: false, do_not_enforce_on_create: false,
+    required_status_checks: gates.map((context) => ({ context, integration_id: 15368 })),
+  } };
+}
+
 function rulesetBody() {
   return {
     name: RULESET, target: 'branch', enforcement: 'active', bypass_actors: [],
     conditions: { ref_name: { include: ['refs/heads/main'], exclude: [] } },
     rules: [
-      { type: 'required_status_checks', parameters: {
-        strict_required_status_checks_policy: false, do_not_enforce_on_create: false,
-        required_status_checks: GATES.map((context) => ({ context, integration_id: 15368 })),
-      } },
+      requiredChecks(REVIEW_GATES),
       { type: 'pull_request', parameters: {
         required_approving_review_count: 0, require_code_owner_review: false,
         dismiss_stale_reviews_on_push: false, require_last_push_approval: false,
@@ -47,6 +60,56 @@ function rulesetBody() {
       } },
     ],
   };
+}
+
+function ciRulesetBody(bypassActors) {
+  return {
+    name: CI_RULESET, target: 'branch', enforcement: 'active', bypass_actors: bypassActors,
+    conditions: { ref_name: { include: ['refs/heads/main'], exclude: [] } },
+    rules: [requiredChecks(['required-ci-gate'])],
+  };
+}
+
+async function ciBypassActors(request, ref) {
+  const rules = await readCodeowners({
+    async content(path, sha) {
+      const file = request('GET', `contents/${path}?ref=${sha}`);
+      if (file.type !== 'file' || file.encoding !== 'base64' || file.size > 1000000) throw new Error(`Cannot read trusted ${path}`);
+      return Buffer.from(file.content, 'base64').toString('utf8');
+    },
+  }, ref);
+  const owners = [...new Set([...rules].reverse().find((rule) => rule.pattern === '*')?.owners || [])];
+  if (!owners.length) throw new Error('CI bypass requires a nonempty global * CODEOWNERS rule on main.');
+  const actors = [];
+  for (const owner of owners) {
+    if (owner.includes('/')) throw new Error(`CI bypass requires individual global code owners; cannot expand ${owner}.`);
+    const login = owner.slice(1);
+    const result = request('GET', `collaborators/${login}/permission`);
+    if (!human(result.user) || !Number.isSafeInteger(result.user.id) || result.user.id < 1
+      || result.user.login.toLowerCase() !== login
+      || !(['admin', 'maintain', 'write'].includes(result.permission) || result.user.permissions?.push)) {
+      throw new Error(`CI bypass owner ${owner} must be a human collaborator with write access.`);
+    }
+    actors.push({ actor_id: result.user.id, actor_type: 'User', bypass_mode: 'pull_request' });
+  }
+  return actors;
+}
+
+function verifyRuleset(actual, expected) {
+  const actors = (items) => items?.map(({ actor_id, actor_type, bypass_mode }) => ({ actor_id, actor_type, bypass_mode }))
+    .sort((a, b) => a.actor_id - b.actor_id);
+  const checks = (rules) => rules?.find((rule) => rule.type === 'required_status_checks')?.parameters?.required_status_checks
+    ?.map(({ context, integration_id }) => ({ context, integration_id })).sort((a, b) => a.context.localeCompare(b.context));
+  const pull = actual.rules?.find((rule) => rule.type === 'pull_request')?.parameters;
+  const expectedPull = expected.rules.find((rule) => rule.type === 'pull_request')?.parameters;
+  if (actual.name !== expected.name || actual.target !== 'branch' || actual.enforcement !== 'active'
+    || !isDeepStrictEqual(actual.conditions, expected.conditions)
+    || !isDeepStrictEqual(actors(actual.bypass_actors), actors(expected.bypass_actors))
+    || !isDeepStrictEqual(checks(actual.rules), checks(expected.rules))
+    || actual.rules?.length !== expected.rules.length
+    || (expectedPull && Object.entries(expectedPull).some(([key, value]) => !isDeepStrictEqual(pull?.[key], value)))) {
+    throw new Error(`Ruleset ${expected.name} was not installed as expected; keeping the native review requirement.`);
+  }
 }
 
 async function main(args = process.argv.slice(2), api = { request, list }, log = console.log) {
@@ -71,16 +134,19 @@ async function main(args = process.argv.slice(2), api = { request, list }, log =
   }
   const backup = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
   if (backup.repo !== REPO) throw new Error('Snapshot repository mismatch.');
-  const previous = backup.ownRulesets.find((rule) => rule.name === RULESET);
-  const current = list('rulesets').find((rule) => rule.source_type === 'Repository' && rule.name === RULESET);
+  const current = list('rulesets').filter((rule) => rule.source_type === 'Repository');
   if (command === 'restore') {
-    log('Restore the previous native review requirements first, then restore/remove only the review-policy ruleset. Socket and unrelated rules remain untouched.');
+    log('Restore the previous native review requirements first, then restore/remove only the review-policy and CI-policy rulesets. Socket and unrelated rules remain untouched.');
     if (!apply) { log('Dry run. Add --apply to restore.'); return; }
     request('PATCH', 'branches/main/protection/required_pull_request_reviews', reviewSettings(backup.protection));
-    if (previous) {
-      const { name, target, enforcement, conditions, rules, bypass_actors } = previous;
-      request(current ? 'PUT' : 'POST', current ? `rulesets/${current.id}` : 'rulesets', { name, target, enforcement, conditions, rules, bypass_actors });
-    } else if (current) request('DELETE', `rulesets/${current.id}`);
+    for (const name of [RULESET, CI_RULESET]) {
+      const previous = backup.ownRulesets.find((rule) => rule.name === name);
+      const installed = current.find((rule) => rule.name === name);
+      if (previous) {
+        const { target, enforcement, conditions, rules, bypass_actors } = previous;
+        request(installed ? 'PUT' : 'POST', installed ? `rulesets/${installed.id}` : 'rulesets', { name, target, enforcement, conditions, rules, bypass_actors });
+      } else if (installed) request('DELETE', `rulesets/${installed.id}`);
+    }
     log('Previous review protection restored.');
     return;
   }
@@ -107,19 +173,18 @@ async function main(args = process.argv.slice(2), api = { request, list }, log =
     if (result?.status !== 'completed' || result.conclusion !== 'success') throw new Error(`Evidence gate ${name} is not successful on the PR head.`);
     if (!result.output?.summary?.includes(`base ${main};`)) throw new Error(`Evidence gate ${name} used an older target policy; re-evaluate the PR.`);
   }
-  log(`Ready to require ${GATES.join(', ')} and resolved threads, then replace the blanket review count with dynamic ownership. Backup: ${backupPath}`);
+  const bypassActors = await ciBypassActors(request, main);
+  log(`Ready to require ${GATES.join(', ')} and resolved threads, then replace the blanket review count with dynamic ownership. Only required-ci-gate permits explicit PR-only bypass by ${bypassActors.length} global code owners. Backup: ${backupPath}`);
   if (!apply) { log('Dry run. Add --apply to activate.'); return; }
   const liveProtection = request('GET', 'branches/main/protection');
   if (JSON.stringify(reviewSettings(liveProtection)) !== JSON.stringify(reviewSettings(backup.protection))) {
     throw new Error('Review settings changed since the snapshot; take a fresh snapshot before activation.');
   }
-  const installed = request(current ? 'PUT' : 'POST', current ? `rulesets/${current.id}` : 'rulesets', rulesetBody());
-  const verified = request('GET', `rulesets/${installed.id}`);
-  const required = verified.rules?.find((rule) => rule.type === 'required_status_checks')?.parameters?.required_status_checks;
-  const pullRule = verified.rules?.find((rule) => rule.type === 'pull_request')?.parameters;
-  if (verified.enforcement !== 'active' || verified.bypass_actors?.length || !pullRule?.required_review_thread_resolution
-    || !GATES.every((gate) => required?.some((check) => check.context === gate && check.integration_id === 15368))) {
-    throw new Error('Required gates/thread resolution were not installed; keeping the native review requirement.');
+  if (request('GET', 'branches/main').commit.sha !== main) throw new Error('Main changed during readiness checks; rerun activation.');
+  for (const desired of [ciRulesetBody(bypassActors), rulesetBody()]) {
+    const existing = current.find((rule) => rule.name === desired.name);
+    const installed = request(existing ? 'PUT' : 'POST', existing ? `rulesets/${existing.id}` : 'rulesets', desired);
+    verifyRuleset(request('GET', `rulesets/${installed.id}`), desired);
   }
   request('PATCH', 'branches/main/protection/required_pull_request_reviews', {
     required_approving_review_count: 0, require_code_owner_reviews: false, dismiss_stale_reviews: false, require_last_push_approval: false,
@@ -130,4 +195,4 @@ async function main(args = process.argv.slice(2), api = { request, list }, log =
 }
 
 if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
-module.exports = { rulesetBody, reviewSettings, main };
+module.exports = { rulesetBody, ciRulesetBody, ciBypassActors, reviewSettings, main };

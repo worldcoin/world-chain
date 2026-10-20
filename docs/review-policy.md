@@ -6,7 +6,7 @@ from the target branch, not from labels or instructions in a PR.
 
 ## Merge requirements
 
-Every PR to `main` needs all four checks and resolved review conversations:
+By default, every PR to `main` needs all four checks and resolved review conversations:
 
 | Check | Requirement |
 | --- | --- |
@@ -132,7 +132,30 @@ Close duplicates and rerun. PRs exceeding GitHub's 3000-file API limit must be s
 Pushes to `main` re-evaluate open PRs against current ownership and policy.
 
 Auto-merge remains opt-in and uses the repository's existing squash-only setting.
-This change does not introduce a merge queue or grant protection bypasses.
+This change does not introduce a merge queue.
+
+## Emergency CI override
+
+Global code owners can explicitly bypass build/test CI when a pipeline is broken
+or unreliable. In the PR merge box, select GitHub's bypass option and confirm the
+squash merge. This is a manual merge action; failing or pending CI stays visible.
+Codex, Bugbot, the risk-based human confirmations and resolution of all review
+threads remain mandatory. Socket and other independent protections still apply.
+
+The activation script installs two rulesets on `main`:
+
+- `world-chain-review-policy` requires the three review gates and resolved threads,
+  with no bypass actors.
+- `world-chain-ci-policy` requires only `required-ci-gate`. Its bypass list contains
+  the individual human collaborators with write access named by the last global
+  `*` rule in `CODEOWNERS` on `main`, using GitHub's **For pull requests only** mode.
+
+Path-specific owners, repository roles and broader teams are not added to the CI
+bypass list. Activation rejects missing global owners, team entries, bots or
+owners without write access. GitHub's native bypass list is configured at
+activation time: when the global owner list changes, rerun activation with a
+fresh backup and successful evidence PR to update the list. A `CODEOWNERS` edit
+alone does not synchronize bypass permissions.
 
 ## Rollout and rollback
 
@@ -145,20 +168,23 @@ This change does not introduce a merge queue or grant protection bypasses.
 4. Validate readiness without changing GitHub:
    `node scripts/review-policy/admin.cjs activate --backup /tmp/world-chain-review-before.json --evidence-pr NUMBER`.
 5. Run the same activation command with `--apply` only after readiness passes. It
-   first installs required gates and thread resolution, then removes the blanket
-   approval/code-owner requirement. Existing Socket and unrelated rules are retained.
+   first installs the CI ruleset with owner-only PR bypass, then the review ruleset
+   without bypass, and verifies both before removing the blanket approval/code-owner
+   requirement. Existing Socket and unrelated rules are retained.
 
 Activation verifies the deployed files match the local implementation and requires
 a real PR whose four gate checks succeeded. The required checks accept GitHub
-Actions as their source. No bypass actors are added. Automatic stale-review
-dismissal and last-push approval stay disabled.
+Actions as their source. Only the CI ruleset permits bypass, and only for the
+verified global code owners. Automatic stale-review dismissal and last-push
+approval stay disabled.
 
 For rollback, run
 `node scripts/review-policy/admin.cjs restore --backup /tmp/world-chain-review-before.json`
 to inspect the operation, then add `--apply`. Restoration reinstates the old native
-review requirements **before** removing/restoring the review-policy ruleset.
+review requirements **before** removing/restoring the review-policy and CI-policy
+rulesets, including any previous bypass configuration.
 Snapshots are never overwritten. Treat a partial activation as blocked, inspect the
-error, and use the snapshot to restore; do not bypass a failing gate.
+error, and use the snapshot to restore.
 
 Run the local tests with `node --test scripts/review-policy/*.test.cjs`. Policy CI
 also runs actionlint against the controller, notifier, tests and affected CI.
