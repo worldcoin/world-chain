@@ -12,3 +12,7 @@ pub use cli::{
     WorldChainRpcModuleValidator,
 };
 pub use config::{FlashblocksPayloadBuilderConfig, WorldChainNodeConfig};
+
+pub struct TestStruct {
+    pub num: u64
+}
