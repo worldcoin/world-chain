@@ -40,8 +40,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM public.ecr.aws/docker/library/debian:bookworm-slim
 
+# Require Debian's eMudhra distrust update for the system CA bundle.
 RUN apt-get update && \
   apt-get install -y --no-install-recommends ca-certificates && \
+  dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20250419~deb12u2' && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
 
