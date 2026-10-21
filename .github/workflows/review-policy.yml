@@ -1,0 +1,85 @@
+name: Review policy
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  issue_comment:
+    types: [created, edited, deleted]
+  check_run:
+    types: [created, completed, rerequested]
+  workflow_run:
+    workflows: ["Review policy events", "Rust CI", "CI", "verify-measurements", "Review policy tests", "supply-chain", "Large Files"]
+    types: [requested, in_progress, completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to re-evaluate
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  targets:
+    if: >-
+      (github.event_name != 'issue_comment' || github.event.issue.pull_request != null) &&
+      (github.event_name != 'check_run' || github.event.check_run.app.slug == 'cursor')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      prs: ${{ steps.targets.outputs.prs }}
+      base: ${{ steps.base.outputs.sha }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          persist-credentials: false
+      - id: base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - id: targets
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const { targets } = require('./scripts/review-policy/github.cjs');
+            core.setOutput('prs', JSON.stringify(await targets({ github, context })));
+
+  evaluate:
+    needs: targets
+    if: needs.targets.outputs.prs != '' && needs.targets.outputs.prs != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.targets.outputs.prs) }}
+    concurrency:
+      group: review-policy-pr-${{ matrix.pr }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.targets.outputs.base }}
+          persist-credentials: false
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          REVIEW_POLICY_BASE_SHA: ${{ needs.targets.outputs.base }}
+          REVIEW_POLICY_PR: ${{ matrix.pr }}
+          REVIEW_POLICY_TEAM_TOKEN: ${{ secrets.REVIEW_POLICY_TEAM_TOKEN }}
+        with:
+          script: |
+            const { evaluate } = require('./scripts/review-policy/github.cjs');
+            const token = process.env.REVIEW_POLICY_TEAM_TOKEN;
+            const teamGithub = token ? new github.constructor({ auth: token }) : undefined;
+            await evaluate({ github, teamGithub, context, core, number: Number(process.env.REVIEW_POLICY_PR) });

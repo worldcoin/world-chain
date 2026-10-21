@@ -8,11 +8,15 @@ on:
     paths:
       - "pkg/contracts/**"
       - ".gitmodules"
+      - "Justfile"
+      - "justfiles/contracts.just"
       - ".github/workflows/foundry.yml"
   pull_request:
     paths:
       - "pkg/contracts/**"
       - ".gitmodules"
+      - "Justfile"
+      - "justfiles/contracts.just"
       - ".github/workflows/foundry.yml"
   workflow_dispatch:
 
