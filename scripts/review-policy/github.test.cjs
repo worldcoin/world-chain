@@ -2,6 +2,8 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 const { evaluate, targets, Api, readCodeowners, people } = require('./github.cjs');
 const { GATES } = require('./policy.cjs');
 const { rulesetBody, ciRulesetBody, reviewSettings } = require('./admin.cjs');
@@ -73,6 +75,29 @@ async function run(options = {}) {
     sleep: async () => { clock += options.sleepMs ?? 31 * 60 * 1000; options.afterSleep?.(fixture); } });
   return fixture;
 }
+
+test('PR events dispatch the controller on trusted main without attaching its cancellable evaluator to the PR', async () => {
+  const workflow = fs.readFileSync('.github/workflows/review-policy.yml', 'utf8');
+  const request = workflow.match(/^  request:\n([\s\S]*?)^  targets:/m)?.[1];
+  assert.match(request, /if: github\.event_name == 'pull_request_target'/);
+  assert.match(request, /permissions:\n      actions: write/);
+  assert(!request.includes('actions/checkout'));
+  assert.match(workflow, /targets:\n    if: >-\n      github\.event_name != 'pull_request_target' &&/);
+  assert.match(workflow, /group: review-policy-pr-\$\{\{ matrix\.pr \}\}\n      cancel-in-progress: true/);
+  const script = request.split('          script: |\n')[1].replace(/^ {12}/gm, '');
+  const calls = [];
+  await vm.runInNewContext(`(async () => { ${script} })()`, {
+    github: { rest: { actions: { createWorkflowDispatch: async (args) => calls.push(args) } } },
+    context: { repo, payload: { pull_request: { number: 1204, head: { ref: 'untrusted-pr-branch' } } } },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].owner, repo.owner);
+  assert.equal(calls[0].repo, repo.repo);
+  assert.equal(calls[0].workflow_id, 'review-policy.yml');
+  assert.equal(calls[0].ref, 'main');
+  assert.equal(calls[0].inputs.pr, '1204');
+  assert.equal(calls[0].request.timeout, 20000);
+});
 
 test('trusted controller publishes four successful checks on PR head, never on main', async () => {
   const result = await run();
