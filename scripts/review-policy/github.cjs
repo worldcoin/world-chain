@@ -174,6 +174,9 @@ async function evaluate({ github, context, core, number, teamGithub,
     const files = await api.all('GET /repos/{owner}/{repo}/pulls/{pull_number}/files', { pull_number: number });
     if (files.length !== pr.changed_files) throw new Error('Incomplete PR file list (GitHub limits this API to 3000 files); split the PR.');
     const paths = policy.changedPaths(files);
+    if (paths.includes('.github/workflows/review-policy-events.yml')) {
+      throw new Error('PRs cannot change the review-event notifier; restore it or use a controlled migration with native review protection enabled.');
+    }
     classification = policy.classify(paths, config);
     const rules = await readCodeowners(api, pr.base.sha);
     const owners = policy.ownership(paths, rules);

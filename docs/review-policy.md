@@ -134,6 +134,11 @@ Its token has checks write access and read access to repository metadata, PRs, i
 and Actions. The separate membership client uses `REVIEW_POLICY_TEAM_TOKEN` only for
 read-only team lookups. No OpenAI API key is needed.
 
+PRs that modify, delete or rename `.github/workflows/review-policy-events.yml`
+fail the gates because review events use the PR's version of that workflow.
+Updating the notifier requires a controlled migration with native review protection
+enabled, so pending PRs cannot disable approval revocations.
+
 Checks are posted on the PR head explicitly. Each PR is serialized, and the head
 and target commit are rechecked before publishing. Every poll rereads AI results,
 human confirmations, permissions and CI results. Human clearance requires two
