@@ -52,7 +52,7 @@ function fake(options = {}) {
     else if (route === 'GET /repos/{owner}/{repo}/issues/{issue_number}/comments') data = options.comments || [];
     else if (route === 'GET /repos/{owner}/{repo}/issues/{issue_number}/reactions') data = options.reactions || [];
     else if (route === 'GET /repos/{owner}/{repo}/actions/runs') data = { workflow_runs: options.noCI ? [] : [1, 2].map((id) => ({
-      id, workflow_id: id, event: 'pull_request', head_sha: head, pull_requests: [{ number: 1 }], status: 'completed', conclusion: 'success',
+      id, workflow_id: id, run_attempt: 1, event: 'pull_request', head_sha: head, pull_requests: [{ number: 1 }], status: 'completed', conclusion: 'success',
     })) };
     else if (route === 'GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs') data = { jobs: [{ name: args.run_id === 1 ? 'review-policy-tests' : 'check-large-files', status: 'completed', conclusion: 'success' }] };
     else if (route === 'GET /repos/{owner}/{repo}/collaborators/{username}/permission') data = { permission: 'write' };
@@ -62,8 +62,9 @@ function fake(options = {}) {
     return { data: structuredClone(data) };
   } };
   const failures = [];
-  const core = { info: () => {}, setFailed: (text) => failures.push(text), summary: { addRaw: () => ({ write: async () => {} }) } };
-  return { github, core, checks, failures, calls, pr };
+  const messages = [];
+  const core = { info: (text) => messages.push(text), setFailed: (text) => failures.push(text), summary: { addRaw: () => ({ write: async () => {} }) } };
+  return { github, core, checks, failures, calls, messages, pr };
 }
 
 async function run(options = {}) {
@@ -72,7 +73,7 @@ async function run(options = {}) {
   let clock = now;
   await evaluate({ github: fixture.github, teamGithub: options.teamAccess ? fixture.github : undefined,
     context, core: fixture.core, number: 1, now: () => clock,
-    sleep: async () => { clock += options.sleepMs ?? 31 * 60 * 1000; options.afterSleep?.(fixture); } });
+    sleep: async (ms) => { clock += ms; options.afterSleep?.(fixture, ms); } });
   return fixture;
 }
 
@@ -183,7 +184,7 @@ test('re-evaluation invalidates old green checks while fresh AI evidence is pend
 test('author confirmation changes during the AI wait cannot leave a successful human gate', async (t) => {
   for (const change of ['revoke', 'edit', 'delete']) await t.test(change, async () => {
     const options = { files: [{ filename: 'ordinary-config.yaml' }], noCodex: true,
-      comments: [structuredClone(authorApproval)], sleepMs: 30000 };
+      comments: [structuredClone(authorApproval)] };
     options.afterSleep = () => {
       options.noCodex = false;
       if (change === 'revoke') options.comments.push({ ...authorApproval, id: 2, body: '/unapprove', created_at: new Date(now + 30000).toISOString() });
@@ -202,7 +203,7 @@ test('human clearance is independently verified and revoked while both AI review
   let sleeps = 0;
   let unavailable = true;
   const options = { files: [{ filename: 'ordinary-config.yaml' }], noCodex: true,
-    comments: [structuredClone(authorApproval)], sleepMs: 30000,
+    comments: [structuredClone(authorApproval)],
     respond: (route, _args, data) => {
       if (unavailable && route === 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs') {
         data.check_runs = data.check_runs.filter((check) => check.name !== 'Cursor Bugbot');
@@ -235,7 +236,7 @@ test('AI and CI progress updates cannot invalidate unchanged human clearance', a
   let revision = 0;
   let pending = true;
   let sleeps = 0;
-  const result = await run({ files: [{ filename: 'ordinary-config.yaml' }], comments: [authorApproval], sleepMs: 30000,
+  const result = await run({ files: [{ filename: 'ordinary-config.yaml' }], comments: [authorApproval],
     respond: (route, _args, data) => {
       const progress = `Progress update ${++revision}`;
       const updatedAt = new Date(now + revision).toISOString();
@@ -276,7 +277,7 @@ test('AI and CI progress updates cannot invalidate unchanged human clearance', a
 test('dismissal or changes requested during the AI wait replaces the earlier approval', async (t) => {
   for (const state of ['DISMISSED', 'CHANGES_REQUESTED']) await t.test(state, async () => {
     const approval = { id: 2, user: { login: 'reviewer', type: 'User' }, state: 'APPROVED', commit_id: head, submitted_at: at };
-    const options = { files: [{ filename: 'ordinary-config.yaml' }], reviews: [approval], sleepMs: 30000 };
+    const options = { files: [{ filename: 'ordinary-config.yaml' }], reviews: [approval] };
     options.afterSleep = () => { options.reviews = [codexReview, { ...approval, state }]; };
     const result = await run(options);
     assert.deepEqual(result.failures, []);
@@ -288,7 +289,7 @@ test('dismissal or changes requested during the AI wait replaces the earlier app
 
 test('a failed CI rerun during the AI wait replaces the earlier successful CI result', async () => {
   let rerun = false;
-  const options = { noCodex: true, sleepMs: 30000,
+  const options = { noCodex: true,
     afterSleep: () => { options.noCodex = false; rerun = true; },
     respond: (route, _args, data) => {
       if (rerun && route === 'GET /repos/{owner}/{repo}/actions/runs') {
@@ -304,7 +305,7 @@ test('a failed CI rerun during the AI wait replaces the earlier successful CI re
 });
 
 test('CI completed during the AI wait can pass without another controller run', async () => {
-  const options = { noCodex: true, noCI: true, sleepMs: 30000 };
+  const options = { noCodex: true, noCI: true };
   options.afterSleep = () => { options.noCodex = false; options.noCI = false; };
   const result = await run(options);
   assert.deepEqual(result.failures, []);
@@ -380,7 +381,262 @@ test('event resolution ignores untrusted checks and locates PRs when webhook PR 
   assert.deepEqual(await targets({ github: {}, context: { ...context, eventName: 'check_run', payload: { check_run: { app: { slug: 'github-actions' } } } } }), []);
   const github = { request: async () => ({ data: [{ number: 1, state: 'open', base: { ref: 'main' }, head: { sha: head } },
     { number: 2, state: 'closed', base: { ref: 'main' }, head: { sha: head } }] }) };
-  assert.deepEqual(await targets({ github, context: { ...context, eventName: 'workflow_run', payload: { workflow_run: { head_sha: head } } } }), [1]);
+  assert.deepEqual(await targets({ github, context: { ...context, eventName: 'workflow_run', payload: { action: 'completed', workflow_run: { head_sha: head } } } }), [1]);
+});
+
+test('CI completion and rerun start wake the controller; initial CI start does not restart it', async () => {
+  const workflow = fs.readFileSync('.github/workflows/review-policy.yml', 'utf8');
+  assert.match(workflow, /types: \[in_progress, completed\]/);
+  assert.match(workflow, /github\.event\.workflow_run\.run_attempt > 1/);
+  let calls = 0;
+  const github = { request: async () => {
+    calls++;
+    return { data: [{ number: 1, state: 'open', base: { ref: 'main' }, head: { sha: head } }] };
+  } };
+  for (const [action, run_attempt, expected] of [
+    ['requested', 1, []], ['in_progress', 1, []], ['in_progress', 2, [1]], ['completed', 1, [1]],
+  ]) {
+    const payload = { action, workflow_run: { head_sha: head, run_attempt } };
+    assert.deepEqual(await targets({ github, context: { ...context, eventName: 'workflow_run', payload } }), expected);
+  }
+  assert.equal(calls, 2);
+});
+
+test('conditional reads validate cached data with GitHub and isolate pagination and caller mutations', async () => {
+  let version = 1;
+  let thrown = false;
+  const github = { request: async (_route, args) => {
+    const etag = `"${args.page}-${version}"`;
+    if (args.headers?.['if-none-match'] === etag) {
+      if (thrown) throw Object.assign(new Error('Not modified'), { status: 304 });
+      thrown = true;
+      return { status: 304 };
+    }
+    return { status: 200, headers: { etag }, data: [{ page: args.page, version }] };
+  } };
+  const api = new Api(github, repo);
+  const route = 'GET /repos/{owner}/{repo}/pulls';
+  (await api.call(route, { page: 1 }))[0].version = 99;
+  assert.deepEqual(await api.call(route, { page: 1 }), [{ page: 1, version: 1 }]);
+  assert.deepEqual(await api.call(route, { page: 1 }), [{ page: 1, version: 1 }]);
+  assert.deepEqual(await api.call(route, { page: 2 }), [{ page: 2, version: 1 }]);
+  version++;
+  assert.deepEqual(await api.call(route, { page: 1 }), [{ page: 1, version: 2 }]);
+});
+
+test('requests are serialized and an ETag never hides an authorization error', async () => {
+  let active = 0;
+  let maximum = 0;
+  let denied = false;
+  const api = new Api({ request: async () => {
+    maximum = Math.max(maximum, ++active);
+    await Promise.resolve();
+    active--;
+    if (denied) throw Object.assign(new Error('Forbidden'), { status: 403 });
+    return { data: [], headers: { etag: '"same"' } };
+  } }, repo);
+  await Promise.all([api.call('GET one'), api.call('GET two'), api.call('GET one')]);
+  assert.equal(maximum, 1);
+  denied = true;
+  await assert.rejects(() => api.call('GET one'), /Forbidden/);
+});
+
+test('polling avoids duplicate AI/CI reads and unchanged historical check writes', async () => {
+  const checks = Array.from({ length: 10 }, (_, index) => GATES.map((name, id) => ({
+    id: 10 + index * 4 + id, name, head_sha: head, app: { slug: 'github-actions' },
+    external_id: `review-policy:worldcoin/world-chain:1:${head}`, status: 'completed', conclusion: 'success',
+  }))).flat();
+  let elapsed = 0;
+  const options = { checks, noCodex: true,
+    afterSleep: (_fixture, ms) => {
+      assert.equal(ms, 60000);
+      elapsed += ms;
+      if (elapsed >= 5 * 60000) options.noCodex = false;
+    } };
+  const result = await run(options);
+  assert.deepEqual(result.failures, []);
+  const count = (suffix) => result.calls.filter((call) => call.route.endsWith(suffix)).length;
+  assert.equal(count('/actions/runs'), 6);
+  assert.equal(count('/reactions'), 6);
+  assert.equal(count('/reviews'), 12, 'human decisions still get a second fresh read');
+  assert.equal(count('/permission'), 12);
+  assert.equal(count('/jobs'), 2, 'completed jobs are immutable for the observed run attempt');
+  const oldCodex = checks.find((check) => check.name === 'codex-review-gate');
+  const writes = result.calls.filter((call) => call.route.startsWith('PATCH ') && call.args.check_run_id === oldCodex.id);
+  assert.deepEqual(writes.map((call) => call.args.conclusion), ['failure', 'success']);
+  assert(result.calls.length < 250, `API budget exceeded: ${result.calls.length} requests`);
+});
+
+test('one-minute polling detects a new Codex thumbs-up without requiring a webhook', async () => {
+  let sleeps = 0;
+  const options = { noCodex: true, afterSleep: (_fixture, ms) => {
+    assert.equal(ms, 60000);
+    assert.equal(++sleeps, 1);
+    options.reactions = [{ content: '+1', user: codexReview.user, created_at: new Date(now + 59000).toISOString() }];
+  } };
+  const result = await run(options);
+  assert.deepEqual(result.failures, []);
+  assert.equal(sleeps, 1);
+  assert.equal(result.checks.find((check) => check.name === 'codex-review-gate').conclusion, 'success');
+});
+
+test('the last poll uses the remaining time without shortening the 30-minute AI budget', async () => {
+  process.env.REVIEW_POLICY_BASE_SHA = base;
+  const fixture = fake({ noCodex: true });
+  const sleeps = [];
+  let clock = now;
+  await evaluate({ github: fixture.github, context, core: fixture.core, number: 1, now: () => clock,
+    sleep: async (ms) => {
+      assert(ms > 0 && ms <= 60000);
+      sleeps.push(ms);
+      clock += ms;
+      if (sleeps.length === 1) clock += 25000;
+    },
+  });
+  assert.deepEqual(fixture.failures, []);
+  assert.equal(sleeps.length, 30);
+  assert.equal(sleeps.at(-1), 35000);
+  assert.equal(clock - now, 30 * 60000);
+  assert.equal(fixture.checks.find((check) => check.name === 'codex-review-gate').conclusion, 'failure');
+});
+
+test('completed job cache is invalidated by a new CI attempt even with the same run conclusion', async () => {
+  let rerun = false;
+  const options = { noCodex: true,
+    afterSleep: () => { rerun = true; options.noCodex = false; },
+    respond: (route, args, data) => {
+      if (rerun && route.endsWith('/actions/runs')) data.workflow_runs[0].run_attempt = 2;
+      if (rerun && route.endsWith('/jobs') && args.run_id === 1) data.jobs[0].conclusion = 'skipped';
+      return data;
+    },
+  };
+  const result = await run(options);
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.calls.filter((call) => call.route.endsWith('/jobs')).length, 3);
+  assert.equal(result.checks.find((check) => check.name === 'required-ci-gate').conclusion, 'failure');
+});
+
+function rateLimit(headers = {}, status = 403) {
+  return Object.assign(new Error('API rate limit exceeded'), { status, response: { headers } });
+}
+
+test('rate-limit reset restarts from fresh evidence instead of retrying a stale success publication', async () => {
+  let throttled = false;
+  let waits = 0;
+  const options = { files: [{ filename: 'ordinary-config.yaml' }], comments: [authorApproval],
+    respond: (route, args, data) => {
+      if (!throttled && route.startsWith('PATCH ') && args.output.title === 'human-review-gate: success') {
+        throttled = true;
+        throw rateLimit({ 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(now / 1000 + 120) });
+      }
+      return data;
+    },
+    afterSleep: (_fixture, ms) => {
+      waits++;
+      assert.equal(ms, 121000);
+      options.comments = [];
+    },
+  };
+  const result = await run(options);
+  assert.equal(waits, 1);
+  assert.deepEqual(result.failures, []);
+  assert(result.messages.some((message) => message.includes('rate limit')));
+  assert.equal(result.checks.filter((check) => check.name === 'review-policy-observed').length, 1);
+  for (const check of result.checks.filter((check) => check.name === 'human-review-gate')) assert.equal(check.conclusion, 'failure');
+  for (const name of GATES.filter((name) => name !== 'human-review-gate')) {
+    assert.equal(result.checks.filter((check) => check.name === name).at(-1).conclusion, 'success');
+  }
+});
+
+test('rate-limit recovery respects head changes and does not publish clearance on the old head', async () => {
+  let throttled = false;
+  const result = await run({ respond: (route, _args, data) => {
+    if (!throttled && route.endsWith('/reviews')) { throttled = true; throw rateLimit({ 'retry-after': '90' }, 429); }
+    return data;
+  }, afterSleep: (fixture, ms) => {
+    assert.equal(ms, 90000);
+    fixture.pr.state = 'closed';
+    fixture.pr.head.sha = 'new-head';
+  } });
+  assert.deepEqual(result.failures, []);
+  assert(!result.calls.some((call) => call.route.startsWith('PATCH ') && call.args.conclusion === 'success'));
+});
+
+test('team-token rate limits recover separately from missing membership permissions', async () => {
+  let reads = 0;
+  let waits = 0;
+  const result = await run({ codeowners: '* @worldcoin/protocol', members: [{ login: 'owner', type: 'User' }], teamAccess: true,
+    respond: (route, _args, data) => {
+      if (route.endsWith('/members') && ++reads === 1) throw rateLimit({ 'retry-after': '60' }, 429);
+      return data;
+    }, afterSleep: (_fixture, ms) => { waits++; assert.equal(ms, 60000); },
+  });
+  assert.deepEqual(result.failures, []);
+  assert.equal(waits, 1);
+  assert(result.messages.some((message) => message.includes('team membership API rate limit')));
+  assert.equal(result.checks.filter((check) => check.name === 'human-review-gate').at(-1).conclusion, 'success');
+});
+
+test('persistent throttling is bounded and permission errors do not trigger quota retries', async (t) => {
+  for (const [name, error, expectedWaits, message] of [
+    ['secondary', rateLimit({}, 429), [60000, 120000, 240000], /recovery budget exhausted/],
+    ['too distant reset', rateLimit({ 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(now / 1000 + 7200) }), [], /recovery budget exhausted/],
+    ['forbidden', Object.assign(new Error('Forbidden'), { status: 403 }), [], /Forbidden/],
+  ]) await t.test(name, async () => {
+    const waits = [];
+    const result = await run({ respond: (route, _args, data) => {
+      if (route.endsWith('/reviews')) throw error;
+      return data;
+    }, afterSleep: (_fixture, ms) => waits.push(ms) });
+    assert.deepEqual(waits, expectedWaits);
+    assert.equal(result.failures.length, 1);
+    assert.match(result.failures[0], message);
+  });
+});
+
+test('rate-limit waiting preserves the remaining AI budget instead of expiring or resetting it', async () => {
+  let polls = 0;
+  let throttled = false;
+  let rateWaits = 0;
+  const result = await run({ noCodex: true,
+    respond: (route, _args, data) => {
+      if (!throttled && polls === 1 && route.endsWith('/reviews')) {
+        throttled = true;
+        throw rateLimit({ 'retry-after': '2400' }, 429);
+      }
+      return data;
+    }, afterSleep: (_fixture, ms) => {
+      if (ms === 60000) assert(++polls <= 30, 'recovery must not restart the AI timeout');
+      else { assert.equal(ms, 2400000); rateWaits++; }
+    },
+  });
+  assert.deepEqual(result.failures, []);
+  assert.equal(rateWaits, 1);
+  assert.equal(polls, 30, 'quota waiting must not consume the AI timeout');
+  const gate = result.checks.filter((check) => check.name === 'codex-review-gate').at(-1);
+  assert.equal(gate.conclusion, 'failure');
+  assert.match(gate.output.summary, /No completed review after 30 minutes/);
+});
+
+test('a rate-limit response stops already queued requests until recovery', async () => {
+  let calls = 0;
+  const api = new Api({ request: async () => { calls++; throw rateLimit({}, 429); } }, repo);
+  const results = await Promise.allSettled([api.call('GET one'), api.call('GET two'), api.call('POST three')]);
+  assert(results.every((result) => result.status === 'rejected'));
+  assert.equal(calls, 1);
+});
+
+test('target discovery also waits for the quota reset before retrying', async () => {
+  let attempts = 0;
+  let clock = now;
+  const github = { request: async () => {
+    if (++attempts === 1) throw rateLimit({ 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(now / 1000 + 600) });
+    return { data: [{ number: 1 }] };
+  } };
+  const result = await targets({ github, context: { ...context, eventName: 'push' }, now: () => clock,
+    sleep: async (ms) => { assert.equal(ms, 601000); clock += ms; } });
+  assert.deepEqual(result, [1]);
+  assert.equal(attempts, 2);
 });
 
 test('author commands wake the controller on create, revoke, edit and delete; chatter does not', async () => {
@@ -450,7 +706,7 @@ test('critical protocol changes still need two distinct humans from the agreed c
 
 test('membership removals during AI review invalidate earlier owner privileges', async () => {
   const members = [{ login: 'owner', type: 'User' }];
-  const result = await run({ codeowners: '* @worldcoin/protocol', members, teamAccess: true, noCodex: true, sleepMs: 30000,
+  const result = await run({ codeowners: '* @worldcoin/protocol', members, teamAccess: true, noCodex: true,
     afterSleep: () => { members.length = 0; },
     respond: (route, args, data) => route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews' && !members.length ? [codexReview] : data,
   });
@@ -460,7 +716,7 @@ test('membership removals during AI review invalidate earlier owner privileges',
 
 test('new team members gain owner privileges on the next evidence read without activation', async () => {
   const members = [];
-  const result = await run({ codeowners: '* @worldcoin/protocol', members, teamAccess: true, noCodex: true, sleepMs: 30000,
+  const result = await run({ codeowners: '* @worldcoin/protocol', members, teamAccess: true, noCodex: true,
     afterSleep: () => { members.push({ login: 'owner', type: 'User' }); },
     respond: (route, args, data) => route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews' && members.length ? [codexReview] : data,
   });
