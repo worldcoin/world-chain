@@ -107,10 +107,16 @@ across retries. The known heuristic limitation is a delayed thumbs-up for an old
 head arriving after a new push; this tradeoff is intentional for v1.
 
 Bugbot must publish `Cursor Bugbot` from the Cursor app on the current SHA. A
-successful check counts. A neutral check counts only with Bugbot's matching formal
-completion review posted after that run began. An absent, running, cancelled,
-failed or ambiguous result does not pass. Resolving a finding does not need to
-turn the original check green if a completed review was established.
+successful check counts. A neutral check counts with Bugbot's matching formal
+completion review posted after that run began, or when Cursor explicitly reports
+`Bugbot skipped this commit because its changes match the last review.` in the
+check's result text. This attestation on the current SHA lets Bugbot reuse a review
+after a rebase with an unchanged patch; the controller trusts Cursor's comparison
+rather than treating a review on an older SHA alone as sufficient. Only the latest
+Cursor check counts. An absent, running, cancelled, failed or ambiguous result does
+not pass. Resolving a finding does not need to turn the original check green if a
+completed review was established. Review threads still require resolution when
+Bugbot reuses a review.
 
 The controller polls for AI completion every 30 seconds for up to 30 minutes.
 Timeout fails the AI gate; rerun **Review policy**, or dispatch it with the PR

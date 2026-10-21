@@ -117,6 +117,27 @@ test('Bugbot neutral requires a matching completed review, errors and cancellati
   assert.equal(p.bugbotGate([check, { ...check, id: 2, status: 'in_progress' }], [findings], sha).state, 'pending');
 });
 
+test('Bugbot accepts its explicit unchanged-patch attestation only on the current completed Cursor check', () => {
+  const check = { id: 1, name: 'Cursor Bugbot', app: { slug: 'cursor' }, head_sha: sha,
+    status: 'completed', conclusion: 'neutral', started_at: at,
+    output: { title: 'Bugbot Review', summary: 'Bugbot Analysis Progress (3s elapsed)\n\n✅ Reviewed patch is unchanged (3s)',
+      text: 'Bugbot skipped this commit because its changes match the last review.' } };
+  const result = p.bugbotGate([check], [], sha);
+  assert.equal(result.state, 'success');
+  assert.match(result.reason, /reviewed patch is unchanged/);
+  for (const [change, expected] of [
+    [{ head_sha: 'old' }, 'pending'], [{ app: { slug: 'fake' } }, 'pending'],
+    [{ status: 'in_progress' }, 'pending'], [{ conclusion: 'cancelled' }, 'failure'],
+    [{ conclusion: 'failure' }, 'failure'], [{ output: undefined }, 'failure'],
+    [{ output: { text: 'Bugbot encountered an internal error.' } }, 'failure'],
+    [{ output: { text: 'Bugbot skipped this commit.' } }, 'failure'],
+    [{ output: { text: 'Run cancelled by a newer commit.' } }, 'failure'],
+    [{ output: { summary: check.output.text } }, 'failure'],
+  ]) assert.equal(p.bugbotGate([{ ...check, ...change }], [], sha).state, expected, JSON.stringify(change));
+  assert.equal(p.bugbotGate([check, { ...check, id: 2, status: 'in_progress' }], [], sha).state, 'pending');
+  assert.equal(p.bugbotGate([check, { ...check, id: 2, output: undefined }], [], sha).state, 'failure');
+});
+
 test('CI requires the current PR workflow and successful individual jobs, not skipped jobs', () => {
   const pr = { number: 1, head: { sha, ref: 'branch', repo: { id: 5 } } };
   const groups = [{ id: 'rust', workflow: 'rust-ci.yml', jobs: ['tests', 'clippy'] }];
