@@ -93,6 +93,11 @@ and check publication continue to use the job's built-in token. Missing, expired
 or unauthorized membership credentials block the gates rather than treating
 contributors as owners. Team membership includes active members of child teams.
 
+When rotating this credential, update the existing `REVIEW_POLICY_TEAM_TOKEN`
+repository secret, then rerun **Review policy** for an open PR. Confirm its gate
+summary evaluates team ownership without a membership configuration error before
+revoking the previous token.
+
 ## AI completion and CI
 
 The author enables **Automatic review / All PRs** and the every-push trigger in
