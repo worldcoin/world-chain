@@ -122,6 +122,10 @@ function bugbotGate(checks, reviews, sha) {
     .sort((a, b) => b.id - a.id)[0];
   if (!check || check.status !== 'completed') return { state: 'pending', reason: 'Waiting for Cursor Bugbot on current SHA' };
   if (check.conclusion === 'success') return { state: 'success', reason: 'Bugbot completed successfully' };
+  if (check.conclusion === 'neutral'
+    && check.output?.text?.trim() === 'Bugbot skipped this commit because its changes match the last review.') {
+    return { state: 'success', reason: 'Bugbot confirms the reviewed patch is unchanged' };
+  }
   const attested = reviews.some((review) => CURSOR.has(review.user?.login) && review.commit_id === sha
     && review.state === 'COMMENTED' && Date.parse(review.submitted_at) >= Date.parse(check.started_at)
     && /<!-- BUGBOT_REVIEW -->/.test(review.body || '')

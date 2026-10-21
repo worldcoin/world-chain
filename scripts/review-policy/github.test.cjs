@@ -111,6 +111,18 @@ test('trusted controller publishes four successful checks on PR head, never on m
   assert(result.calls.every((call) => call.args.request.timeout === 20000));
 });
 
+test('the controller accepts Cursor reusing its reviewed patch after a rebase', async () => {
+  const result = await run({ checks: [{ id: 2, name: 'Cursor Bugbot', head_sha: head,
+    app: { slug: 'cursor' }, status: 'completed', conclusion: 'neutral', started_at: at,
+    output: { title: 'Bugbot Review', summary: 'Bugbot Analysis Progress (3s elapsed)\n\n✅ Reviewed patch is unchanged (3s)',
+      text: 'Bugbot skipped this commit because its changes match the last review.' } }] });
+  assert.deepEqual(result.failures, []);
+  const check = result.checks.find((item) => item.name === 'bugbot-review-gate');
+  assert.equal(check.head_sha, head);
+  assert.equal(check.conclusion, 'success');
+  assert.match(check.output.summary, /Bugbot confirms the reviewed patch is unchanged/);
+});
+
 test('reruns find completed reviewer checks hidden by the default latest-attempt filter', async () => {
   let sleeps = 0;
   const result = await run({
