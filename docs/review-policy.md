@@ -287,9 +287,15 @@ is the global owner still requires activation to bind the new team ID.
    are retained.
 
 Activation verifies the deployed files match the local implementation and requires
-a real PR whose four gate checks succeeded. The required checks accept GitHub
-Actions as their source. Only the CI ruleset permits bypass, and only for the
-verified global owner team. Automatic stale-review dismissal and last-push
+a real PR whose four gate checks succeeded. Evidence may refer to an older `main`
+commit only if its trusted policy inputs are identical to current `main`, using
+the same Git-tree comparison as the evaluator. Missing or invalid evidence commit
+identities, changed policy and unreadable trees block activation. The final check
+that `main` stayed unchanged during activation still applies.
+
+The required checks accept GitHub Actions as their source. Only the CI ruleset
+permits bypass, and only for the verified global owner team. Automatic
+stale-review dismissal and last-push
 approval stay disabled.
 
 For rollback, run
