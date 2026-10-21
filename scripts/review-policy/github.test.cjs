@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { createHash } = require('node:crypto');
 const { evaluate, targets, Api, readCodeowners, people } = require('./github.cjs');
 const { GATES } = require('./policy.cjs');
 const { rulesetBody, ciRulesetBody, reviewSettings } = require('./admin.cjs');
@@ -18,7 +19,33 @@ const codexReview = { id: 1, user: { login: 'chatgpt-codex-connector[bot]', type
   state: 'COMMENTED', commit_id: head, submitted_at: at };
 const authorApproval = { id: 1, user: { login: 'owner', type: 'User' }, body: '/approve', created_at: at };
 
+function gitTrees(versions = {}) {
+  const trees = new Map();
+  const entry = (path, type, sha) => ({ path, type, sha, mode: type === 'tree' ? '040000' : '100644' });
+  for (const [ref, changes] of Object.entries({ [base]: {}, 'ordinary-main': {},
+    'new-main': { CODEOWNERS: 'new-owners' }, changed: { CODEOWNERS: 'old-owners' }, ...versions })) {
+    const paths = { CODEOWNERS: 'owners', '.github/review-policy.json': 'config',
+      '.github/workflows': 'workflows', '.github/actions': 'actions', 'scripts/review-policy': 'scripts', ...changes };
+    const root = [];
+    for (const directory of ['', '.github', 'scripts', 'docs']) {
+      const entries = Object.entries(paths).filter(([path, sha]) => sha !== null
+        && (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '') === directory)
+        .map(([path, sha]) => entry(path.slice(directory ? directory.length + 1 : 0),
+          ['.github/workflows', '.github/actions', 'scripts/review-policy'].includes(path) ? 'tree' : 'blob', sha));
+      if (!directory) root.push(...entries);
+      else {
+        const sha = createHash('sha1').update(JSON.stringify(entries)).digest('hex');
+        trees.set(sha, { tree: entries, truncated: false });
+        root.push(entry(directory, 'tree', sha));
+      }
+    }
+    trees.set(ref, { tree: root, truncated: false });
+  }
+  return trees;
+}
+
 function fake(options = {}) {
+  const trees = gitTrees(options.policyVersions);
   const pr = { number: 1, state: 'open', changed_files: 1, user: { login: 'owner', type: 'User' },
     head: { sha: head, ref: 'branch', repo: { id: 1 } }, base: { ref: 'main', sha: options.prBase || base, repo: { full_name: 'worldcoin/world-chain' } } };
   const checks = [
@@ -35,6 +62,10 @@ function fake(options = {}) {
       data = structuredClone(pr);
       if (options.moveHead && ++ticks > 3) data.head.sha = 'c'.repeat(40);
     } else if (route === 'GET /repos/{owner}/{repo}/branches/{branch}') data = { commit: { sha: base } };
+    else if (route === 'GET /repos/{owner}/{repo}/git/trees/{tree_sha}') {
+      data = trees.get(args.tree_sha);
+      if (!data) throw new Error(`Unknown Git tree: ${args.tree_sha}`);
+    }
     else if (route === 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs') data = { check_runs: structuredClone(checks) };
     else if (route === 'POST /repos/{owner}/{repo}/check-runs') {
       data = { id: nextCheckId++, app: { slug: 'github-actions' }, ...args };
@@ -164,6 +195,35 @@ test('the target branch advancing during evaluation blocks clearance even if the
   const result = await run({ respond: (route, _args, data) => route === 'GET /repos/{owner}/{repo}/branches/{branch}' && ++reads > 5
     ? { commit: { sha: 'new-main' } } : data });
   assert(!result.calls.some((call) => call.route.startsWith('PATCH ') && call.args.conclusion === 'success'));
+});
+
+test('ordinary main advances before startup or during AI polling do not interrupt the PR', async (t) => {
+  for (const phase of ['startup', 'polling']) await t.test(phase, async () => {
+    let advanced = phase === 'startup';
+    let sleeps = 0;
+    const options = { noCodex: true,
+      respond: (route, _args, data) => route === 'GET /repos/{owner}/{repo}/branches/{branch}' && advanced
+        ? { commit: { sha: 'ordinary-main' } } : data,
+      afterSleep: () => { advanced = true; sleeps++; options.noCodex = false; },
+    };
+    const result = await run(options);
+    assert.deepEqual(result.failures, []);
+    assert.equal(sleeps, 1);
+    for (const name of GATES) assert.equal(result.checks.find((check) => check.name === name).conclusion, 'success', name);
+    const treeCalls = result.calls.filter((call) => call.route.endsWith('/git/trees/{tree_sha}'));
+    assert.equal(treeCalls.length, 5, 'immutable tree reads are shared and cached across identity checks');
+  });
+});
+
+test('policy changes during AI polling invalidate prior human clearance', async () => {
+  let advanced = false;
+  const result = await run({ noCodex: true,
+    respond: (route, _args, data) => route === 'GET /repos/{owner}/{repo}/branches/{branch}' && advanced
+      ? { commit: { sha: 'new-main' } } : data,
+    afterSleep: () => { advanced = true; },
+  });
+  assert.match(result.failures.join('\n'), /target review policy changed/);
+  assert.equal(result.checks.find((check) => check.name === 'human-review-gate').conclusion, 'failure');
 });
 
 test('re-evaluation invalidates old green checks while fresh AI evidence is pending', async () => {
@@ -633,7 +693,7 @@ test('target discovery also waits for the quota reset before retrying', async ()
     if (++attempts === 1) throw rateLimit({ 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(now / 1000 + 600) });
     return { data: [{ number: 1 }] };
   } };
-  const result = await targets({ github, context: { ...context, eventName: 'push' }, now: () => clock,
+  const result = await targets({ github, context: { ...context, eventName: 'push', payload: { before: '0'.repeat(40), after: base } }, now: () => clock,
     sleep: async (ms) => { assert.equal(ms, 601000); clock += ms; } });
   assert.deepEqual(result, [1]);
   assert.equal(attempts, 2);
@@ -650,9 +710,36 @@ test('author commands wake the controller on create, revoke, edit and delete; ch
   }
 });
 
-test('main advances re-evaluate all open PRs', async () => {
-  const github = { request: async () => ({ data: [{ number: 1 }, { number: 2 }] }) };
-  assert.deepEqual(await targets({ github, context: { ...context, eventName: 'push' } }), [1, 2]);
+test('ordinary main pushes do not list or re-evaluate open PRs', async () => {
+  const fixture = fake();
+  const result = await targets({ github: fixture.github, context: { ...context, eventName: 'push',
+    payload: { before: base, after: 'ordinary-main' } } });
+  assert.deepEqual(result, []);
+  assert.equal(fixture.calls.length, 5);
+  assert(fixture.calls.every((call) => call.route.endsWith('/git/trees/{tree_sha}')));
+});
+
+test('policy, ownership and workflow changes refresh open PRs, including additions and deletions', async (t) => {
+  for (const path of ['CODEOWNERS', '.github/CODEOWNERS', 'docs/CODEOWNERS', '.github/review-policy.json',
+    '.github/workflows', '.github/actions', 'scripts/review-policy']) {
+    for (const change of ['replacement', null]) await t.test(`${path}: ${change}`, async () => {
+      const fixture = fake({ policyVersions: { [base]: { [path]: 'original' }, updated: { [path]: change } } });
+      const result = await targets({ github: fixture.github, context: { ...context, eventName: 'push',
+        payload: { before: base, after: 'updated' } } });
+      assert.deepEqual(result, [1]);
+    });
+  }
+  const fixture = fake({ policyVersions: { added: { '.github/CODEOWNERS': 'new-owner-file' } } });
+  assert.deepEqual(await targets({ github: fixture.github, context: { ...context, eventName: 'push',
+    payload: { before: base, after: 'added' } } }), [1]);
+});
+
+test('incomplete policy trees fail closed rather than skipping a required refresh', async () => {
+  const fixture = fake({ respond: (route, _args, data) => route.endsWith('/git/trees/{tree_sha}')
+    ? { ...data, truncated: true } : data });
+  await assert.rejects(() => targets({ github: fixture.github, context: { ...context, eventName: 'push',
+    payload: { before: base, after: 'ordinary-main' } } }), /Incomplete Git tree/);
+  assert(!fixture.calls.some((call) => call.route.endsWith('/pulls')));
 });
 
 test('unreadable team membership cannot grant owner fast path', async () => {

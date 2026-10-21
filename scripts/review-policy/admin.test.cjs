@@ -7,6 +7,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { main, rulesetBody, ciRulesetBody } = require('./admin.cjs');
 const { GATES } = require('./policy.cjs');
+const base = 'b'.repeat(40);
+const previousBase = 'a'.repeat(40);
 
 async function fixture(t, options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'world-chain-policy-test-'));
@@ -27,7 +29,14 @@ async function fixture(t, options = {}) {
       if (method !== 'GET') mutations.push({ method, resource, body });
       else reads.push(resource);
       if (resource === 'branches/main/protection') return structuredClone(live);
-      if (resource === 'branches/main') return { commit: { sha: options.mainChanged && branchReads++ > 0 ? 'new-base' : 'base' } };
+      if (resource === 'branches/main') return { commit: { sha: options.mainChanged && branchReads++ > 0 ? 'new-base' : base } };
+      if (resource.startsWith('git/trees/')) {
+        if (options.treeError) throw Object.assign(new Error('Cannot read policy tree'), { status: 403 });
+        const ref = resource.slice('git/trees/'.length);
+        assert([base, previousBase].includes(ref), `Unexpected policy reference: ${ref}`);
+        return { truncated: Boolean(options.truncatedTree), tree: [{ path: 'CODEOWNERS', type: 'blob', mode: '100644',
+          sha: options.changedPolicy && ref === previousBase ? 'previous-owners' : 'current-owners' }] };
+      }
       if (resource.startsWith('contents/')) {
         if (options.notDeployed) throw new Error('Not deployed on main');
         const filename = resource.slice('contents/'.length).split('?')[0];
@@ -53,7 +62,7 @@ async function fixture(t, options = {}) {
       if (resource === '/orgs/worldcoin/teams/protocol/repos/worldcoin/world-chain') {
         return { full_name: 'worldcoin/world-chain', permissions: { push: !options.readOnlyTeam } };
       }
-      if (resource === 'pulls/1') return { base: { ref: 'main', sha: options.stalePrBase ? 'older-main' : 'base' }, head: { sha: 'head' } };
+      if (resource === 'pulls/1') return { base: { ref: 'main', sha: options.stalePrBase ? previousBase : base }, head: { sha: 'head' } };
       if (resource === 'rulesets' && method === 'POST') {
         const rule = { id: nextId++, ...body }; rulesets.set(rule.id, structuredClone(rule)); return rule;
       }
@@ -78,7 +87,8 @@ async function fixture(t, options = {}) {
     list(resource) {
       if (resource === 'rulesets') return [socket, ...[...rulesets.values()].map((rule) => ({ ...rule, source_type: 'Repository' }))];
       if (resource === 'commits/head/check-runs') return GATES.map((name) => ({ name, status: 'completed', conclusion: options.badGate ? 'failure' : 'success',
-        app: { slug: 'github-actions' }, external_id: 'review-policy:worldcoin/world-chain:1:head', output: { summary: 'PR #1; head head; base base; risk: critical.' } }));
+        app: { slug: 'github-actions' }, external_id: 'review-policy:worldcoin/world-chain:1:head',
+        output: { summary: options.gateSummary ?? `PR #1; head head; base ${options.gateBases?.[name] || options.evidenceBase || base}; risk: critical.` } }));
       throw new Error(`Unexpected admin list: ${resource}`);
     },
   };
@@ -98,6 +108,36 @@ test('activation verifies current target policy from gate evidence despite a cac
   const f = await fixture(t, { stalePrBase: true });
   await f.run('activate', ['--evidence-pr', '1']);
   assert.deepEqual(f.mutations, []);
+});
+
+test('activation accepts successful evidence from an older commit with identical policy', async (t) => {
+  for (const apply of [false, true]) await t.test(apply ? 'apply' : 'dry run', async (t) => {
+    const f = await fixture(t, { evidenceBase: previousBase });
+    await f.run('activate', ['--evidence-pr', '1', ...(apply ? ['--apply'] : [])]);
+    assert.equal(f.mutations.length, apply ? 3 : 0);
+    assert.deepEqual(f.reads.filter((resource) => resource.startsWith('git/trees/')),
+      [`git/trees/${previousBase}`, `git/trees/${base}`], 'all four gates share immutable policy reads');
+  });
+});
+
+test('incompatible or unverifiable evidence policy cannot change protections', async (t) => {
+  for (const options of [{ changedPolicy: true }, { treeError: true }, { truncatedTree: true }]) {
+    const f = await fixture(t, { gateBases: { 'required-ci-gate': previousBase }, ...options });
+    await assert.rejects(() => f.run('activate', ['--evidence-pr', '1', '--apply']),
+      /different target policy|Cannot read policy tree|Incomplete Git tree/);
+    assert.deepEqual(f.mutations, []);
+    assert.deepEqual(f.live, f.original);
+  }
+});
+
+test('missing or malformed evidence headers cannot select a policy reference', async (t) => {
+  for (const gateSummary of ['', `Unrelated text; base ${base};`, 'PR #1; head head; base main; risk: low.',
+    `PR #2; head head; base ${base}; risk: low.`, `PR #1; head other; base ${base}; risk: low.`]) {
+    const f = await fixture(t, { gateSummary });
+    await assert.rejects(() => f.run('activate', ['--evidence-pr', '1', '--apply']), /missing or invalid target commit/);
+    assert.deepEqual(f.mutations, []);
+    assert(!f.reads.some((resource) => resource.startsWith('git/trees/')));
+  }
 });
 
 test('activation installs CI before review gates; rollback restores reviews before deleting both rulesets', async (t) => {
@@ -144,7 +184,7 @@ test('build/test CI and both AI gates permit PR-only bypass while human approval
   assert.deepEqual(review.bypass_actors, []);
   assert.deepEqual(review.rules[0].parameters.required_status_checks, [{ context: 'human-review-gate', integration_id: 15368 }]);
   assert.equal(review.rules[1].parameters.required_review_thread_resolution, true);
-  assert(f.reads.includes('contents/CODEOWNERS?ref=base'));
+  assert(f.reads.includes(`contents/CODEOWNERS?ref=${base}`));
   assert(!f.reads.some((resource) => resource.includes('CODEOWNERS?ref=head')));
 });
 
@@ -152,7 +192,7 @@ test('CI bypass honors CODEOWNERS precedence and the last global rule', async (t
   const f = await fixture(t, { githubCodeowners: '* @Alice\n* @Carol\n', codeowners: '* @Bob\n' });
   await f.run('activate', ['--evidence-pr', '1', '--apply']);
   assert.deepEqual(f.mutations[0].body.bypass_actors, [{ actor_id: 103, actor_type: 'User', bypass_mode: 'pull_request' }]);
-  assert(!f.reads.includes('contents/CODEOWNERS?ref=base'));
+  assert(!f.reads.includes(`contents/CODEOWNERS?ref=${base}`));
 });
 
 test('a global owner team becomes a native team bypass actor without copying its members', async (t) => {

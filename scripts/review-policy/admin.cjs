@@ -5,7 +5,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { isDeepStrictEqual } = require('node:util');
 const { GATES, human } = require('./policy.cjs');
-const { readCodeowners } = require('./github.cjs');
+const { Api, readCodeowners } = require('./github.cjs');
 
 const REPO = 'worldcoin/world-chain';
 const RULESET = 'world-chain-review-policy';
@@ -180,11 +180,19 @@ async function main(args = process.argv.slice(2), api = { request, list }, log =
   const pr = request('GET', `pulls/${evidence}`);
   if (pr.base.ref !== 'main') throw new Error('Evidence PR must target main.');
   const checks = list(`commits/${pr.head.sha}/check-runs`, 'check_runs');
+  const policyApi = new Api({ request: async (route, { tree_sha }) => {
+    if (route !== 'GET /repos/{owner}/{repo}/git/trees/{tree_sha}') throw new Error(`Unexpected policy API: ${route}`);
+    return { data: request('GET', `git/trees/${tree_sha}`) };
+  } }, {});
   for (const name of GATES) {
     const result = checks.find((check) => check.name === name && check.app?.slug === 'github-actions'
       && check.external_id === `review-policy:${REPO}:${evidence}:${pr.head.sha}`);
     if (result?.status !== 'completed' || result.conclusion !== 'success') throw new Error(`Evidence gate ${name} is not successful on the PR head.`);
-    if (!result.output?.summary?.includes(`base ${main};`)) throw new Error(`Evidence gate ${name} used an older target policy; re-evaluate the PR.`);
+    const header = result.output?.summary?.match(/^PR #(\d+); head ([^;\r\n]+); base ([a-f0-9]{40}); risk: /);
+    if (!header || Number(header[1]) !== evidence || header[2] !== pr.head.sha) {
+      throw new Error(`Evidence gate ${name} has a missing or invalid target commit; re-evaluate the PR.`);
+    }
+    if (!await policyApi.samePolicy(header[3], main)) throw new Error(`Evidence gate ${name} used a different target policy; re-evaluate the PR.`);
   }
   const bypassActors = await ciBypassActors(request, main);
   log(`Ready to require ${GATES.join(', ')} and resolved threads, then replace the blanket review count with dynamic ownership. ${CI_GATES.join(', ')} permit explicit PR-only bypass by ${bypassActors.length} global CODEOWNERS users/teams. Human confirmations and resolved threads cannot be bypassed. Backup: ${backupPath}`);
