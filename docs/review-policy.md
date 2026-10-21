@@ -134,6 +134,14 @@ Its token has checks write access and read access to repository metadata, PRs, i
 and Actions. The separate membership client uses `REVIEW_POLICY_TEAM_TOKEN` only for
 read-only team lookups. No OpenAI API key is needed.
 
+PR events run only the short `request-review-policy` job, which dispatches the
+controller on trusted `main` without checking out PR code. The cancellable
+`evaluate` job belongs to that background run; only its four published gates
+determine the review-policy outcome on the PR. New events still supersede older
+evaluations immediately. Superseded runs remain cancelled in Actions history,
+while the PR's launcher job completes successfully; actual gate failures remain
+visible and keep their normal merge requirements.
+
 PRs that modify, delete or rename `.github/workflows/review-policy-events.yml`
 fail the gates because review events use the PR's version of that workflow.
 Updating the notifier requires a controlled migration with native review protection

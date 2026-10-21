@@ -23,8 +23,28 @@ on:
 permissions: {}
 
 jobs:
+  request:
+    if: github.event_name == 'pull_request_target'
+    name: request-review-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: 'review-policy.yml',
+              ref: 'main',
+              inputs: { pr: String(context.payload.pull_request.number) },
+              request: { timeout: 20000 },
+            });
+
   targets:
     if: >-
+      github.event_name != 'pull_request_target' &&
       (github.event_name != 'issue_comment' || github.event.issue.pull_request != null) &&
       (github.event_name != 'check_run' || github.event.check_run.app.slug == 'cursor')
     runs-on: ubuntu-latest
