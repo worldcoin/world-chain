@@ -53,6 +53,7 @@ function fake(options = {}) {
     ...(options.checks || []),
   ];
   const calls = [];
+  const statuses = [];
   let ticks = 0;
   let nextCheckId = Math.max(...checks.map((check) => check.id)) + 1;
   const github = { request: async (route, args) => {
@@ -67,7 +68,10 @@ function fake(options = {}) {
       if (!data) throw new Error(`Unknown Git tree: ${args.tree_sha}`);
     }
     else if (route === 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs') data = { check_runs: structuredClone(checks) };
-    else if (route === 'POST /repos/{owner}/{repo}/check-runs') {
+    else if (route === 'POST /repos/{owner}/{repo}/statuses/{sha}') {
+      data = { id: statuses.length + 1, ...args };
+      statuses.unshift(data);
+    } else if (route === 'POST /repos/{owner}/{repo}/check-runs') {
       data = { id: nextCheckId++, app: { slug: 'github-actions' }, ...args };
       checks.push(data);
     } else if (route === 'PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}') {
@@ -95,7 +99,7 @@ function fake(options = {}) {
   const failures = [];
   const messages = [];
   const core = { info: (text) => messages.push(text), setFailed: (text) => failures.push(text), summary: { addRaw: () => ({ write: async () => {} }) } };
-  return { github, core, checks, failures, calls, messages, pr };
+  return { github, core, checks, statuses, failures, calls, messages, pr };
 }
 
 async function run(options = {}) {
@@ -103,7 +107,7 @@ async function run(options = {}) {
   const fixture = fake(options);
   let clock = now;
   await evaluate({ github: fixture.github, teamGithub: options.teamAccess ? fixture.github : undefined,
-    context, core: fixture.core, number: 1, now: () => clock,
+    context: { ...context, ...options.context }, core: fixture.core, number: 1, now: () => clock,
     sleep: async (ms) => { clock += ms; options.afterSleep?.(fixture, ms); } });
   return fixture;
 }
@@ -141,6 +145,61 @@ test('trusted controller publishes four successful checks on PR head, never on m
     assert.match(check.output.summary, /Verified human evidence fingerprint: [a-f0-9]{64}/);
   }
   assert(result.calls.every((call) => call.args.request.timeout === 20000));
+});
+
+test('background events publish merge statuses on the PR head with matching diagnostic checks', async (t) => {
+  const workflow = fs.readFileSync('.github/workflows/review-policy.yml', 'utf8');
+  assert.match(workflow.split('  evaluate:')[1], /      statuses: write/);
+  for (const eventName of ['workflow_dispatch', 'workflow_run', 'issue_comment']) await t.test(eventName, async () => {
+    const result = await run({ context: { eventName } });
+    assert.deepEqual(result.failures, []);
+    assert.equal(result.statuses.length, GATES.length * 2);
+    for (const name of GATES) {
+      const check = result.checks.find((check) => check.name === name);
+      const statuses = result.statuses.filter((status) => status.context === name);
+      assert.deepEqual(statuses.map((status) => status.state), ['success', 'pending']);
+      assert(statuses.every((status) => status.sha === head && status.target_url === `https://github.com/worldcoin/world-chain/runs/${check.id}`));
+      const pending = result.calls.findIndex((call) => call.args.context === name && call.args.state === 'pending');
+      const completed = result.calls.findIndex((call) => call.args.check_run_id === check.id && call.args.conclusion === 'success');
+      const success = result.calls.findIndex((call) => call.args.context === name && call.args.state === 'success');
+      assert(pending < completed && completed < success);
+    }
+  });
+});
+
+test('head, policy or evaluator replacement during check publication prevents a successful commit status', async (t) => {
+  for (const change of ['head', 'policy', 'evaluator']) await t.test(change, async () => {
+    let changed = false;
+    const result = await run({ respond: (route, args, data) => {
+      if (route.startsWith('PATCH ') && args.conclusion === 'success') changed = true;
+      if (!changed) return data;
+      if (change === 'head' && route.endsWith('/pulls/{pull_number}')) data.head.sha = 'new-head';
+      if (change === 'policy' && route.endsWith('/branches/{branch}')) data.commit.sha = 'new-main';
+      if (change === 'evaluator' && route.endsWith('/check-runs')) {
+        data.check_runs.push({ ...data.check_runs.find((check) => check.name === GATES[0]), id: 10000 });
+      }
+      return data;
+    } });
+    assert.deepEqual(result.failures, []);
+    assert(result.statuses.every((status) => status.state === 'pending'));
+  });
+});
+
+test('commit status publication errors cannot report a successful evaluation', async (t) => {
+  for (const failure of ['denied', 'mismatched response']) await t.test(failure, async () => {
+    const result = await run({ respond: (route, args, data) => {
+      if (route.endsWith('/statuses/{sha}') && args.state === 'success') {
+        if (failure === 'denied') throw Object.assign(new Error('Forbidden'), { status: 403 });
+        return { ...data, context: 'wrong-context' };
+      }
+      return data;
+    } });
+    assert.equal(result.failures.length, 1);
+    for (const name of GATES) {
+      assert.equal(result.statuses.find((status) => status.context === name).state, 'failure');
+      assert.equal(result.checks.find((check) => check.name === name).conclusion, 'failure');
+    }
+  });
 });
 
 test('the controller accepts Cursor reusing its reviewed patch after a rebase', async () => {
@@ -224,6 +283,7 @@ test('policy changes during AI polling invalidate prior human clearance', async 
   });
   assert.match(result.failures.join('\n'), /target review policy changed/);
   assert.equal(result.checks.find((check) => check.name === 'human-review-gate').conclusion, 'failure');
+  assert.equal(result.statuses.find((status) => status.context === 'human-review-gate').state, 'failure');
 });
 
 test('re-evaluation invalidates old green checks while fresh AI evidence is pending', async () => {
@@ -256,6 +316,11 @@ test('author confirmation changes during the AI wait cannot leave a successful h
     assert(result.calls.some((call) => call.args.output?.title === 'human-review-gate: success'));
     assert.equal(result.checks.find((check) => check.name === 'codex-review-gate').conclusion, 'success');
     assert.equal(result.checks.find((check) => check.name === 'human-review-gate').conclusion, 'failure');
+    const statuses = result.statuses.filter((status) => status.context === 'human-review-gate');
+    assert.deepEqual(statuses.map((status) => status.state), ['failure', 'success', 'pending']);
+    const revoked = result.calls.findIndex((call) => call.args.context === 'human-review-gate' && call.args.state === 'failure');
+    const failedCheck = result.calls.findIndex((call) => call.args.output?.title === 'human-review-gate: failure');
+    assert(revoked < failedCheck);
   });
 });
 
@@ -411,11 +476,13 @@ test('first observation survives re-evaluation; old thumbs-up cannot become fres
 test('missing CI remains pending rather than reporting success', async () => {
   const result = await run({ noCI: true });
   assert.equal(result.checks.find((check) => check.name === 'required-ci-gate').status, 'in_progress');
+  assert.equal(result.statuses.find((status) => status.context === 'required-ci-gate').state, 'pending');
 });
 
 test('head movement never publishes success after the movement', async () => {
   const result = await run({ moveHead: true });
   assert(!result.calls.some((call) => call.route.startsWith('PATCH ') && call.args.conclusion === 'success'));
+  assert(!result.statuses.some((status) => status.state === 'success'));
 });
 
 test('base movement, incomplete file list and duplicate PR heads fail closed', async () => {
@@ -524,7 +591,9 @@ test('polling avoids duplicate AI/CI reads and unchanged historical check writes
   const oldCodex = checks.find((check) => check.name === 'codex-review-gate');
   const writes = result.calls.filter((call) => call.route.startsWith('PATCH ') && call.args.check_run_id === oldCodex.id);
   assert.deepEqual(writes.map((call) => call.args.conclusion), ['failure', 'success']);
-  assert(result.calls.length < 250, `API budget exceeded: ${result.calls.length} requests`);
+  // Four gates add eight status writes and twelve final identity reads.
+  assert(result.calls.length < 270, `API budget exceeded: ${result.calls.length} requests`);
+  for (const name of GATES) assert.equal(result.statuses.filter((status) => status.context === name).length, 2);
 });
 
 test('one-minute polling detects a new Codex thumbs-up without requiring a webhook', async () => {
@@ -620,6 +689,24 @@ test('rate-limit recovery respects head changes and does not publish clearance o
   } });
   assert.deepEqual(result.failures, []);
   assert(!result.calls.some((call) => call.route.startsWith('PATCH ') && call.args.conclusion === 'success'));
+});
+
+test('a throttled commit-status success is re-evaluated after an approval is revoked', async () => {
+  let throttled = false;
+  const options = { files: [{ filename: 'ordinary-config.yaml' }], comments: [authorApproval],
+    respond: (route, args, data) => {
+      if (!throttled && route.endsWith('/statuses/{sha}') && args.context === 'human-review-gate' && args.state === 'success') {
+        throttled = true;
+        throw rateLimit({ 'retry-after': '60' }, 429);
+      }
+      return data;
+    }, afterSleep: () => { options.comments = []; },
+  };
+  const result = await run(options);
+  assert(throttled);
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.statuses.find((status) => status.context === 'human-review-gate').state, 'failure');
+  assert(result.checks.filter((check) => check.name === 'human-review-gate').every((check) => check.conclusion === 'failure'));
 });
 
 test('team-token rate limits recover separately from missing membership permissions', async () => {

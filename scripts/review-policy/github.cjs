@@ -244,8 +244,21 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
   const own = (name) => checks.filter((check) => check.name === name && check.app?.slug === 'github-actions' && check.external_id === external).sort((a, b) => a.id - b.id)[0];
   const link = `${context.serverUrl || 'https://github.com'}/${fullName}/actions/runs/${context.runId}`;
   const gateChecks = new Map();
+  const gateStatuses = new Map();
   async function create(name, extra) {
     return api.call('POST /repos/{owner}/{repo}/check-runs', { name, head_sha: sha, external_id: external, details_url: link, ...extra });
+  }
+  async function publishStatus(name, result, check) {
+    const target_url = `${context.serverUrl || 'https://github.com'}/${fullName}/runs/${check.id}`;
+    const previous = gateStatuses.get(name);
+    if (previous?.state === result.state && previous.target_url === target_url) return;
+    const status = await api.call('POST /repos/{owner}/{repo}/statuses/{sha}', {
+      sha, context: name, state: result.state, target_url, description: `${name}: ${result.state}`,
+    });
+    if (status.state !== result.state || status.context !== name || status.target_url !== target_url) {
+      throw new Error(`GitHub did not publish the expected ${name} commit status.`);
+    }
+    gateStatuses.set(name, status);
   }
   async function publish(name, result, text) {
     const current = await getPr();
@@ -259,6 +272,8 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
     const all = await api.all('GET /repos/{owner}/{repo}/commits/{ref}/check-runs', { ref: sha, filter: 'all' }, 'check_runs');
     const matching = all.filter((check) => check.name === name && check.app?.slug === 'github-actions' && check.external_id === external);
     if (matching.some((check) => check.id > active.id)) return false;
+    // Invalidate merge clearance before updating diagnostic checks.
+    if (result.state !== 'success') await publishStatus(name, result, active);
     for (const check of [active, ...matching.filter((check) => check.id !== active.id)]) {
       const superseded = check.id !== active.id && result.state === 'pending';
       const conclusion = superseded ? 'failure' : result.state === 'pending' ? undefined : result.state;
@@ -273,6 +288,15 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
       });
       if (updated.status !== status || (updated.conclusion || undefined) !== conclusion) throw new Error(`GitHub did not publish the expected ${name} result.`);
       if (check.id === active.id) gateChecks.set(name, updated);
+    }
+    if (result.state === 'success' && gateStatuses.get(name)?.state !== 'success') {
+      const latest = await getPr();
+      if (latest.state !== 'open' || latest.head.sha !== sha || latest.base.ref !== pr.base.ref
+          || !await api.samePolicy(pr.base.sha, latest.base.sha)) return false;
+      const latestChecks = await api.all('GET /repos/{owner}/{repo}/commits/{ref}/check-runs', { ref: sha, filter: 'all' }, 'check_runs');
+      if (latestChecks.some((check) => check.name === name && check.app?.slug === 'github-actions'
+          && check.external_id === external && check.id > active.id)) return false;
+      await publishStatus(name, result, active);
     }
     return true;
   }

@@ -86,9 +86,13 @@ async function fixture(t, options = {}) {
     },
     list(resource) {
       if (resource === 'rulesets') return [socket, ...[...rulesets.values()].map((rule) => ({ ...rule, source_type: 'Repository' }))];
-      if (resource === 'commits/head/check-runs') return GATES.map((name) => ({ name, status: 'completed', conclusion: options.badGate ? 'failure' : 'success',
+      if (resource === 'commits/head/check-runs') return GATES.map((name, id) => ({ id, name, status: 'completed', conclusion: options.badGate ? 'failure' : 'success',
         app: { slug: 'github-actions' }, external_id: 'review-policy:worldcoin/world-chain:1:head',
         output: { summary: options.gateSummary ?? `PR #1; head head; base ${options.gateBases?.[name] || options.evidenceBase || base}; risk: critical.` } }));
+      if (resource === 'commits/head/statuses') return options.noStatuses ? [] : GATES.map((context, id) => ({
+        context, state: options.statusState || 'success', creator: { login: options.statusCreator || 'github-actions[bot]' },
+        target_url: `https://github.com/worldcoin/world-chain/runs/${options.wrongStatusTarget ? 999 : id}`,
+      }));
       throw new Error(`Unexpected admin list: ${resource}`);
     },
   };
@@ -155,6 +159,16 @@ test('undeployed code and unsuccessful pilot gates cannot change protection', as
   for (const options of [{ notDeployed: true }, { badGate: true }]) {
     const f = await fixture(t, options);
     await assert.rejects(() => f.run('activate', ['--evidence-pr', '1', '--apply']));
+    assert.deepEqual(f.mutations, []);
+    assert.deepEqual(f.live, f.original);
+  }
+});
+
+test('diagnostic checks alone cannot activate protection without matching successful merge statuses', async (t) => {
+  for (const options of [{ noStatuses: true }, { statusState: 'pending' }, { statusState: 'failure' },
+    { statusCreator: 'someone-else' }, { wrongStatusTarget: true }]) {
+    const f = await fixture(t, options);
+    await assert.rejects(() => f.run('activate', ['--evidence-pr', '1', '--apply']), /matching successful GitHub Actions commit status/);
     assert.deepEqual(f.mutations, []);
     assert.deepEqual(f.live, f.original);
   }

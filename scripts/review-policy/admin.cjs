@@ -180,6 +180,7 @@ async function main(args = process.argv.slice(2), api = { request, list }, log =
   const pr = request('GET', `pulls/${evidence}`);
   if (pr.base.ref !== 'main') throw new Error('Evidence PR must target main.');
   const checks = list(`commits/${pr.head.sha}/check-runs`, 'check_runs');
+  const statuses = list(`commits/${pr.head.sha}/statuses`);
   const policyApi = new Api({ request: async (route, { tree_sha }) => {
     if (route !== 'GET /repos/{owner}/{repo}/git/trees/{tree_sha}') throw new Error(`Unexpected policy API: ${route}`);
     return { data: request('GET', `git/trees/${tree_sha}`) };
@@ -188,6 +189,11 @@ async function main(args = process.argv.slice(2), api = { request, list }, log =
     const result = checks.find((check) => check.name === name && check.app?.slug === 'github-actions'
       && check.external_id === `review-policy:${REPO}:${evidence}:${pr.head.sha}`);
     if (result?.status !== 'completed' || result.conclusion !== 'success') throw new Error(`Evidence gate ${name} is not successful on the PR head.`);
+    const status = statuses.find((status) => status.context === name);
+    if (status?.state !== 'success' || status.creator?.login !== 'github-actions[bot]'
+        || status.target_url !== `https://github.com/${REPO}/runs/${result.id}`) {
+      throw new Error(`Evidence gate ${name} lacks a matching successful GitHub Actions commit status; re-evaluate the PR.`);
+    }
     const header = result.output?.summary?.match(/^PR #(\d+); head ([^;\r\n]+); base ([a-f0-9]{40}); risk: /);
     if (!header || Number(header[1]) !== evidence || header[2] !== pr.head.sha) {
       throw new Error(`Evidence gate ${name} has a missing or invalid target commit; re-evaluate the PR.`);

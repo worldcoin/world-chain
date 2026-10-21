@@ -154,17 +154,25 @@ audit; all PRs require policy tests and the large-file check.
 The privileged controller checks out only an immutable commit of `main`. It never
 executes PR code or reads artifacts from untrusted workflows. A separate unprivileged
 review-event notifier wakes the controller; the controller reads live API state.
-Its token has checks write access and read access to repository metadata, PRs, issues
-and Actions. The separate membership client uses `REVIEW_POLICY_TEAM_TOKEN` only for
+Its token has checks and commit-status write access and read access to repository
+metadata, PRs, issues and Actions. The separate membership client uses `REVIEW_POLICY_TEAM_TOKEN` only for
 read-only team lookups. No OpenAI API key is needed.
 
 PR events run only the short `request-review-policy` job, which dispatches the
 controller on trusted `main` without checking out PR code. The cancellable
-`evaluate` job belongs to that background run; only its four published gates
+`evaluate` job belongs to that background run; its four published commit statuses
 determine the review-policy outcome on the PR. New events still supersede older
 evaluations immediately. Superseded runs remain cancelled in Actions history,
 while the PR's launcher job completes successfully; actual gate failures remain
 visible and keep their normal merge requirements.
+
+Each gate publishes a commit status with its existing required context and a link
+to its diagnostic check. GitHub excludes checks from some background workflow
+events from required-check evaluation; commit statuses report the same verified
+outcomes independently of that workflow-job restriction. The required source
+remains GitHub Actions. Diagnostic checks retain the full evidence and also stay
+in sync, since GitHub requires both to pass when a status and check share a name.
+See [GitHub's required-check troubleshooting](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks#checks-from-some-workflow-jobs-are-not-evaluated).
 
 CI completion wakes the controller. Initial CI start events do not restart an
 evaluation already launched by the PR event; a rerun's start still wakes it so a
@@ -223,8 +231,11 @@ and requires a rerun. GitHub API reads and check publication are not atomic; lat
 events trigger a new evaluation.
 
 Every evaluation creates fresh pending gates and updates older duplicates to the
-same outcome. Old successful checks cannot survive a revoked author confirmation or remain
-green while a fresh evaluation is waiting for evidence. Historical checks are only
+same outcome. Pending and failed commit statuses are written before diagnostic
+check updates; success is written only after those updates and a fresh check of
+the head, target policy and absence of a newer evaluation. Unchanged statuses
+are not reposted during polling. Old successful checks cannot survive a revoked
+author confirmation or remain green while a fresh evaluation is waiting for evidence. Historical checks are only
 written when their status or conclusion changes; the newest checks carry the
 current complete summary.
 The target SHA is resolved from the branch API because the PR API can retain an
@@ -287,8 +298,9 @@ is the global owner still requires activation to bind the new team ID.
    are retained.
 
 Activation verifies the deployed files match the local implementation and requires
-a real PR whose four gate checks succeeded. Evidence may refer to an older `main`
-commit only if its trusted policy inputs are identical to current `main`, using
+a real PR whose four gate checks and matching GitHub Actions commit statuses
+succeeded. Each status must link to its corresponding diagnostic check. Evidence
+may refer to an older `main` commit only if its trusted policy inputs are identical to current `main`, using
 the same Git-tree comparison as the evaluator. Missing or invalid evidence commit
 identities, changed policy and unreadable trees block activation. The final check
 that `main` stayed unchanged during activation still applies.
