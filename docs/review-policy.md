@@ -171,6 +171,20 @@ evaluation already launched by the PR event; a rerun's start still wakes it so a
 previous successful CI result can be invalidated immediately. Review-event notifier
 completion, author commands and Cursor events retain their existing behavior.
 
+An ordinary merge to `main` does not re-evaluate other open PRs. The push handler
+compares Git object identities for the three supported CODEOWNERS locations,
+`.github/review-policy.json`, `scripts/review-policy/`, `.github/workflows/` and
+`.github/actions/`. Only changes to these controls refresh all open PRs, retaining
+normal AI polling so an ongoing review can still complete after a policy update.
+Git trees are read without recursion, including additions and deletions, and
+incomplete reads fail closed.
+
+An evaluation already running can continue across ordinary merges to `main` when
+these controls are unchanged. It still stops on a changed PR head, target branch,
+or review policy. Immutable Git trees and policy fingerprints are cached within
+the run, so repeated identity checks do not repeat those API reads. A normal main
+push therefore runs only the short target-discovery job, with no evaluator matrix.
+
 API requests are serialized and use conditional GETs when GitHub supplies an ETag.
 Cached data is reused only after GitHub confirms it is unchanged with HTTP 304;
 these authenticated responses do not consume the primary API quota. Human approval,
@@ -196,10 +210,10 @@ fail the gates because review events use the PR's version of that workflow.
 Updating the notifier requires a controlled migration with native review protection
 enabled, so pending PRs cannot disable approval revocations.
 
-Checks are posted on the PR head explicitly. Each PR is serialized, and the head
-and target commit are rechecked before publishing. Every poll rereads AI results,
-human confirmations, permissions and CI results. Human clearance requires two
-consecutive snapshots with the same fingerprint of human review decisions, the
+Checks are posted on the PR head explicitly. Each PR is serialized, and the head,
+target branch and policy identity are rechecked before publishing. Every poll
+rereads AI results, human confirmations, permissions and CI results. Human clearance
+requires two consecutive snapshots with the same fingerprint of human review decisions, the
 author's approval command state, permissions, ownership, risk and commit identity.
 The verified human fingerprint is recorded in the check summary. AI/CI progress,
 reactions, review body edits and ordinary discussion do not invalidate it. A revoked

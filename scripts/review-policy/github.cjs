@@ -4,6 +4,12 @@ const fs = require('node:fs');
 const { createHash } = require('node:crypto');
 const policy = require('./policy.cjs');
 const AI_POLL_INTERVAL_MS = 60000;
+const POLICY_INPUTS = [
+  ['', ['CODEOWNERS']],
+  ['.github', ['CODEOWNERS', 'review-policy.json', 'workflows', 'actions']],
+  ['scripts', ['review-policy']],
+  ['docs', ['CODEOWNERS']],
+];
 
 function fingerprint(value) {
   const canonical = (item) => Array.isArray(item) ? item.map(canonical)
@@ -43,6 +49,8 @@ class Api {
   constructor(github, repo, teamGithub) {
     this.github = github; this.repo = repo; this.teamGithub = teamGithub;
     this.cache = new Map();
+    this.trees = new Map();
+    this.policyRevisions = new Map();
     this.queue = Promise.resolve();
     this.rateLimit = undefined;
   }
@@ -95,6 +103,34 @@ class Api {
     if (result.type !== 'file' || result.encoding !== 'base64' || result.size > 1000000) throw new Error(`Cannot read trusted ${path}`);
     return Buffer.from(result.content, 'base64').toString('utf8');
   }
+  async tree(sha) {
+    if (!this.trees.has(sha)) {
+      const data = await this.call('GET /repos/{owner}/{repo}/git/trees/{tree_sha}', { tree_sha: sha });
+      if (data.truncated || !Array.isArray(data.tree)) throw new Error('Incomplete Git tree; cannot verify review policy.');
+      this.trees.set(sha, data.tree);
+    }
+    return this.trees.get(sha);
+  }
+  async policyRevision(sha) {
+    if (!this.policyRevisions.has(sha)) {
+      const root = await this.tree(sha);
+      const inputs = [];
+      for (const [directory, names] of POLICY_INPUTS) {
+        const entry = directory && root.find((item) => item.path === directory);
+        if (entry && entry.type !== 'tree') throw new Error(`Invalid review-policy directory: ${directory}`);
+        const entries = !directory ? root : entry ? await this.tree(entry.sha) : [];
+        for (const name of names) {
+          const item = entries.find((candidate) => candidate.path === name);
+          inputs.push([directory ? `${directory}/${name}` : name, item ? [item.mode, item.type, item.sha] : null]);
+        }
+      }
+      this.policyRevisions.set(sha, fingerprint(inputs));
+    }
+    return this.policyRevisions.get(sha);
+  }
+  async samePolicy(before, after) {
+    return before === after || await this.policyRevision(before) === await this.policyRevision(after);
+  }
 }
 
 async function targets({ github, context, core = { info: () => {} },
@@ -108,6 +144,9 @@ async function findTargets(github, context) {
   if (context.eventName === 'workflow_run' && event.action !== 'completed'
       && !(event.action === 'in_progress' && event.workflow_run?.run_attempt > 1)) return [];
   if (context.eventName === 'push') {
+    if (event.deleted) return [];
+    if (!event.before || !event.after) throw new Error('Push is missing commit identities; cannot verify review-policy changes.');
+    if (!/^0+$/.test(event.before) && await api.samePolicy(event.before, event.after)) return [];
     return (await api.all('GET /repos/{owner}/{repo}/pulls', { state: 'open', base: 'main' })).map((pr) => pr.number);
   }
   if (event.pull_request) return [event.pull_request.number];
@@ -211,7 +250,7 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
   async function publish(name, result, text) {
     const current = await getPr();
     if (current.state !== 'open' || current.head.sha !== sha || current.base.ref !== pr.base.ref) return false;
-    if (result.state === 'success' && current.base.sha !== pr.base.sha) return false;
+    if (result.state === 'success' && !await api.samePolicy(pr.base.sha, current.base.sha)) return false;
     let active = gateChecks.get(name);
     if (result.state === 'pending' && active.status === 'completed') {
       active = await create(name, { status: 'in_progress' });
@@ -250,7 +289,7 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
       await publish(name, { state: 'pending' }, `Re-evaluating PR #${number}, head ${sha}.`);
     }
     const checkoutSha = process.env.REVIEW_POLICY_BASE_SHA;
-    if (!checkoutSha || checkoutSha !== pr.base.sha) throw new Error('Target branch changed since checkout; rerun Review policy.');
+    if (!checkoutSha || !await api.samePolicy(checkoutSha, pr.base.sha)) throw new Error('Target review policy changed since checkout; rerun Review policy.');
     const config = JSON.parse(fs.readFileSync('.github/review-policy.json', 'utf8'));
     const files = await api.all('GET /repos/{owner}/{repo}/pulls/{pull_number}/files', { pull_number: number });
     if (files.length !== pr.changed_files) throw new Error('Incomplete PR file list (GitHub limits this API to 3000 files); split the PR.');
@@ -268,9 +307,10 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
     for (const workflow of new Set(groups.map((group) => group.workflow))) {
       workflowIds[workflow] = (await api.call('GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}', { workflow_id: workflow })).id;
     }
-    function checkIdentity(current) {
-      if (current.state !== 'open' || current.head.sha !== sha || current.base.ref !== pr.base.ref || current.base.sha !== pr.base.sha) {
-        throw new Error('PR head or target branch changed while collecting evidence; rerun Review policy.');
+    async function checkIdentity(current) {
+      if (current.state !== 'open' || current.head.sha !== sha || current.base.ref !== pr.base.ref
+          || !await api.samePolicy(pr.base.sha, current.base.sha)) {
+        throw new Error('PR head or target review policy changed while collecting evidence; rerun Review policy.');
       }
     }
     async function readHumanEvidence(reviews, comments) {
@@ -295,7 +335,7 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
     }
     const completedJobs = new Map();
     async function readEvidence() {
-      checkIdentity(await getPr());
+      await checkIdentity(await getPr());
       const [reviews, comments, reactions, checks, allRuns] = await Promise.all([
         api.all('GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews', { pull_number: number }),
         api.all('GET /repos/{owner}/{repo}/issues/{issue_number}/comments', { issue_number: number }),
@@ -325,7 +365,7 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
         'human-review-gate': human.result,
         'required-ci-gate': policy.ciGate(groups, runs, jobs, workflowIds, pr),
       };
-      checkIdentity(await getPr());
+      await checkIdentity(await getPr());
       return { results: evidenceResults, humanFingerprint: human.fingerprint };
     }
     async function finalEvidence() {
@@ -333,7 +373,7 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
       for (let attempt = 0; attempt < 3; attempt++) {
         if (candidate.results['human-review-gate'].state !== 'success') return candidate;
         const human = await readHumanEvidence();
-        checkIdentity(await getPr());
+        await checkIdentity(await getPr());
         const rechecked = { results: { ...candidate.results, 'human-review-gate': human.result }, humanFingerprint: human.fingerprint };
         if (candidate.humanFingerprint === rechecked.humanFingerprint) return { ...rechecked, verified: true };
         candidate = rechecked;
@@ -356,7 +396,7 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
       if (text !== published) {
         const current = await getPr();
         if (current.head.sha !== sha || current.base.ref !== pr.base.ref || current.state !== 'open') return;
-        if (current.base.sha !== pr.base.sha) throw new Error('Target branch advanced; rerun Review policy against its current policy.');
+        await checkIdentity(current);
         for (const name of policy.GATES) if (!await publish(name, results[name], text)) return;
         published = text;
       }
