@@ -133,11 +133,14 @@ not pass. Resolving a finding does not need to turn the original check green if 
 completed review was established. Review threads still require resolution when
 Bugbot reuses a review.
 
-The controller polls for AI completion every 30 seconds for up to 30 minutes.
+The controller polls for AI completion every 60 seconds for up to 30 minutes of
+active evaluation, excluding waits imposed by GitHub API rate limits.
 Timeout fails the AI gate; rerun **Review policy**, or dispatch it with the PR
 number. A later formal review or Cursor check event also re-evaluates the gate.
 Reactions have no dedicated Actions trigger: a thumbs-up arriving after polling
-ends requires a manual rerun.
+ends requires a manual rerun. While polling is active, a thumbs-up can wait up to
+one polling interval plus API latency to be detected. Human commands, formal reviews
+and CI completion trigger evaluations without waiting for that interval.
 
 CI requirements are also selected from the trusted configuration. The gate checks
 the expected workflow ID, current head, PR association and the latest attempt's
@@ -163,6 +166,31 @@ evaluations immediately. Superseded runs remain cancelled in Actions history,
 while the PR's launcher job completes successfully; actual gate failures remain
 visible and keep their normal merge requirements.
 
+CI completion wakes the controller. Initial CI start events do not restart an
+evaluation already launched by the PR event; a rerun's start still wakes it so a
+previous successful CI result can be invalidated immediately. Review-event notifier
+completion, author commands and Cursor events retain their existing behavior.
+
+API requests are serialized and use conditional GETs when GitHub supplies an ETag.
+Cached data is reused only after GitHub confirms it is unchanged with HTTP 304;
+these authenticated responses do not consume the primary API quota. Human approval,
+permission and team membership reads still contact GitHub each time. The second
+human verification reads only human evidence, without duplicating AI/CI queries.
+Completed CI jobs are reused within an evaluation only while the run ID, attempt,
+update timestamp and conclusion match; the workflow run itself is always rechecked.
+See [GitHub's API recommendations](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api).
+
+On a rate-limit response, the controller stops requests, logs when it will resume,
+and waits for `Retry-After` or the quota reset (with bounded exponential backoff for
+secondary limits). It then restarts from current PR, policy and review evidence;
+it never retries a previously computed successful result after the wait. Recovery
+allows three retries and at most 65 minutes of quota waiting, without resetting
+the 30-minute AI budget. The evaluator job allows 105 minutes including recovery.
+If the recovery budget is exhausted, the workflow fails with a rerun instruction.
+GitHub may still reject check updates while its quota is exhausted, leaving a gate
+pending until a later evaluation. Missing permissions and invalid credentials do
+not receive quota retries.
+
 PRs that modify, delete or rename `.github/workflows/review-policy-events.yml`
 fail the gates because review events use the PR's version of that workflow.
 Updating the notifier requires a controlled migration with native review protection
@@ -182,7 +210,9 @@ events trigger a new evaluation.
 
 Every evaluation creates fresh pending gates and updates older duplicates to the
 same outcome. Old successful checks cannot survive a revoked author confirmation or remain
-green while a fresh evaluation is waiting for evidence.
+green while a fresh evaluation is waiting for evidence. Historical checks are only
+written when their status or conclusion changes; the newest checks carry the
+current complete summary.
 The target SHA is resolved from the branch API because the PR API can retain an
 older base SHA after `main` advances.
 
