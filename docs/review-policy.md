@@ -93,6 +93,21 @@ and check publication continue to use the job's built-in token. Missing, expired
 or unauthorized membership credentials block the gates rather than treating
 contributors as owners. Team membership includes active members of child teams.
 
+When rotating this credential, update `REVIEW_POLICY_TEAM_TOKEN` at its existing
+repository or organization scope, preserving any organization-secret repository
+access policy. Rerun **Review policy** for an open PR and confirm its gate summary
+evaluates team ownership without a membership configuration error. For an
+organization secret, also verify its other consumers before revoking the previous
+token.
+
+To request that re-evaluation without pushing a commit, run:
+
+```bash
+gh workflow run review-policy.yml --repo worldcoin/world-chain --ref main -f pr=NUMBER
+```
+
+Replace `NUMBER` with the open PR number. The controller runs from trusted `main`.
+
 ## AI completion and CI
 
 The author enables **Automatic review / All PRs** and the every-push trigger in
