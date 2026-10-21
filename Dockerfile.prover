@@ -173,10 +173,12 @@ RUN /app/bin/${PROVER_BIN} vkeys \
 FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime
 WORKDIR /app
 
+# Require Debian's eMudhra distrust update for the system CA bundle.
 RUN apt-get update && \
   apt-get install -y --no-install-recommends \
   ca-certificates \
   tzdata && \
+  dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20250419~deb12u2' && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
 

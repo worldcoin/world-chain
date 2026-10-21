@@ -98,7 +98,7 @@ world-chain-proof-core.workspace = true
 p384 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
 x509-parser = { version = "0.18", features = ["verify"] }
 rustls-pki-types = "1"
-webpki = { package = "rustls-webpki", version = "0.103", default-features = false, features = [
+webpki = { package = "rustls-webpki", version = "0.103.16", default-features = false, features = [
     "ring",
     "std",
 ] }
