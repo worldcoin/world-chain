@@ -27,8 +27,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM base AS builder
 WORKDIR /app
 
+# cast ships in the runtime image; 1.8.6+ carries the eMudhra distrust (rustls-webpki 0.103.16).
 RUN curl -L https://foundry.paradigm.xyz | bash && \
-  /root/.foundry/bin/foundryup --install 1.5.1
+  /root/.foundry/bin/foundryup --install 1.8.6
 
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
@@ -91,9 +92,8 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
   /tmp/aws/install && \
   rm -rf /tmp/aws /tmp/awscliv2.zip
 
-# Install s3fcp
-RUN curl -L "https://github.com/Dzejkop/s3fcp/releases/download/v0.3.0/s3fcp-linux-x86_64" -o "/usr/local/bin/s3fcp" && \
-  chmod +x /usr/local/bin/s3fcp
+# The AWS CLI bundles its own CA store; use Debian's, which distrusts the eMudhra roots.
+ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 ARG PROFILE="maxperf"
