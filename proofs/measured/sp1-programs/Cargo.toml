@@ -24,8 +24,8 @@ rkyv = { version = "0.8", features = ["hashbrown-0_15", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
 sha2 = "0.10.9"
-sp1-lib = { version = "=6.8.1", features = ["verify"] }
-sp1-zkvm = { version = "=6.8.1", features = ["verify"] }
+sp1-lib = { version = "=6.10.0", features = ["verify"] }
+sp1-zkvm = { version = "=6.10.0", features = ["verify"] }
 thiserror = "2"
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
@@ -39,10 +39,10 @@ panic = "abort"
 # Use SP1-accelerated hashing and curve arithmetic to reduce guest RISC-V cycles.
 # Cargo requires these patches at the guest workspace root to apply them to Kona.
 [patch.crates-io]
-sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", tag = "patch-sha2-0.10.9-sp1-6.0.0" }
+sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", tag = "patch-sha2-0.10.9-sp1-6.10.0" }
 sha3 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", tag = "patch-sha3-0.11.0-sp1-6.0.0" }
-k256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-k256-13.4-sp1-6.0.0" }
-p256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-p256-13.2-sp1-6.0.0" }
-substrate-bn = { git = "https://github.com/sp1-patches/bn", tag = "patch-0.6.0-sp1-6.0.0-substrate-bn" }
+k256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-k256-13.4-sp1-6.10.0" }
+p256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-p256-13.2-sp1-6.10.0" }
+substrate-bn = { git = "https://github.com/sp1-patches/bn", tag = "patch-0.6.0-sp1-6.10.0-substrate-bn" }
 # Currently unused: guest Keccak hashing uses the patched sha3 crate.
-tiny-keccak = { git = "https://github.com/sp1-patches/tiny-keccak", tag = "patch-2.0.2-sp1-6.0.0" }
+tiny-keccak = { git = "https://github.com/sp1-patches/tiny-keccak", tag = "patch-2.0.2-sp1-6.10.0" }
