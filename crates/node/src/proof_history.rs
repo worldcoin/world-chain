@@ -25,6 +25,10 @@ pub async fn launch_node(
     builder: WithLaunchContext<NodeBuilder<DatabaseEnv, WorldChainSpec>>,
     config: WorldChainNodeConfig,
 ) -> eyre::Result<()> {
+    eyre::ensure!(
+        builder.config().engine.num_state_masking_blocks() == 0,
+        "--engine.num-state-masking-blocks must be 0 on world-chain: state masking is not supported"
+    );
     if !config.args.rollup.proofs_history {
         let handle = builder
             .node(WorldChainNode::<WorldChainDefaultContext>::new(config))
@@ -64,6 +68,10 @@ pub async fn launch_with_proof_history<S>(
 where
     S: OpProofsStore + DatabaseMetrics + Send + Sync + 'static,
 {
+    eyre::ensure!(
+        builder.config().engine.num_state_masking_blocks() == 0,
+        "--engine.num-state-masking-blocks must be 0 on world-chain: state masking is not supported"
+    );
     let proofs_storage: OpProofsStorage<Arc<S>> = storage.clone().into();
     let exex_storage = proofs_storage.clone();
 

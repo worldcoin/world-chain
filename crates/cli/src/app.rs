@@ -12,7 +12,7 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
-    args::{LogArgs, OtlpInitStatus, OtlpLogsStatus, TraceArgs},
+    args::{DefaultEngineValues, LogArgs, OtlpInitStatus, OtlpLogsStatus, TraceArgs},
     version::version_metadata,
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
@@ -48,19 +48,65 @@ pub struct Cli<
     _phantom: PhantomData<Rpc>,
 }
 
-impl Cli {
-    /// Parses only the default CLI arguments.
-    pub fn parse_args() -> Self {
-        Self::parse()
+const STATE_MASKING_ARG: &str = "num_state_masking_blocks";
+const STATE_MASKING_UNSUPPORTED_HELP: &str =
+    "--engine.num-state-masking-blocks must be 0 on world-chain: state masking is not supported";
+
+impl<C, Ext, Rpc> Cli<C, Ext, Rpc>
+where
+    C: ChainSpecParser,
+    Ext: clap::Args + fmt::Debug,
+    Rpc: RpcModuleValidator,
+{
+    /// Returns the clap command with state masking disabled and hidden, matching op-reth.
+    pub fn command_with_state_masking_disabled() -> clap::Command {
+        // If defaults were initialized elsewhere, the effective-value check still rejects masking.
+        let _ = DefaultEngineValues::default()
+            .with_num_state_masking_blocks(0)
+            .try_init();
+        <Self as clap::CommandFactory>::command().mut_subcommands(|cmd| {
+            if cmd.get_name() == "node" {
+                cmd.mut_args(|arg| {
+                    if arg.get_id() == STATE_MASKING_ARG {
+                        arg.hide(true)
+                    } else {
+                        arg
+                    }
+                })
+            } else {
+                cmd
+            }
+        })
     }
 
-    /// Parses only the default CLI arguments from the given iterator.
+    /// Parses CLI arguments with state masking disabled, matching op-reth.
+    pub fn parse_args() -> Self {
+        match Self::try_parse_args_from(std::env::args_os()) {
+            Ok(cli) => cli,
+            Err(err) => err.exit(),
+        }
+    }
+
+    /// Parses CLI arguments from the given iterator, rejecting state masking.
     pub fn try_parse_args_from<I, T>(itr: I) -> Result<Self, clap::error::Error>
     where
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
-        Self::try_parse_from(itr)
+        let mut cmd = Self::command_with_state_masking_disabled();
+        let mut matches = cmd.try_get_matches_from_mut(itr)?;
+        // Check the effective value, including environment variables and previously set defaults.
+        if let Some(node) = matches.subcommand_matches("node")
+            && node
+                .get_one::<u64>(STATE_MASKING_ARG)
+                .is_some_and(|blocks| *blocks != 0)
+        {
+            return Err(cmd.error(
+                clap::error::ErrorKind::ValueValidation,
+                STATE_MASKING_UNSUPPORTED_HELP,
+            ));
+        }
+        <Self as clap::FromArgMatches>::from_arg_matches_mut(&mut matches)
     }
 }
 
@@ -279,5 +325,52 @@ where
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_masking_is_disabled() {
+        for explicit_zero in [false, true] {
+            let mut args = vec!["world-chain", "node", "--engine.persistence-threshold", "7"];
+            if explicit_zero {
+                args.extend(["--engine.num-state-masking-blocks", "0"]);
+            }
+            let cli = Cli::<WorldChainSpecParser, WorldChainArgs>::try_parse_args_from(args)
+                .expect("masking disabled");
+            let Commands::Node(command) = cli.command else {
+                panic!("expected node command");
+            };
+            assert_eq!(command.engine.num_state_masking_blocks(), 0);
+            command
+                .engine
+                .validate()
+                .expect("legacy persistence threshold");
+        }
+
+        for value in ["1", "30"] {
+            let err = Cli::<WorldChainSpecParser, WorldChainArgs>::try_parse_args_from([
+                "world-chain",
+                "node",
+                "--engine.num-state-masking-blocks",
+                value,
+            ])
+            .expect_err("nonzero masking must be rejected");
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+            assert!(err.to_string().contains(STATE_MASKING_UNSUPPORTED_HELP));
+        }
+
+        let mut cmd =
+            Cli::<WorldChainSpecParser, WorldChainArgs>::command_with_state_masking_disabled();
+        let help = cmd
+            .find_subcommand_mut("node")
+            .expect("node subcommand")
+            .render_long_help()
+            .to_string();
+        assert!(!help.contains("--engine.num-state-masking-blocks"));
+        assert!(help.contains("--engine.persistence-threshold"));
     }
 }
