@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-32652eb9.js";
+            window.path_to_searchindex_js = "../searchindex-c8258299.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-87388434.js"></script>
@@ -210,6 +210,18 @@ Rollup:
       --rollup.enable-tx-conditional
           Enable transaction conditional support on sequencer
 
+      --rollup.retain-forwarded-txs
+          Retain RPC-submitted transactions in the local pool after forwarding them to the sequencer.
+          
+          This flag only has an effect when `rollup.sequencer` is present.
+
+      --rollup.operator-sdm-opt-in &lt;OPERATOR_SDM_OPT_IN&gt;
+          Local operator opt-in for SDM `PostExec` production at process boot. The admin RPC (`admin_setOperatorSdmOptIn`) can still toggle it at runtime. Defaults to disabled
+          
+          [env: OP_RETH_OPERATOR_SDM_OPT_IN=]
+          [default: false]
+          [possible values: true, false]
+
       --rollup.interop-http &lt;INTEROP_HTTP_URL&gt;
           HTTP endpoint(s) for the interop filter, used to validate the interop messages referenced by incoming transactions. Repeat the flag to configure multiple endpoints; each check is fanned out to all of them and combined by quorum agreement (see `--rollup.interop-min-responses`). When none are set, interop transaction validation is disabled: a node that builds blocks will then include transactions carrying invalid interop messages, producing invalid blocks. It is only safe to leave this unset on nodes that do not build blocks
 
@@ -258,13 +270,9 @@ Rollup:
           Path to the proofs-history storage DB. Defaults to `&lt;reth-data-dir&gt;/historical-proofs` (chain-namespaced via reth's `--datadir`)
 
       --proofs-history.storage-version &lt;PROOFS_HISTORY_STORAGE_VERSION&gt;
-          Storage schema version. Must match the version used when starting the node
-
-          Possible values:
-          - v1: V1 storage schema (original single-table-per-domain layout). Default
-          - v2: V2 storage schema with changeset and history-bitmap tables, enabling history-aware reads at any block number within the proof window
+          Deprecated: v2 is the only storage format, so `v2` is a no-op and any other value is rejected.
           
-          [default: v1]
+          Kept so that deployments which still pass `--proofs-history.storage-version=v2` keep working.
 
       --proofs-history.window &lt;PROOFS_HISTORY_WINDOW&gt;
           The window to span blocks for proofs history. Value is the number of blocks. Default is 1 month of blocks based on 2 seconds block time (`30 * 24 * 60 * 60 / 2 = 1_296_000`)

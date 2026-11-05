@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-32652eb9.js";
+            window.path_to_searchindex_js = "../searchindex-c8258299.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-87388434.js"></script>
@@ -271,10 +271,11 @@ CodeChange    { block_access_index: u64, new_code:     Bytes }
 <h3 id="consumer-validation"><a class="header" href="#consumer-validation">Consumer Validation</a></h3>
 <p>A consumer that receives a flashblock whose diff contains <code>access_list_data</code> MAY use the access list to validate the flashblock via the parallel path. A consumer that uses the access list MUST perform all of the following, and MUST reject the flashblock if any step fails:</p>
 <ol>
+<li><strong>Verify the received access list hash.</strong> Before using <code>access_list</code> to reconstruct state, compute <code>keccak256(rlp(access_list))</code> and require it to equal the published <code>access_list_hash</code>. A mismatch MUST be rejected.</li>
 <li><strong>Reconstruct pre-state.</strong> Build a temporal pre-state from <code>access_list</code> over the parent block’s state, applying the <a href="#block-access-index-semantics">Block Access Index Semantics</a>. For any account, slot, or code not present in the access list, reads MUST fall through to the parent state.</li>
 <li><strong>Derive the post-state.</strong> Extend the bundle state committed by prior flashblocks with the changes in <code>access_list</code> to obtain the post-flashblock bundle, and compute its state root.</li>
-<li><strong>Re-execute in parallel.</strong> Execute the flashblock’s transactions, each at its own <code>block_access_index</code> over an isolated snapshot of the reconstructed pre-state, and aggregate the per-transaction receipts, gas, fees, and re-derived account changes.</li>
-<li><strong>Verify the access list.</strong> Reduce the re-derived changes to canonical form, compute their hash, and require it to equal the published <code>access_list_hash</code>. A mismatch MUST be rejected.</li>
+<li><strong>Re-execute in parallel.</strong> Execute the flashblock’s transactions, each at its own <code>block_access_index</code> over an isolated snapshot of the reconstructed pre-state, and aggregate the per-transaction receipts, gas, fees, and re-derived account changes. Before committing each result in transaction order, enforce the sequential block admission rules using cumulative pre-refund EVM gas and, when Jovian is active, cumulative DA footprint, including usage from prior flashblocks and the applicable deposit exemptions.</li>
+<li><strong>Verify the re-derived access list.</strong> Reduce the re-derived changes to canonical form, compute their hash, and require it to equal the same published <code>access_list_hash</code>. A mismatch MUST be rejected.</li>
 <li><strong>Verify the roots and hash.</strong> The re-computed <code>receipts_root</code> MUST equal <code>diff.receipts_root</code>, the derived <code>state_root</code> MUST equal <code>diff.state_root</code>, and the assembled block hash MUST equal <code>diff.block_hash</code>.</li>
 </ol>
 <p>A consumer MUST NOT surface a flashblock’s state as <code>pending</code> unless validation succeeds. If <code>access_list_data</code> is absent, the consumer MUST fall back to sequential re-execution of the diff transactions against the committed state (the legacy path), which produces the same <code>pending</code> block without the access-list optimizations.</p>

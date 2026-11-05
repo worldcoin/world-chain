@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-32652eb9.js";
+            window.path_to_searchindex_js = "../searchindex-c8258299.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-87388434.js"></script>
@@ -177,13 +177,13 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
-<p>We outline an OP Stack dispute game in which a proposer posts an output root without embedding proof material in the factory identity. At least one configured proof lane must support the root during the initial one-day challenge window. If nobody challenges and a proof was submitted, the game may resolve in favor of the proposer; without a proof it resolves against the proposer. A challenge may be submitted whether or not the initial proof already exists and raises the requirement to two independent proof lanes by seven days from game creation. The stock <code>DisputeGameFactory</code>, <code>AnchorStateRegistry</code>, <code>OptimismPortal2</code>, and <code>DelayedWETH</code> remain responsible for game creation, claim validity, withdrawals, and bond custody.</p>
+<p>We outline an OP Stack dispute game in which a proposer posts an output root without embedding proof material in the factory identity. At least one configured proof lane must support the root during the initial one-day challenge window. If nobody challenges and a proof was submitted, the game may resolve in favor of the proposer; without a proof it resolves against the proposer. A challenge may be submitted whether or not the initial proof already exists and raises the requirement to two independent proof lanes by seven days from game creation. The stock <code>DisputeGameFactory</code>, <code>AnchorStateRegistry</code>, and <code>OptimismPortal2</code> remain responsible for game creation, claim validity, and withdrawals; a WIP-1006 <code>ERC20StakingVault</code> holds proposal and challenge bonds in a deployment-selected ERC-20 token. World Chain configures WLD as that bond token.</p>
 <h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
 <p>The vanilla OP Stack fault-proof system inherits a multi-day challenge window for every proposal and routes every dispute through a single interactive fault-proof lane. Base’s Azul proof system reduces that window when two heterogeneous proofs (TEE and ZK) agree, but still requires a proof on the common path and still rests final resolution on at most two lanes.</p>
 <p>World Chain targets two properties that neither model provides together:</p>
 <ul>
 <li><strong>A stable factory identity.</strong> Proof bytes are submitted to the created game rather than included in <code>extraData</code>, so the stock factory UUID remains predictable from the transition.</li>
-<li><strong>A cheap common path.</strong> Only one configured proof lane is required when no staked participant objects to a root.</li>
+<li><strong>A cheap common path.</strong> Only one configured proof lane is required when no participant objects to a root.</li>
 <li><strong>A diversified disputed path.</strong> When a root is challenged, the proposer must defend it, and no single prover, TEE vendor, or council action can finalize that defense. At least two independent lanes must agree.</li>
 </ul>
 <p>The result is fast finality in the common case and <code>n / m</code> threshold security in the dispute case.</p>
@@ -197,30 +197,34 @@
 <tr><th>Name</th><th>Value</th><th>Meaning</th></tr>
 </thead>
 <tbody>
-<tr><td><code>PROOF_THRESHOLD</code></td><td><code>2</code></td><td>Number of distinct proof lanes that MUST support a challenged root before it finalizes.</td></tr>
 <tr><td><code>PROOF_LANE_COUNT</code></td><td><code>3</code></td><td>Number of configured proof lanes.</td></tr>
+<tr><td><code>CHALLENGER_REWARD_BPS</code></td><td><code>5,000</code></td><td>Share of a forfeited proposer bond paid to the challenger after a challenged proof timeout, in basis points.</td></tr>
 </tbody>
 </table>
 </div>
 <h3 id="activation-parameters"><a class="header" href="#activation-parameters">Activation Parameters</a></h3>
 <p>Activation parameters are set at hardfork activation and held as immutable values on the proof system contracts. They MAY be retuned only by a subsequent activation. All implementations MUST commit to these values in their deployed configuration and MUST NOT permit per-call overrides.</p>
+<p>Proof-system identities (<code>aggregationVKey</code>, <code>rangeVKeyCommitment</code>, and <code>teeImageId</code>) are also
+immutable game-implementation configuration, but are not fixed protocol constants. Rotating one
+requires activating a new game implementation; existing games retain their original identities.</p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Name</th><th>Initial Value</th><th>Meaning</th></tr>
 </thead>
 <tbody>
-<tr><td><code>CHALLENGE_PERIOD</code></td><td><code>1 day</code></td><td>Duration after proposal creation during which a staked participant MAY challenge a root and any party MAY submit the initial proof. Per-proposal <code>challengeDeadline = createdAt + CHALLENGE_PERIOD</code>.</td></tr>
+<tr><td><code>PROOF_THRESHOLD</code></td><td><code>2</code></td><td>Number of distinct proof lanes that MUST support a challenged root before it finalizes. The implementation accepts values from <code>2</code> through <code>PROOF_LANE_COUNT</code>.</td></tr>
+<tr><td><code>BLOCK_INTERVAL</code></td><td>TBD</td><td>Exact distance each proposal MUST advance from its parent.</td></tr>
+<tr><td><code>CHALLENGE_PERIOD</code></td><td><code>1 day</code></td><td>Duration after proposal creation during which any participant MAY challenge a root and any party MAY submit the initial proof. Per-proposal <code>challengeDeadline = createdAt + CHALLENGE_PERIOD</code>.</td></tr>
 <tr><td><code>PROOF_PERIOD</code></td><td><code>7 days</code></td><td>Duration after proposal creation during which the proposer MAY defend a challenged root by accumulating lane submissions toward <code>PROOF_THRESHOLD</code>. Per-proposal <code>proofDeadline = createdAt + PROOF_PERIOD</code>. <code>PROOF_PERIOD</code> MUST be greater than <code>CHALLENGE_PERIOD</code>. A challenged root that the proposer has not defended to <code>PROOF_THRESHOLD</code> by <code>proofDeadline</code> MUST be invalidated.</td></tr>
-<tr><td><code>PROPOSER_BOND</code></td><td>TBD</td><td>ETH bond supplied to <code>DisputeGameFactory.create</code> and held as <code>DelayedWETH</code> credit by the game. Paid to the proposer after <code>DEFENDER_WINS</code>, to the challenger after a challenged proof timeout, to the configured protocol recipient after an unchallenged proof timeout, or refunded if the registry invalidates the game. It MUST exceed <code>CHALLENGE_FEE</code>, so successfully challenging an invalid root has a positive gross reward before transaction costs.</td></tr>
-<tr><td><code>CHALLENGER_BOND</code></td><td>TBD</td><td>ETH bond supplied by the challenger and held as <code>DelayedWETH</code> credit by the game. The non-refundable <code>CHALLENGE_FEE</code> is deducted whenever a challenge is accepted; the remainder is paid to the proposer after a successful defense, to the challenger after proof timeout, or refunded if the registry invalidates the game.</td></tr>
-<tr><td><code>PROTOCOL_FEE_RECIPIENT</code></td><td>TBD</td><td>Nonzero protocol-controlled recipient credited with the proposer bond when an unchallenged proposal expires without any valid proof lane and with <code>CHALLENGE_FEE</code> whenever a challenge is accepted.</td></tr>
-<tr><td><code>CHALLENGE_FEE</code></td><td>TBD</td><td>Nonzero flat amount deducted from <code>CHALLENGER_BOND</code> whenever a challenge is accepted. It MUST NOT exceed <code>CHALLENGER_BOND</code> and MUST remain charged under both normal and refund settlement.</td></tr>
+<tr><td><code>PROPOSER_BOND</code></td><td>TBD</td><td>Bond tokens locked from the creator’s available vault balance during factory creation. Paid to the proposer after <code>DEFENDER_WINS</code>, split between the challenger and protocol after a challenged proof timeout, paid to the protocol after an unchallenged proof timeout, or refunded if the registry invalidates the game.</td></tr>
+<tr><td><code>CHALLENGER_BOND</code></td><td>TBD</td><td>Bond tokens locked from the challenger’s available vault balance at challenge time. Split between the proposer and accepted proof-lane recipients after a successful defense, returned to the challenger after proof timeout, or refunded if the registry invalidates the game.</td></tr>
+<tr><td><code>PROTOCOL_FEE_RECIPIENT</code></td><td>TBD</td><td>Nonzero protocol-controlled recipient credited with the proposer bond after an unchallenged proof timeout and with the portion not paid to the challenger after a challenged proof timeout.</td></tr>
 </tbody>
 </table>
 </div>
 <h3 id="proof-lanes"><a class="header" href="#proof-lanes">Proof Lanes</a></h3>
-<p>A challenged root finalizes only when at least <code>PROOF_THRESHOLD</code> distinct lanes support the same root commitment. Each lane counts at most once per root.</p>
+<p>A challenged root finalizes only when at least <code>PROOF_THRESHOLD</code> distinct lanes are accepted by the same game. Each lane counts at most once per game. The lanes do not need to authenticate byte-identical payloads: the validity and TEE lanes authenticate the transition, while the Security Council authenticates the proposal’s <code>rootId</code>. The game derives both statements from its own state.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -234,8 +238,8 @@
 </table>
 </div>
 <p>Multiple proofs from the same lane MUST NOT increase the threshold count.</p>
-<h3 id="root-commitments"><a class="header" href="#root-commitments">Root Commitments</a></h3>
-<p>The data bound by every proof and attestation is split into immutable domain configuration and per-game clone data. The implementation fixes the complete domain. Each proposal supplies that domain’s hash in <code>extraData</code>, allowing the game to reject cross-domain proposals and ensuring that the factory UUID changes when the proof-system domain changes.</p>
+<h3 id="identifiers-and-authenticated-statements"><a class="header" href="#identifiers-and-authenticated-statements">Identifiers and Authenticated Statements</a></h3>
+<p>The factory UUID identifies a game, while each proof lane authenticates a statement derived by that game. The implementation fixes the complete domain. Each proposal supplies that domain’s hash in <code>extraData</code>, allowing the game to reject cross-domain proposals and ensuring that the factory UUID changes when the proof-system domain changes.</p>
 <h4 id="proposal-per-proposal"><a class="header" href="#proposal-per-proposal">Proposal (per-proposal)</a></h4>
 <div class="table-wrapper">
 <table>
@@ -248,15 +252,15 @@
 <tr><td><code>l2BlockNumber</code></td><td>Proposer</td><td>L2 block number for <code>rootClaim</code>, matching the <a href="https://specs.optimism.io/protocol/proposals.html"><code>l2BlockNumber</code> field of an OP Stack L2 output proposal</a>.</td></tr>
 <tr><td><code>parentRef</code></td><td>Proposer</td><td>Address of the parent — the <code>AnchorStateRegistry</code> for the first proposal, otherwise the parent proposal. Same convention as the OP Stack <a href="https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html">Fault Dispute Game <code>extraData</code> parent reference</a> and the parent reference encoded in Base Azul’s <code>AggregateVerifier</code> extra-data layout (see <a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts">Base Azul proof system</a>). The parent’s <code>rootClaim</code> and <code>l2BlockNumber</code> are read from this reference rather than re-supplied.</td></tr>
 <tr><td><code>attempt</code></td><td>Proposer</td><td>Retry nonce for the same transition. Attempt zero is the initial game; later attempts are permitted only after an eligible predecessor fails or is made obsolete by activation.</td></tr>
-<tr><td><code>l1OriginHash</code></td><td>Factory</td><td>L1 origin hash captured at proposal creation. The proposer does not pass it as calldata; it is read via <code>blockhash()</code> or <a href="https://eips.ethereum.org/EIPS/eip-2935">EIP-2935</a> history and pinned by the factory, mirroring the OP Stack <a href="https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html"><code>l1Head</code> snapshot at clone creation</a> that Base Azul inherits.</td></tr>
+<tr><td><code>l1OriginHash</code></td><td>Factory</td><td>Previous L1 block hash captured at proposal creation. The proposer does not pass it as calldata.</td></tr>
 <tr><td><code>l1OriginNumber</code></td><td>Game</td><td>L1 block number paired with the factory-captured <code>l1OriginHash</code>.</td></tr>
 </tbody>
 </table>
 </div>
-<p>The proposer calls <code>DisputeGameFactory.create(gameType, rootClaim, extraData)</code>, where:</p>
+<p>The proposer deposits the configured bond token into <code>ERC20StakingVault</code> and calls <code>DisputeGameFactory.create(gameType, rootClaim, extraData)</code>, where:</p>
 <pre><code class="language-text">extraData = abi.encode(domainHash, l2BlockNumber, parentRef, attempt)
 </code></pre>
-<h4 id="domain-verifier-immutable"><a class="header" href="#domain-verifier-immutable">Domain (verifier-immutable)</a></h4>
+<h4 id="domain-game-immutable"><a class="header" href="#domain-game-immutable">Domain (game-immutable)</a></h4>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -266,21 +270,24 @@
 <tr><td><code>chainId</code></td><td>World Chain L2 chain ID.</td></tr>
 <tr><td><code>proofSystemVersion</code></td><td>Version of this proof system’s proof-domain encoding.</td></tr>
 <tr><td><code>rollupConfigHash</code></td><td>Hash of the rollup configuration and World Chain hardfork schedule.</td></tr>
+<tr><td><code>blockInterval</code></td><td>Exact distance in L2 blocks between a parent root and a proposed root.</td></tr>
 </tbody>
 </table>
 </div>
-<p>These values are set once on the game implementation (analogous to Base’s <code>CONFIG_HASH</code> and <code>L2_CHAIN_ID</code> immutables). Proposal cadence is deliberately absent: the game enforces only that each proposal advances its parent, so the distance between roots is proposer policy that the proposer and challenger agree on offchain. Their hash is supplied in each game’s <code>extraData</code> and MUST equal the implementation’s immutable <code>domainHash</code>. Lane-specific constants, such as the active TEE image hash and validity-proof program key, live in the lane verifiers and are committed to by those lanes’ proof material.</p>
-<h4 id="canonical-identifiers"><a class="header" href="#canonical-identifiers">Canonical identifiers</a></h4>
-<p>The contracts use two related identifiers:</p>
+<p>These values are set once on the game implementation (analogous to Base’s <code>CONFIG_HASH</code> and <code>L2_CHAIN_ID</code> immutables). Their hash is supplied in each game’s <code>extraData</code> and MUST equal the implementation’s immutable <code>domainHash</code>. The game implementation also pins the aggregation vkey, range vkey commitment, and TEE image ID. Lane verifier contracts are reusable: the game supplies its pinned identity to the selected verifier for every proof.</p>
+<h4 id="identifiers-and-statements"><a class="header" href="#identifiers-and-statements">Identifiers and statements</a></h4>
+<p>The contracts use two related identifiers and one transition statement:</p>
 <ul>
-<li><code>gameUUID</code> is the stock <code>DisputeGameFactory</code> lookup key. It commits to <code>gameType</code>, <code>rootClaim</code>, and the complete <code>extraData</code>, but excludes the factory-captured L1 origin.</li>
-<li><code>rootId</code> is the proof-bound commitment. It includes the factory-captured L1 origin and is the value every proof lane MUST bind to.</li>
+<li><code>gameUUID</code> is the stock <code>DisputeGameFactory</code> lookup key and the unique identifier for a game creation. It commits to <code>gameType</code>, <code>rootClaim</code>, and the complete <code>extraData</code>, but excludes the factory-captured L1 origin.</li>
+<li><code>rootId</code> is the Security Council’s proposal commitment. It includes the factory-captured L1 origin and is also used to correlate proof events and errors. It is not the factory UUID and does not include <code>attempt</code>.</li>
+<li><code>transition</code> is the state-transition statement authenticated by the validity and TEE lanes. The game derives it from its L1 head, parent proposal, root claim, L2 block number, and immutable rollup configuration.</li>
 </ul>
 <p>The contract computes:</p>
 <pre><code class="language-text">domainHash = keccak256(abi.encode(
     chainId,
     proofSystemVersion,
-    rollupConfigHash
+    rollupConfigHash,
+    blockInterval
 ))
 
 extraData = abi.encode(
@@ -290,7 +297,7 @@ extraData = abi.encode(
     attempt
 )
 
-gameUUID = keccak256(abi.encodePacked(
+gameUUID = keccak256(abi.encode(
     gameType,
     rootClaim,
     extraData
@@ -304,8 +311,18 @@ rootId = keccak256(abi.encode(
     l1OriginHash,
     l1OriginNumber
 ))
+
+transition = TransitionPublicValues({
+    l1Head: l1OriginHash,
+    l2PreRoot: parentRoot,
+    l2PreBlockNumber: parentL2BlockNumber,
+    l2PostRoot: rootClaim,
+    l2PostBlockNumber: l2BlockNumber,
+    rollupConfigHash: rollupConfigHash
+})
 </code></pre>
-<p>The factory MUST reject duplicate games with the same <code>gameUUID</code>. All proofs and attestations MUST bind to <code>rootId</code>. A proof or attestation that binds to a different domain, parent, root, block range, or L1 origin MUST NOT be accepted for <code>rootId</code>.</p>
+<p>The factory MUST reject duplicate games with the same <code>gameUUID</code>. The game MUST construct the expected lane statement from its own state; callers MUST NOT be able to override it. The validity lane MUST authenticate <code>abi.encode(transition, rangeVKeyCommitment)</code> under the game-pinned aggregation vkey. The TEE lane MUST authenticate <code>abi.encode(transition)</code> with a signer registered for the game-pinned TEE image ID. The Security Council lane MUST authenticate <code>abi.encode(rootId)</code> under a council-specific signature domain.</p>
+<p>Proof reuse across games is permitted only when the authenticated transition and relevant verifier identities are identical. Such reuse proves the same state transition and MUST NOT allow a proof for one parent, root, block range, rollup configuration, aggregation program, range program, or TEE image to authorize another.</p>
 <h3 id="state-machine"><a class="header" href="#state-machine">State Machine</a></h3>
 <p>The OP Stack lifecycle uses <code>GameStatus</code> for externally consumed resolution. The WIP-facing root states map onto it as follows:</p>
 <pre class="mermaid">stateDiagram-v2
@@ -313,7 +330,7 @@ rootId = keccak256(abi.encode(
     PROPOSED --&gt; FINALIZED: PROOF_THRESHOLD lanes
     PROPOSED --&gt; FINALIZED: one proof + unchallenged deadline
     PROPOSED --&gt; INVALIDATED: no proof at unchallenged deadline
-    PROPOSED --&gt; CHALLENGED: staked challenge before challenge deadline
+    PROPOSED --&gt; CHALLENGED: bonded challenge before challenge deadline
     CHALLENGED --&gt; FINALIZED: resolve after PROOF_THRESHOLD lanes
     CHALLENGED --&gt; INVALIDATED: resolve after proof timeout
     PROPOSED --&gt; INVALIDATED: resolve after parent invalidation
@@ -326,26 +343,26 @@ rootId = keccak256(abi.encode(
 <h3 id="proposal-lifecycle"><a class="header" href="#proposal-lifecycle">Proposal Lifecycle</a></h3>
 <p>A root enters the system in the <code>PROPOSED</code> state.</p>
 <ol>
-<li>The proposer calls the stock <code>DisputeGameFactory.create</code> with the WIP-1006 game type, <code>rootClaim</code>, and canonical <code>extraData</code>, supplying the configured initialization bond.</li>
-<li>The factory creates a clone of the registered WIP-1006 implementation, captures the creator and L1 head, and calls <code>initialize</code>.</li>
-<li>The game validates the domain, parent registration and eligibility, exact L2 block interval, retry predecessor, and bond.</li>
+<li>The proposer deposits bond tokens into its available vault balance, then calls the stock <code>DisputeGameFactory.create</code> with zero ETH. The factory creates a clone, captures its caller as <code>gameCreator</code> and the L1 head, and calls <code>initialize</code>.</li>
+<li>The game validates the domain, parent registration and eligibility, exact L2 block interval, and retry predecessor, then asks the vault to lock <code>PROPOSER_BOND</code>.</li>
+<li>The factory registers a game only after <code>initialize</code> returns, so the vault authenticates the caller as the deterministic clone the factory deploys for the current implementation and the caller’s creation data, then debits <code>PROPOSER_BOND</code> from <code>gameCreator</code>’s available balance. Any failure reverts the entire creation.</li>
 <li>The game records <code>createdAt = block.timestamp</code>, <code>challengeDeadline = createdAt + CHALLENGE_PERIOD</code>, and <code>proofDeadline = createdAt + PROOF_PERIOD</code>.</li>
-<li>The proposer bond is deposited into <code>DelayedWETH</code>, and the root remains open to challenge until <code>challengeDeadline</code>.</li>
+<li>The root remains open to challenge until <code>challengeDeadline</code>.</li>
 </ol>
+<p>The account calling <code>create</code> is both <code>gameCreator</code> and the bonded proposer. Once a game is registered, it remains authorized to settle through the same singleton vault even if the factory later registers a newer implementation. Game-implementation rotations MUST reuse that vault so settled balances remain available across versions.</p>
+<p>The DisputeGameFactory owner and vault ProxyAdmin owner MUST remain the same governance authority. This is required because the factory owner selects the implementations on whose word the vault allocates participant balances, while the ProxyAdmin owner controls the vault implementation and break-glass custody. New bond locks MUST fail closed if those owners diverge, and deployment and activation tooling MUST validate the invariant.</p>
 <p>Proof material MUST NOT be part of factory creation or <code>extraData</code>. After the game exists, any party MAY submit a valid configured proof lane before <code>challengeDeadline</code>. Offchain services MAY choose a preferred operational lane, but the onchain protocol MUST NOT privilege one lane for the initial proof.</p>
 <p>An initial <code>attempt = 0</code> identifies the first game for a transition. A later attempt keeps the same <code>parentRef</code>, increments <code>attempt</code>, and MUST be accepted only after the preceding attempt enters a protocol-defined recovery case, such as a proof timeout or a game created before WIP-1006 became respected.</p>
 <h3 id="challenge-lifecycle"><a class="header" href="#challenge-lifecycle">Challenge Lifecycle</a></h3>
-<p>Any staked participant MAY challenge a proposed root before <code>challengeDeadline</code>, regardless of whether an initial proof lane already supports it. A challenge goes through optimistically: the challenger is not asked to prove that the root is invalid, and the challenge succeeds by default unless the proposer defends the root. The challenge raises the required support from one lane to <code>PROOF_THRESHOLD</code>.</p>
+<p>Any participant MAY challenge a proposed root before <code>challengeDeadline</code>, regardless of whether an initial proof lane already supports it. A challenge goes through optimistically: the challenger is not asked to prove that the root is invalid, and the challenge succeeds by default unless the proposer defends the root. The challenge raises the required support from one lane to <code>PROOF_THRESHOLD</code>.</p>
 <p>The challenge transaction:</p>
 <ul>
-<li>MUST verify that the caller is currently staked according to the configured staking registry.</li>
 <li>MUST NOT require the caller to submit proof material.</li>
-<li>MUST require the caller to supply <code>CHALLENGER_BOND</code> as ETH and deposit it into the game’s <code>DelayedWETH</code>;</li>
-<li>MUST irrevocably assign <code>CHALLENGE_FEE</code> of that bond to <code>PROTOCOL_FEE_RECIPIENT</code> in both normal and refund settlement modes;</li>
+<li>MUST atomically lock <code>CHALLENGER_BOND</code> from the caller’s available vault balance;</li>
 <li>MUST mark the root as <code>CHALLENGED</code>.</li>
-<li>MUST record <code>challengedAt = block.timestamp</code> on the root the first time it transitions to <code>CHALLENGED</code>. The challenge MUST NOT change the <code>proofDeadline</code> recorded at proposal creation.</li>
+<li>MUST NOT change the <code>proofDeadline</code> derived from proposal creation.</li>
 </ul>
-<p>If the challenged root resolves in favor of the proposer, the proposer receives the proposer bond plus the challenger bond remainder. If it times out below threshold, the challenger receives the proposer bond plus its challenger bond remainder. The protocol receives <code>CHALLENGE_FEE</code> in either case. A game accepts only one challenger.</p>
+<p>If the challenged root resolves in favor of the proposer, the challenger bond is split equally between the proposer and each accepted proof-lane recipient; the proposer also recovers the proposer bond. If it times out below threshold, the challenger recovers the challenger bond plus <code>CHALLENGER_REWARD_BPS</code> of the proposer bond, and the protocol receives the remainder. A game accepts only one challenger.</p>
 <p>A challenge submitted at or after <code>challengeDeadline</code> MUST revert.</p>
 <h3 id="unchallenged-finality"><a class="header" href="#unchallenged-finality">Unchallenged Finality</a></h3>
 <p>An unchallenged root that reaches <code>PROOF_THRESHOLD</code> MAY resolve immediately with <code>DEFENDER_WINS</code>.
@@ -355,35 +372,36 @@ Otherwise, if no valid challenge has been submitted by <code>challengeDeadline</
 <li>the root is still <code>PROPOSED</code>;</li>
 <li>the parent is the anchor sentinel or has resolved with <code>DEFENDER_WINS</code>; and</li>
 <li>the parent is not blacklisted; and</li>
-<li>either at least <code>PROOF_THRESHOLD</code> configured lanes support <code>rootId</code>, or
-<code>block.timestamp &gt;= challengeDeadline</code> and at least one configured lane supports <code>rootId</code>.</li>
+<li>either at least <code>PROOF_THRESHOLD</code> configured lanes have been accepted by the game, or
+<code>block.timestamp &gt;= challengeDeadline</code> and at least one configured lane has been accepted by the game.</li>
 </ul>
 <p>If no proof lane supports the root at <code>challengeDeadline</code>, the game MUST instead resolve with <code>CHALLENGER_WINS</code>, record proof timeout, and credit the proposer bond to the configured protocol recipient. This outcome MUST remain retryable even when no challenger exists.</p>
 <p>A self-blacklisted, retired, unrespected, or otherwise improper game may still have <code>DEFENDER_WINS</code> status, but the registry MUST reject its claim and the game MUST use refund-mode bond settlement.</p>
 <h3 id="proposer-defense-and-challenged-finality"><a class="header" href="#proposer-defense-and-challenged-finality">Proposer Defense and Challenged Finality</a></h3>
 <p>Once a root is challenged, the burden of proof rests with the <strong>proposer</strong>, who MUST defend the root by establishing its validity. A challenged root MUST NOT finalize merely because time has elapsed. It finalizes only when the proposer’s defense assembles support from at least <code>PROOF_THRESHOLD</code> distinct proof lanes for the root, and only if the threshold is met before <code>proofDeadline</code>.</p>
 <p>Defending the root is the proposer’s responsibility because the proposer’s <code>PROPOSER_BOND</code> is forfeited if the root fails to reach the threshold. Lane submission itself remains permissionless — any party MAY relay a valid lane submission, and a proposer MAY coordinate independent provers, TEE signers, and the Security Council to do so — but the protocol assigns the economic responsibility for the defense to the proposer and to no other party.</p>
-<p>Each root tracks a per-lane support set (the <strong>proof bitmap</strong>) with one bit per entry in <a href="#proof-lanes">Proof Lanes</a>. Each lane’s bit is set at most once, so duplicate submissions from the same lane MUST NOT increase the threshold count.</p>
+<p>Each root tracks a per-lane support set (the <strong>proof bitmap</strong>) with one bit per entry in <a href="#proof-lanes">Proof Lanes</a>. Each lane’s bit is set at most once, and a duplicate submission MUST revert. Each submission also names the recipient of that lane’s share of a forfeited challenger bond.</p>
 <p>For each lane submission, the contract MUST:</p>
 <ol>
 <li>Verify that the game is still in progress.</li>
 <li>Verify that <code>block.timestamp &lt; challengeDeadline</code> when unchallenged, or <code>block.timestamp &lt; proofDeadline</code> when challenged.</li>
-<li>Verify that the proof or attestation binds to <code>rootId</code>.</li>
+<li>Decode the lane, reward recipient, and lane-specific proof from the compact payload.</li>
+<li>Construct the lane-specific statement and verifier identity from the game’s own state and immutable configuration.</li>
 <li>Verify the proof or attestation according to the lane-specific verifier.</li>
-<li>Set the lane’s bit in the root’s proof bitmap.</li>
-<li>Emit a threshold-reached signal when the bitmap first contains at least <code>PROOF_THRESHOLD</code> distinct lanes.</li>
+<li>Set the lane’s bit, record its reward recipient, and emit <code>Proved</code> with the updated bitmap.</li>
 </ol>
 <p>A lane submission at or after its applicable deadline MUST revert. Once threshold is met, anyone MAY call <code>resolve()</code>, which MUST resolve the game with <code>DEFENDER_WINS</code> whether or not it was challenged.</p>
-<p>If <code>block.timestamp &gt;= proofDeadline</code> and the proof bitmap contains fewer than <code>PROOF_THRESHOLD</code> distinct lanes, anyone MAY call <code>resolve()</code>. The game MUST resolve with <code>CHALLENGER_WINS</code>, record proof timeout as the invalidation reason, and credit the proposer bond plus the challenger bond remainder to the challenger.</p>
+<p>If <code>block.timestamp &gt;= proofDeadline</code> and the proof bitmap contains fewer than <code>PROOF_THRESHOLD</code> distinct lanes, anyone MAY call <code>resolve()</code>. The game MUST resolve with <code>CHALLENGER_WINS</code>, record proof timeout as the invalidation reason, return the challenger bond, credit <code>CHALLENGER_REWARD_BPS</code> of the proposer bond to the challenger, and credit the remainder to <code>PROTOCOL_FEE_RECIPIENT</code>.</p>
 <h3 id="invalidity-and-conflicts"><a class="header" href="#invalidity-and-conflicts">Invalidity and Conflicts</a></h3>
-<p>Invalidation occurs either when a challenged root times out below threshold or when its parent is blacklisted or resolves with <code>CHALLENGER_WINS</code>. Parent invalidation MUST cascade before a descendant can resolve successfully. Because neither participant caused an ancestor failure, the descendant proposer bond and challenger bond remainder MUST be refunded. The challenge fee remains charged.</p>
+<p>Invalidation occurs either when a challenged root times out below threshold or when its parent is blacklisted or resolves with <code>CHALLENGER_WINS</code>. Parent invalidation observed before descendant resolution MUST cascade. Because neither participant caused an ancestor failure, the descendant proposer and challenger MUST recover their full bonds.</p>
+<p>A descendant MAY resolve after its parent resolves with <code>DEFENDER_WINS</code> but before the parent’s registry finality airgap elapses. This allows consecutive games’ finality windows to overlap. If a resolved parent is found invalid during that overlap, the guardian MUST pause the system and blacklist the parent and every already-resolved descendant before unpausing; descendants that have not resolved yet inherit the invalid parent automatically.</p>
 <p>An invalidated root MUST NOT become claim-valid or update the anchor.</p>
-<p>If invalidity of a finalized root is discovered after the fact — for example, via an offchain proof exhibiting a conflicting <code>(parent, l2BlockNumber) → rootId'</code> — the protocol MUST NOT silently roll back finalized state. The configured safety process MUST be triggered: pausing the proof game type, blacklisting the game, or routing the incident to governance.</p>
+<p>If invalidity of a finalized root is discovered after the fact — for example, via an offchain proof exhibiting a conflicting <code>(parentRoot, l2BlockNumber) → rootClaim'</code> — the protocol MUST NOT silently roll back finalized state. The configured safety process MUST be triggered: pausing the proof game type, blacklisting the game, or routing the incident to governance.</p>
 <h3 id="lane-specific-requirements"><a class="header" href="#lane-specific-requirements">Lane-Specific Requirements</a></h3>
 <h4 id="validity-proof"><a class="header" href="#validity-proof">Validity Proof</a></h4>
-<p>The validity proof lane verifies that the transition from <code>parentRoot</code> at <code>parentL2BlockNumber</code> to <code>rootClaim</code> at <code>l2BlockNumber</code> is valid under <code>rollupConfigHash</code>. The verifier MAY be implemented with a zkVM, a SNARK, or another cryptographic proof system. The proof MUST bind to <code>rootId</code> and MUST be verified onchain or by an onchain verifier gateway.</p>
+<p>The validity proof lane verifies that the transition from <code>parentRoot</code> at <code>parentL2BlockNumber</code> to <code>rootClaim</code> at <code>l2BlockNumber</code> is valid from <code>l1OriginHash</code> under <code>rollupConfigHash</code>. The verifier MAY be implemented with a zkVM, a SNARK, or another cryptographic proof system. For SP1, the proof MUST authenticate <code>abi.encode(transition, rangeVKeyCommitment)</code> under the aggregation vkey pinned by the game. It MUST be verified onchain or by an onchain verifier gateway.</p>
 <h4 id="tee-attestation"><a class="header" href="#tee-attestation">TEE Attestation</a></h4>
-<p>The TEE lane accepts a signature from a registered TEE signer over transition data bound to <code>rootId</code>. Signer admission MUST verify the hardware attestation, approved image measurements, and attestation freshness before deriving and activating the signer’s identity. For each proof, the lane verifier MUST check the transition binding, recover the signer from the signature, and require that signer to remain active in the registry. Revocation MUST prevent all subsequent proofs from that signer.</p>
+<p>The TEE lane accepts a signature from a registered TEE signer over <code>abi.encode(transition)</code>. Signer admission MUST verify the hardware attestation, approved image measurements, and attestation freshness before deriving and activating the signer’s identity. For each proof, the lane verifier MUST recover the signer from the transition signature and require that the signer is registered for the TEE image ID pinned by the game. Revocation MUST prevent all subsequent proofs from that signer.</p>
 <h4 id="security-council-attestation"><a class="header" href="#security-council-attestation">Security Council Attestation</a></h4>
 <p>The Security Council lane accepts a threshold signature, multisig transaction, or equivalent onchain action from the configured council. The attestation MUST bind to <code>rootId</code> and MUST be domain-separated from other council actions. A council attestation counts as one lane and MUST NOT finalize a challenged root by itself.</p>
 <h3 id="anchor-updates"><a class="header" href="#anchor-updates">Anchor Updates</a></h3>
@@ -398,13 +416,14 @@ Otherwise, if no valid challenge has been submitted by <code>challengeDeadline</
 </ul>
 <p>Blacklist, retirement, pause, and respected-game-type controls MUST remain gated by the stock OP guardian role. Anchor updates SHOULD be permissionless and self-validating. Failure to advance the anchor MUST NOT prevent an otherwise finalized game from closing or a claim-valid game from supporting a withdrawal.</p>
 <h3 id="bond-settlement"><a class="header" href="#bond-settlement">Bond Settlement</a></h3>
-<p>Resolution assigns normal-mode credits. After the stock dispute-game finality delay, anyone MAY call <code>closeGame()</code> to fix the bond distribution mode:</p>
+<p>Resolution assigns normal-mode credits without releasing bond tokens. After the stock dispute-game finality delay, anyone MAY call <code>closeGame()</code> to fix the bond distribution mode:</p>
 <ul>
 <li><code>NORMAL</code> when <code>AnchorStateRegistry.isGameProper(game)</code> is true;</li>
 <li><code>REFUND</code> when the game has been blacklisted, retired, or otherwise made improper.</li>
 </ul>
-<p>Closing SHOULD attempt to advance the anchor but MUST treat an ineligible or stale anchor update as non-fatal. Credit claims MUST use the two-phase <code>DelayedWETH</code> flow: first unlock the recipient’s credit, then withdraw it after the configured delay. Claiming MAY be permissionless, but funds MUST only be transferred to the credited recipient.</p>
-<p>For every challenged game, <code>CHALLENGE_FEE</code> MUST be credited to <code>PROTOCOL_FEE_RECIPIENT</code> in both distribution modes. Blacklisting, retirement, invalid-parent resolution, and any other refund-mode outcome MUST NOT return that fee to the challenger.</p>
+<p>Closing SHOULD attempt to advance the anchor but MUST treat an ineligible or stale anchor update as non-fatal. It MUST atomically settle the full game pot into the selected recipients’ available vault balances, making those balances immediately reusable for new bonds, reject duplicate settlement, and preserve exact payout conservation. External withdrawal is account-controlled and two-phase: the account requests an amount, waits the configured delay, and withdraws bond tokens. A new request resets the delay for the full pending amount.</p>
+<p>The vault MUST maintain one-to-one bond-token-denominated liabilities and MUST NOT issue transferable shares or apply an exchange rate. Direct token donations MAY make assets exceed liabilities. Insolvency MUST NOT prevent internal game settlement, but an external transfer may fail until the vault is recapitalized. System pause blocks external withdrawal but does not block deposits, withdrawal requests, or challenges to existing games; game creation and closing retain their existing ASR pause checks.</p>
+<p>For challenged <code>DEFENDER_WINS</code>, <code>CHALLENGER_BOND</code> MUST be split equally between the proposer and every accepted proof-lane recipient, with any integer-division remainder credited to the proposer. For challenged <code>PROOF_TIMEOUT</code>, the challenger receives its bond plus <code>CHALLENGER_REWARD_BPS</code> of <code>PROPOSER_BOND</code>; <code>PROTOCOL_FEE_RECIPIENT</code> receives the rest of <code>PROPOSER_BOND</code>. <code>REFUND</code> mode returns the full deposited bonds to their depositors instead of applying normal-mode rewards.</p>
 <h3 id="portal-withdrawals"><a class="header" href="#portal-withdrawals">Portal Withdrawals</a></h3>
 <p><code>OptimismPortal2.proveWithdrawalTransaction</code> selects a game by its stock factory index. The Portal MUST require the game to be proper and respected and MUST verify the output-root proof against the game’s <code>rootClaim</code>. Withdrawal finalization occurs only after the proof-maturity delay and <code>AnchorStateRegistry.isGameClaimValid(game)</code> returns true. A game does not need to be the current anchor to support a withdrawal.</p>
 <h3 id="contract-interfaces"><a class="header" href="#contract-interfaces">Contract Interfaces</a></h3>
@@ -418,17 +437,15 @@ Otherwise, if no valid challenge has been submitted by <code>challengeDeadline</
 <tr><td><code>IDisputeGameFactory</code></td><td>Stock OP factory; registers the WIP-1006 implementation, creates clones, indexes games by UUID and list index, and captures <code>l1Head</code>.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#disputegamefactory"><code>DisputeGameFactory</code></a></td></tr>
 <tr><td><code>IDisputeGame</code> / <code>IMultiProofGame</code></td><td>Per-proposal game; exposes the Portal-facing lifecycle and World Chain proof-lane extensions.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#aggregateverifier"><code>AggregateVerifier</code></a></td></tr>
 <tr><td><code>IAnchorStateRegistry</code></td><td>Stock OP registry; evaluates registration, respect, blacklist, retirement, finality, claim validity, and the current anchor.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#anchorstateregistry"><code>AnchorStateRegistry</code></a></td></tr>
-<tr><td><code>IDelayedWETH</code></td><td>Holds proposer and challenger bonds and enforces delayed two-phase credit withdrawal.</td><td>OP Stack <code>DelayedWETH</code>.</td></tr>
-<tr><td><code>IValidityProofVerifier</code></td><td>Verifies the <code>VALIDITY_PROOF</code> lane against <code>rootId</code>.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#zkverifier"><code>ZKVerifier</code></a></td></tr>
-<tr><td><code>ITEEVerifier</code></td><td>Verifies the <code>TEE_ATTESTATION</code> lane against <code>rootId</code>.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#teeverifier"><code>TEEVerifier</code></a></td></tr>
-<tr><td><code>ITEEProverRegistry</code></td><td>Maintains accepted TEE signer identities, image hashes, and proposer allowlisting.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#teeproverregistry"><code>TEEProverRegistry</code></a></td></tr>
-<tr><td><code>ISecurityCouncil</code></td><td>Submits and verifies <code>SECURITY_COUNCIL</code> attestations bound to <code>rootId</code>.</td><td>World Chain Security Council multisig.</td></tr>
-<tr><td><code>IStakingRegistry</code></td><td>Checks challenger eligibility only. Bond custody and distribution remain in the game and <code>DelayedWETH</code>.</td><td>World Chain-specific; no Base analogue.</td></tr>
+<tr><td><code>IERC20StakingVault</code></td><td>Accepts participant deposits, locks WIP-1006 proposal and challenge bonds from available balances, settles finalized game payouts, and enforces delayed token withdrawal.</td><td><a href="../pkg/contracts/src/dispute/interfaces/IERC20StakingVault.sol"><code>IERC20StakingVault</code></a></td></tr>
+<tr><td><code>IWorldChainProofVerifier</code></td><td>Common interface for verifying lane proofs against a game-supplied verifier identity and game-derived public values.</td><td><a href="../pkg/contracts/src/dispute/interfaces/IWorldChainProofVerifier.sol"><code>IWorldChainProofVerifier</code></a></td></tr>
+<tr><td><code>NitroEnclaveKeyRegistry</code></td><td>Maintains TEE signer identities admitted through Nitro attestation.</td><td><a href="../pkg/contracts/src/dispute/nitro/NitroEnclaveKeyRegistry.sol"><code>NitroEnclaveKeyRegistry</code></a></td></tr>
+<tr><td><code>SecurityCouncilVerifier</code></td><td>Verifies the council Safe’s ERC-1271 attestation over <code>rootId</code>.</td><td><a href="../pkg/contracts/src/dispute/council/SecurityCouncilVerifier.sol"><code>SecurityCouncilVerifier</code></a></td></tr>
 </tbody>
 </table>
 </div>
 <h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
-<p>This proposal is implemented as a new World Chain game type registered on the existing OP Stack <code>DisputeGameFactory</code>. Existing output roots and Cannon-style games do not need to be reinterpreted. Activating the type consists of registering its implementation and initialization bond, then switching the stock <code>AnchorStateRegistry</code> respected game type after operational readiness.</p>
+<p>This proposal is implemented as a new World Chain game type registered on the existing OP Stack <code>DisputeGameFactory</code>. Existing output roots and Cannon-style games do not need to be reinterpreted. Activating the type consists of deploying the vault, registering the game implementation, setting the factory’s type-1006 ETH initialization bond to zero, and switching the stock <code>AnchorStateRegistry</code> respected game type after operational readiness.</p>
 <p>The proposal data remains aligned with the OP Stack:</p>
 <ul>
 <li><code>rootClaim</code> follows the <a href="https://specs.optimism.io/protocol/proposals.html#l2-output-commitment-construction">OP Stack output-root V1 encoding</a>.</li>
@@ -438,21 +455,23 @@ Otherwise, if no valid challenge has been submitted by <code>challengeDeadline</
 <li>factory identity uses the canonical <code>(gameType, rootClaim, extraData)</code> UUID;</li>
 <li><code>domainHash</code>, <code>l2BlockNumber</code>, <code>parentRef</code>, and <code>attempt</code> are encoded in <code>extraData</code>.</li>
 </ul>
-<p>Offchain services MUST use the stock factory creation and lookup APIs plus the WIP-1006 game extensions. They do not require a custom factory or anchor registry. Proposers and defenders MAY reconstruct a selected lineage by looking up the expected transition from the current anchor; challengers use the factory index to inspect all games. A deployment MAY have its defender submit the TEE lane as the initial operational policy, but challenged games MUST still be escalated with an independent lane.</p>
+<p>Proposers and challengers deposit enough bond tokens into their available vault balances before using the stock factory and game APIs. <code>deposit(account, amount)</code> transfers the caller’s tokens and credits the selected account, and no standing allowance is required after a deposit. Offchain services do not require a custom factory or anchor registry. Proposers and defenders MAY reconstruct a selected lineage by looking up the expected transition from the current anchor; challengers use the factory index to inspect all games. A deployment MAY have its defender submit the TEE lane as the initial operational policy, but challenged games MUST still be escalated with an independent lane.</p>
 <h2 id="test-cases"><a class="header" href="#test-cases">Test Cases</a></h2>
 <p>Before this WIP can move beyond Draft, implementations SHOULD cover at least:</p>
 <ul>
 <li>a newly created game has no proof support and a factory UUID independent of later proof bytes;</li>
+<li>the proposer bond is locked from <code>gameCreator</code> atomically with factory creation, and creation reverts without sufficient available balance;</li>
+<li>the vault rejects a proposer-bond lock from any caller that is not the deterministic clone the canonical factory deploys;</li>
+<li>an already registered game can settle after the factory implementation is replaced;</li>
 <li>an unchallenged root with any one valid configured lane finalizes after exactly <code>CHALLENGE_PERIOD</code>;</li>
 <li>an unchallenged root with <code>PROOF_THRESHOLD</code> distinct lanes finalizes before <code>CHALLENGE_PERIOD</code>;</li>
 <li>an unchallenged proofless root invalidates after exactly <code>CHALLENGE_PERIOD</code>, forfeits its proposer bond to the configured protocol recipient, and can be retried;</li>
 <li>factory creation rejects an incorrect domain hash or malformed <code>extraData</code>;</li>
 <li>factory UUID lookup and <code>findLatestGames</code> preserve the complete WIP-1006 <code>extraData</code>;</li>
-<li>an unstaked account cannot challenge;</li>
-<li>a staked account can challenge without proof before the deadline;</li>
-<li>a staked account can challenge after an initial proof, and the game then requires <code>PROOF_THRESHOLD</code> lanes;</li>
-<li>a proposer that challenges its own valid game recovers at most both bonds minus <code>CHALLENGE_FEE</code>;</li>
-<li>normal-mode and refund-mode settlement both credit <code>CHALLENGE_FEE</code> to the protocol recipient;</li>
+<li>any account can challenge without proof by posting <code>CHALLENGER_BOND</code> before the deadline;</li>
+<li>an account can challenge after an initial proof, and the game then requires <code>PROOF_THRESHOLD</code> lanes;</li>
+<li>a proposer that challenges its own game and lets it time out loses the protocol share of <code>PROPOSER_BOND</code>;</li>
+<li>challenged <code>DEFENDER_WINS</code> splits <code>CHALLENGER_BOND</code> between the proposer and accepted proof-lane recipients;</li>
 <li>a challenge at or after the deadline reverts;</li>
 <li>a configuration where <code>proofDeadline &lt;= challengeDeadline</code> is rejected;</li>
 <li>a challenged root with one supporting lane does not finalize;</li>
@@ -460,22 +479,26 @@ Otherwise, if no valid challenge has been submitted by <code>challengeDeadline</
 <li>a challenged root the proposer fails to defend to <code>PROOF_THRESHOLD</code> lanes by <code>proofDeadline</code> invalidates and forfeits <code>PROPOSER_BOND</code>;</li>
 <li>a lane submission at or after <code>proofDeadline</code> reverts and does not affect the proof bitmap;</li>
 <li>challenging a root does not change its creation-time <code>proofDeadline</code>;</li>
-<li>duplicate submissions from the same lane do not increase the threshold count;</li>
-<li>every proof lane rejects material that does not bind to <code>rootId</code>;</li>
+<li>duplicate submissions from the same lane revert without changing the threshold count or reward recipient;</li>
+<li>the validity and TEE lanes reject a proof for a different transition or verifier identity, and the Security Council lane rejects an attestation for a different <code>rootId</code>;</li>
 <li>parent invalidation cascades and refunds both descendant participants;</li>
 <li>retry attempts reject an ineligible predecessor and accept each specified recovery case;</li>
-<li>close and claim use normal mode for proper games and refund mode for blacklisted or retired games;</li>
+<li>close atomically settles normal mode for proper games and refund mode for blacklisted or retired games;</li>
+<li>vault liabilities remain exact across deposits, bond locks, settlement, delayed withdrawals, and participant-address overlap;</li>
 <li>Portal withdrawal proof and finalization accept a claim-valid WIP-1006 game and reject blacklisted, retired, unrespected, challenger-winning, or insufficiently mature games.</li>
 </ul>
 <h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
-<p><strong>Unchallenged-path safety relies on one proof lane.</strong> Any single configured lane may support the common path. An invalid root can therefore finalize if one lane is compromised and no honest staked participant challenges it before <code>challengeDeadline</code>. A timely challenge escalates the game to the independent-lane threshold.</p>
+<p><strong>Unchallenged-path safety relies on one proof lane.</strong> Any single configured lane may support the common path. An invalid root can therefore finalize if one lane is compromised and no honest participant challenges it before <code>challengeDeadline</code>. A timely challenge escalates the game to the independent-lane threshold.</p>
 <p><strong>Disputed-path safety depends on lane independence.</strong> A false challenged finality requires two lanes to accept the same invalid root. Implementations MUST avoid shared signing keys, shared verifier keys, shared operator control, and shared offchain infrastructure across lanes, because any such sharing collapses the effective threshold below two.</p>
-<p><strong>TEE trust assumptions live in one lane.</strong> The TEE lane rests on the hardware vendor, the enclave image measurement, the registrar that admits signers, and the revocation process. Each of these is a potential single point of failure for that lane. The TEE lane is counted exactly once. Deployments MAY use it as their preferred initial proof, but a challenge MUST require an additional independent lane. A compromised registrar, stale signer set, or weakened image-measurement policy can turn this lane unsafe without affecting the other two.</p>
+<p><strong>TEE trust assumptions live in one lane.</strong> The TEE lane rests on the hardware vendor, attestation verification, the owner-managed PCR allowlist, the game-pinned PCR0 image ID, and enclave signer-key security. Registration is permissionless, but only an attestation for an approved PCR tuple can add a signer. A weakened PCR policy, compromised signer key, or vulnerable approved image can turn this lane unsafe without affecting the other two. The TEE lane is counted exactly once, and a challenge MUST require an additional independent lane.</p>
 <p><strong>Security Council is a safety valve, not a finality mechanism.</strong> Council signing keys, quorum rules, and action domains MUST be isolated from unrelated governance actions. A council attestation alone MUST NOT finalize a challenged root.</p>
-<p><strong><code>rootId</code> domain separation is critical.</strong> Every lane MUST bind to the same <code>rootId</code>, and <code>rootId</code> itself MUST commit to <code>chainId</code>, <code>proofSystemVersion</code>, <code>rollupConfigHash</code>, and the parent/child block range. Missing domain separation allows replay across chains, hardfork schedules, game types, proof-system versions, or block ranges.</p>
-<p><strong><code>gameUUID</code> is not a proof target.</strong> It exists for factory duplicate prevention and discovery. Proofs and attestations MUST bind to <code>rootId</code>, because the factory UUID does not include the L1 origin captured at game creation.</p>
-<p><strong>Self-challenge bond recycling creates proof-amplification griefing.</strong> A malicious proposer can create a consensus-valid game and challenge it through the same economic owner. Without a non-refundable charge, the owner recovers the nominal losing bond through the winning account while forcing third-party defenders to produce an additional proof lane. <code>CHALLENGE_FEE</code> makes that externalized proof burden carry a linear, unavoidable cost even if proposer and challenger collude. The fee deters but does not cryptographically prevent the attack, so its value MUST be calibrated against the marginal cost of the additional proof.</p>
-<p><strong>Bond, fee, and stake calibration are security-critical.</strong> If <code>CHALLENGER_BOND</code> or <code>CHALLENGE_FEE</code> is too cheap, attackers can grief honest roots into the slow path or force repeated proof work. If either is too expensive, honest watchers may fail to challenge invalid roots. A successful challenger earns <code>PROPOSER_BOND - CHALLENGE_FEE</code> before transaction costs, so <code>PROPOSER_BOND</code> MUST exceed the fee and SHOULD cover the challenger’s expected execution costs with a meaningful safety margin. If <code>PROPOSER_BOND</code> is too cheap, invalid-proposal spam is cheap and honest challenges become uneconomical; if it is too expensive, only well-capitalized actors can propose, which centralizes the role. Exact economic parameters are out of scope for this WIP but MUST be tuned before mainnet deployment.</p>
+<p><strong>Lane statement binding is critical.</strong> The validity and TEE lanes MUST authenticate the exact transition reconstructed by the game. <code>rollupConfigHash</code> MUST commit to every derivation-affecting configuration value, including chain IDs and the World Chain hardfork schedule, and MUST change when any such value changes. A validity-program change MUST rotate the applicable vkey, and a TEE-program change MUST rotate the image ID. The Security Council attestation MUST bind to <code>rootId</code>, whose <code>domainHash</code> commits to <code>chainId</code>, <code>proofSystemVersion</code>, <code>rollupConfigHash</code>, and <code>blockInterval</code>. Missing any of these bindings can permit a proof or attestation to be accepted outside the context in which it was produced.</p>
+<p><strong><code>gameUUID</code> is not a proof target.</strong> It exists for factory duplicate prevention, deterministic deployment, and discovery. The validity and TEE lanes authenticate the game-derived transition instead; the Security Council authenticates <code>rootId</code>. The game, rather than the proof submitter, MUST construct each expected statement.</p>
+<p><strong>Proof-lane rewards are exposed to public-mempool MEV.</strong> The lane proof does not authenticate the compact payload’s reward recipient. A public-mempool observer can copy a valid proof, replace the recipient, and front-run the original submission to capture that lane’s share of a forfeited challenger bond. This does not change proof validity or prevent the game from progressing, but proof submissions that claim a lane reward SHOULD use a trusted private transaction path. Private submission is an operational mitigation, not a cryptographic binding to the recipient.</p>
+<p><strong>Self-challenge can amplify proof work.</strong> A proposer can challenge its own valid game through another account and force defenders to produce another lane. If the game times out, the shared owner loses the protocol share of <code>PROPOSER_BOND</code>; if it is defended, accepted proof-lane recipients share <code>CHALLENGER_BOND</code>. A proposer that also controls those recipients can still recycle the successful-defense payout, so the economics limit but do not prevent proof-amplification griefing.</p>
+<p><strong>The vault ProxyAdmin is a custody trust assumption.</strong> The deployed implementation exposes no administrative path for moving participant balances or extracting backing tokens directly. However, the ProxyAdmin owner can upgrade the singleton vault, so its compromise can still affect uncommitted balances and backing for active games. Production deployment MUST protect this role accordingly.</p>
+<p><strong>Bond-lock authentication is part of factory integrity.</strong> The factory registers a game only after <code>initialize</code> returns, so the vault MUST authenticate a proposer bond lock by recomputing the deterministic clone address the canonical factory deploys for the current implementation and the caller’s creation data. Because locks allocate deposited balances on the word of factory-selected code, they MUST fail closed unless the factory owner and the vault ProxyAdmin owner are the same authority. Participant exposure is bounded by the bond tokens deliberately deposited into the vault.</p>
+<p><strong>Bond calibration is security-critical.</strong> If <code>CHALLENGER_BOND</code> is too cheap, attackers can force valid roots into the slow path or create repeated proof work. If it is too expensive, honest watchers may fail to challenge invalid roots. <code>PROPOSER_BOND</code> must make invalid proposals expensive while keeping proposal participation viable. Exact economic parameters are out of scope for this WIP but MUST be tuned before mainnet deployment.</p>
 <h2 id="copyright"><a class="header" href="#copyright">Copyright</a></h2>
 <p>Copyright and related rights waived via <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0</a>.</p>
 
