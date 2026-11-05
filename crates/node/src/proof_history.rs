@@ -1,7 +1,7 @@
 //! World Chain node launcher with proof-history support.
 
 use crate::{context::WorldChainDefaultContext, node::WorldChainNode};
-use eyre::eyre::eyre;
+use eyre::eyre::{ensure, eyre};
 use futures_util::FutureExt;
 use reth_db::DatabaseEnv;
 use reth_db_api::database_metrics::DatabaseMetrics;
@@ -25,7 +25,7 @@ pub async fn launch_node(
     builder: WithLaunchContext<NodeBuilder<DatabaseEnv, WorldChainSpec>>,
     config: WorldChainNodeConfig,
 ) -> eyre::Result<()> {
-    eyre::ensure!(
+    ensure!(
         builder.config().engine.num_state_masking_blocks() == 0,
         "--engine.num-state-masking-blocks must be 0 on world-chain: state masking is not supported"
     );
@@ -68,7 +68,7 @@ pub async fn launch_with_proof_history<S>(
 where
     S: OpProofsStore + DatabaseMetrics + Send + Sync + 'static,
 {
-    eyre::ensure!(
+    ensure!(
         builder.config().engine.num_state_masking_blocks() == 0,
         "--engine.num-state-masking-blocks must be 0 on world-chain: state masking is not supported"
     );
