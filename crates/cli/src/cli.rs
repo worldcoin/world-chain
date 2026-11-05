@@ -572,9 +572,13 @@ mod tests {
         assert!(args.rollup.proofs_history);
         assert_eq!(
             args.rollup.history.storage_version,
-            reth_optimism_node::args::ProofsStorageVersion::V2
+            Some(reth_optimism_node::args::ProofsStorageVersion::V2)
         );
         assert_eq!(args.rollup.proofs_history_window.window, 302_400);
+        assert!(
+            CommandParser::try_parse_from(["bin", "--proofs-history.storage-version", "v1",])
+                .is_err()
+        );
     }
 
     #[test]

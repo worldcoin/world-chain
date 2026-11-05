@@ -7,15 +7,11 @@ use reth_db::DatabaseEnv;
 use reth_db_api::database_metrics::DatabaseMetrics;
 use reth_node_builder::{FullNodeComponents, NodeBuilder, WithLaunchContext};
 use reth_optimism_exex::OpProofsExEx;
-use reth_optimism_node::args::ProofsStorageVersion;
 use reth_optimism_rpc::{
     debug::{DebugApiExt, DebugApiOverrideServer},
     eth::proofs::{EthApiExt, EthApiOverrideServer},
 };
-use reth_optimism_trie::{
-    OpProofsStorage, OpProofsStore,
-    db::{MdbxProofsStorage, MdbxProofsStorageV2},
-};
+use reth_optimism_trie::{OpProofsStorage, OpProofsStore, db::MdbxProofsStorage};
 use reth_tasks::TaskExecutor;
 use std::{sync::Arc, time::Duration};
 use tokio::time::sleep;
@@ -44,24 +40,19 @@ pub async fn launch_node(
         .history
         .resolve_storage_path(builder.config().datadir().as_ref());
 
-    match config.args.rollup.history.storage_version {
-        ProofsStorageVersion::V1 => {
-            info!(target: "reth::cli", "Using on-disk storage for proofs history (v1)");
-            let storage = Arc::new(
-                MdbxProofsStorage::new(&path)
-                    .map_err(|err| eyre!("failed to open proofs-history storage v1: {err}"))?,
-            );
-            launch_with_proof_history(builder, config, storage).await
-        }
-        ProofsStorageVersion::V2 => {
-            info!(target: "reth::cli", "Using on-disk storage for proofs history (v2)");
-            let storage = Arc::new(
-                MdbxProofsStorageV2::new(&path)
-                    .map_err(|err| eyre!("failed to open proofs-history storage v2: {err}"))?,
-            );
-            launch_with_proof_history(builder, config, storage).await
-        }
+    info!(target: "reth::cli", "Using on-disk storage for proofs history (v2)");
+    let storage = Arc::new(
+        MdbxProofsStorage::new(&path)
+            .map_err(|err| eyre!("failed to open proofs-history storage v2: {err}"))?,
+    );
+    if storage.holds_only_legacy_v1_data()? {
+        return Err(eyre!(
+            "Proofs storage at {} only holds legacy v1 data. Use a fresh \
+             --proofs-history.storage-path and run 'world-chain proofs init' with that path.",
+            path.display()
+        ));
     }
+    launch_with_proof_history(builder, config, storage).await
 }
 
 /// Installs the proof-history ExEx, RPC overrides, and storage metrics before launching the node.
