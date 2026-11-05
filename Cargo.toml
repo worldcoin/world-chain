@@ -1,5 +1,5 @@
 [workspace.package]
-version = "2.8.1-rc.2"
+version = "2.8.1"
 edition = "2024"
 rust-version = "1.99.0"
 license = "MIT"
@@ -181,7 +181,7 @@ reth-node-ethereum = { git = "https://github.com/ethereum-optimism/reth", tag = 
 reth-storage-api = { git = "https://github.com/ethereum-optimism/reth", tag = "op-v2.6.0-2", default-features = false }
 reth-storage-errors = { git = "https://github.com/ethereum-optimism/reth", tag = "op-v2.6.0-2", default-features = false }
 
-# op-reth v2.8.1-rc.2
+# op-reth v2.8.1
 reth-optimism-evm = { git = "https://github.com/ethereum-optimism/optimism", rev = "722072949ce583f361424a160082186ee14cac71", default-features = false }
 reth-optimism-node = { git = "https://github.com/ethereum-optimism/optimism", rev = "722072949ce583f361424a160082186ee14cac71", default-features = false }
 reth-optimism-cli = { git = "https://github.com/ethereum-optimism/optimism", rev = "722072949ce583f361424a160082186ee14cac71", default-features = false }
