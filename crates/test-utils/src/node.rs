@@ -46,7 +46,7 @@ use reth_trie::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput, updates::TrieUpdates,
 };
-use reth_trie_common::ExecutionWitnessMode;
+use reth_trie_common::{DecodedMultiProofV2, ExecutionWitnessMode, MultiProofTargetsV2};
 use revm_primitives::TxKind;
 use std::{
     fmt::Debug,
@@ -610,6 +610,14 @@ impl StateProofProvider for WorldChainNoopProvider {
         _targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         Ok(MultiProof::default())
+    }
+
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: MultiProofTargetsV2,
+    ) -> ProviderResult<DecodedMultiProofV2> {
+        Ok(DecodedMultiProofV2::default())
     }
 
     fn witness(

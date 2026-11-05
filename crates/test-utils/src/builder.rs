@@ -929,11 +929,6 @@ impl HashedGenesisState {
         for (hashed_address, hashed_storage) in &post_state.storages {
             let storage_map = merged_storages.entry(*hashed_address).or_default();
 
-            // If storage was wiped, clear existing storage first
-            if hashed_storage.wiped {
-                storage_map.clear();
-            }
-
             // Apply individual slot changes
             for (hashed_slot, value) in &hashed_storage.storage {
                 if value.is_zero() {
@@ -1155,9 +1150,6 @@ impl reth_provider::StorageRootProvider for TestStateProvider {
             .unwrap_or_default();
 
         // Apply changes from hashed_storage
-        if hashed_storage.wiped {
-            storage.clear();
-        }
         for (hashed_slot, value) in &hashed_storage.storage {
             if value.is_zero() {
                 storage.remove(hashed_slot);
@@ -1208,6 +1200,14 @@ impl reth_provider::StateProofProvider for TestStateProvider {
         _input: reth_trie_common::TrieInput,
         _targets: reth_trie_common::MultiProofTargets,
     ) -> reth_provider::ProviderResult<reth_trie_common::MultiProof> {
+        unimplemented!()
+    }
+
+    fn multiproof_v2(
+        &self,
+        _input: reth_trie_common::TrieInput,
+        _targets: reth_trie_common::MultiProofTargetsV2,
+    ) -> ProviderResult<reth_trie_common::DecodedMultiProofV2> {
         unimplemented!()
     }
 
@@ -1468,6 +1468,14 @@ impl reth_provider::StateProofProvider for BenchProvider {
         targets: reth_trie_common::MultiProofTargets,
     ) -> ProviderResult<reth_trie_common::MultiProof> {
         self.inner.multiproof(input, targets)
+    }
+
+    fn multiproof_v2(
+        &self,
+        input: reth_trie_common::TrieInput,
+        targets: reth_trie_common::MultiProofTargetsV2,
+    ) -> ProviderResult<reth_trie_common::DecodedMultiProofV2> {
+        self.inner.multiproof_v2(input, targets)
     }
 
     fn witness(

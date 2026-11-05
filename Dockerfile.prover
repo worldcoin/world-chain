@@ -8,7 +8,7 @@ ARG SP1_GUEST_PLATFORM=linux/amd64
 #   PROVER_PACKAGE=world-chain-prover-sp1        PROVER_BIN=world-chain-prover-sp1        FEATURES=
 #   PROVER_PACKAGE=world-chain-proof-sp1-worker  PROVER_BIN=world-chain-proof-sp1-worker  FEATURES=
 # Mirrors the caching strategy of the main Dockerfile (cargo-chef + sccache/S3).
-FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS base
+FROM public.ecr.aws/docker/library/rust:1.99.0-bookworm AS base
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \

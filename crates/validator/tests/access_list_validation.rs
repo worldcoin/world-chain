@@ -1,15 +1,21 @@
 use std::sync::Arc;
 
-use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
-use alloy_primitives::{Address, U256};
+use alloy_eip7928::{
+    AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
+    StorageChange,
+};
+use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 use reth_chain_state::ExecutedBlock;
 use reth_optimism_primitives::OpPrimitives;
+use reth_primitives_traits::Account;
 use reth_provider::StateRootProvider;
-use reth_trie_common::HashedPostState;
+use reth_trie_common::{HashedPostState, HashedStorage};
 use world_chain_evm::execution::bal::{BalExecutorError, BalValidationError};
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{
-    access_list::access_list_hash, ed25519_dalek::SigningKey, primitives::FlashblocksPayloadV1,
+    access_list::{FlashblockAccessList, access_list_hash},
+    ed25519_dalek::SigningKey,
+    primitives::FlashblocksPayloadV1,
 };
 use world_chain_test_utils::builder::{
     BenchProvider, CHAIN_SPEC, EVM_CONFIG, build_flashblock_fixture_eth_transfers,
@@ -19,6 +25,76 @@ use world_chain_validator::{
     coordinator::{FlashblocksExecutionCoordinator, process_flashblock},
     flashblock_validation_metrics::FlashblockValidationMetrics,
 };
+
+#[test]
+fn destroyed_account_clears_committed_storage_before_recreation() {
+    let address = Address::repeat_byte(0x42);
+    let hashed_address = keccak256(address);
+    let slot = |key: u64| keccak256(B256::from(U256::from(key)));
+    let committed = HashedPostState::default()
+        .with_accounts([(
+            hashed_address,
+            Some(Account {
+                nonce: 1,
+                balance: U256::from(7),
+                bytecode_hash: Some(keccak256([0xfe])),
+            }),
+        )])
+        .with_storages([(
+            hashed_address,
+            HashedStorage::from_iter([(slot(1), U256::from(11)), (slot(2), U256::from(22))]),
+        )]);
+    let destroyed = FlashblockAccessList {
+        changes: vec![
+            AccountChanges::new(address)
+                .with_balance_change(BalanceChange::new(BlockAccessIndex::new(2), U256::ZERO))
+                .with_nonce_change(NonceChange::new(BlockAccessIndex::new(2), 0))
+                .with_code_change(CodeChange::new(BlockAccessIndex::new(2), Bytes::new())),
+        ],
+        min_tx_index: 2,
+        max_tx_index: 2,
+    }
+    .into_hashed_post_state(&BenchProvider::new(), committed)
+    .expect("destroyed post-state");
+    assert_eq!(destroyed.accounts[&hashed_address], None);
+    assert_eq!(
+        destroyed.storages[&hashed_address].storage[&slot(1)],
+        U256::ZERO
+    );
+    assert_eq!(
+        destroyed.storages[&hashed_address].storage[&slot(2)],
+        U256::ZERO
+    );
+
+    let recreated = FlashblockAccessList {
+        changes: vec![
+            AccountChanges::new(address)
+                .with_nonce_change(NonceChange::new(BlockAccessIndex::new(3), 1))
+                .with_storage_change(SlotChanges::new(
+                    U256::from(1),
+                    vec![StorageChange::new(BlockAccessIndex::new(3), U256::from(33))],
+                )),
+        ],
+        min_tx_index: 3,
+        max_tx_index: 3,
+    }
+    .into_hashed_post_state(&BenchProvider::new(), destroyed)
+    .expect("recreated post-state");
+    assert_eq!(
+        recreated.accounts[&hashed_address]
+            .expect("recreated account")
+            .nonce,
+        1
+    );
+    assert_eq!(
+        recreated.storages[&hashed_address].storage[&slot(1)],
+        U256::from(33)
+    );
+    assert_eq!(
+        recreated.storages[&hashed_address].storage[&slot(2)],
+        U256::ZERO
+    );
+}
 
 fn test_coordinator() -> (
     FlashblocksExecutionCoordinator,
