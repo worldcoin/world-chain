@@ -230,12 +230,6 @@ pub fn project_call_trace(
         }
         if let Some(selfdestruct) = node.geth_selfdestruct_call_trace() {
             checkpoint()?;
-            budget.depth(
-                node.trace
-                    .depth
-                    .checked_add(1)
-                    .ok_or(ProjectionError::InvalidArena)?,
-            )?;
             budget.charge(ProjectionResource::FramesAndLogs, 1)?;
             frame.calls.push(selfdestruct);
         }

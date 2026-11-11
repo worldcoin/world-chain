@@ -107,6 +107,74 @@ fn call_projection_matches_native_options_reverts_logs_and_gas() {
 }
 
 #[test]
+fn call_projection_synthetic_selfdestruct_respects_evm_depth_units() {
+    for nested in [false, true] {
+        let mut nodes = vec![node(0, None, 0)];
+        if nested {
+            nodes[0].children = vec![1];
+            nodes.push(node(1, Some(0), 1));
+        }
+        let last = nodes.last_mut().unwrap();
+        last.trace.status = Some(InstructionResult::SelfDestruct);
+        last.trace.selfdestruct_address = Some(Address::repeat_byte(2));
+        last.trace.selfdestruct_refund_target = Some(Address::repeat_byte(3));
+        last.trace.selfdestruct_transferred_value = Some(U256::from(17));
+        let config = CallConfig::default();
+        let expected = GethTraceBuilder::new_borrowed(&nodes)
+            .with_spec_id(SpecId::PRAGUE)
+            .geth_call_traces_with_result_gas(config, gas());
+        let mut exact = budget();
+        exact.limits.max_call_depth = usize::from(nested);
+        exact.limits.counts.frames_and_logs = nodes.len() + 1;
+        assert_eq!(
+            project_call_trace(
+                &nodes,
+                config,
+                gas(),
+                SpecId::PRAGUE,
+                &mut exact,
+                &mut || Ok(())
+            )
+            .unwrap(),
+            expected
+        );
+        assert_eq!(exact.used().frames_and_logs, nodes.len() + 1);
+        let mut below = ProjectionBudget::new(exact.limits);
+        below.limits.counts.frames_and_logs -= 1;
+        assert!(matches!(
+            project_call_trace(
+                &nodes,
+                config,
+                gas(),
+                SpecId::PRAGUE,
+                &mut below,
+                &mut || Ok(())
+            ),
+            Err(ProjectionError::LimitExceeded(
+                ProjectionResource::FramesAndLogs
+            ))
+        ));
+        if nested {
+            let mut shallow = ProjectionBudget::new(exact.limits);
+            shallow.limits.max_call_depth = 0;
+            assert!(matches!(
+                project_call_trace(
+                    &nodes,
+                    config,
+                    gas(),
+                    SpecId::PRAGUE,
+                    &mut shallow,
+                    &mut || Ok(())
+                ),
+                Err(ProjectionError::LimitExceeded(
+                    ProjectionResource::CallDepth
+                ))
+            ));
+        }
+    }
+}
+
+#[test]
 fn call_projection_bounds_native_revert_and_panic_reason_variants() {
     let mut outputs = vec![
         Bytes::new(),

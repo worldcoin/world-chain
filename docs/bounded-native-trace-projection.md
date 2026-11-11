@@ -22,6 +22,9 @@ The limits have explicit units:
 | data_bytes | Decoded variable payload bytes retained/copied: input, output, revert data, log data/topics and code |
 | max_call_depth | EVM parent edges, root depth zero; this is not JSON nesting depth |
 
+Synthetic SELFDESTRUCT frames consume the frame allowance without adding an EVM
+parent edge; their JSON nesting remains part of the worker's encoded-output limit.
+
 These are conservative work/retention counters, not only final-output counts.
 Diff entries later removed as unchanged, zero, created or deleted remain charged;
 failed frames reserve output plus three times its length for the pinned
