@@ -223,6 +223,7 @@ alloy-rpc-types-eth = { version = "2.3.0", default-features = false }
 alloy-rpc-types = { version = "2.3.0", features = [
     "eth",
 ], default-features = false }
+alloy-rpc-types-trace = { version = "2.3.0", default-features = false }
 alloy-rpc-types-engine = { version = "2.3.0", default-features = false }
 alloy-rlp = { version = "0.3.16", default-features = false, features = [
     "derive",

@@ -2,6 +2,7 @@
 #![allow(clippy::type_complexity)]
 
 pub mod admin;
+pub mod bounded_trace;
 pub use admin::{AdminApiExtServer, WorldChainAdminApiExt};
 
 pub mod engine;
