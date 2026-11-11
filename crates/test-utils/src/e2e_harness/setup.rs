@@ -48,16 +48,14 @@ use reth_tasks::{Runtime, TaskExecutor};
 use revm_primitives::{B256, Bytes, TxKind, U256};
 use std::{
     collections::BTreeMap,
+    net::TcpListener,
     ops::Range,
     sync::{Arc, LazyLock},
     time::Duration,
 };
 use tracing::{info, span};
 use world_chain_chainspec::{WorldChainSpec, WorldChainSpecBuilder};
-use world_chain_node::{
-    FlashblocksOpApi, OpApiExtServer,
-    node::{WorldChainNode, WorldChainNodeContext, WorldChainNodePrimitiveTypes},
-};
+use world_chain_node::node::{WorldChainNode, WorldChainNodeContext, WorldChainNodePrimitiveTypes};
 use world_chain_primitives::{
     flashblocks::Flashblock, p2p::Authorization, payload_id::force_op_payload_id_v3,
 };
@@ -187,6 +185,17 @@ pub struct WorldChainTestBuilder {
     /// Enables the `admin` RPC namespace on the HTTP server (off by default).
     #[builder(default)]
     admin_rpc: bool,
+    /// Overrides the HTTP namespaces, including the `admin_rpc` default selection.
+    http_api: Option<RpcModuleSelection>,
+    /// Enables WebSocket RPC on an unused port (off by default).
+    #[builder(default)]
+    ws_rpc: bool,
+    /// Combines HTTP and WebSocket RPC on one listener instead of separate ports.
+    #[builder(default)]
+    shared_rpc_port: bool,
+    /// Enables the preconfirmed log API (off by default; requires Flashblocks).
+    #[builder(default)]
+    preconfirmed_logs: bool,
     block_uncompressed_size_limit: Option<u64>,
     #[builder(default = Arc::new(CHAIN_SPEC.clone()))]
     chain_spec: Arc<WorldChainSpec>,
@@ -241,6 +250,10 @@ impl WorldChainTestBuilder {
             self.flashblocks,
             self.access_list,
             self.admin_rpc,
+            self.http_api,
+            self.ws_rpc,
+            self.shared_rpc_port,
+            self.preconfirmed_logs,
             self.block_uncompressed_size_limit,
             self.chain_spec,
         )
@@ -336,6 +349,10 @@ async fn setup_inner<T, G>(
     flashblocks_enabled: bool,
     access_list: bool,
     admin_rpc: bool,
+    http_api: Option<RpcModuleSelection>,
+    ws_rpc: bool,
+    shared_rpc_port: bool,
+    preconfirmed_logs: bool,
     block_uncompressed_size_limit: Option<u64>,
     chain_spec: Arc<WorldChainSpec>,
 ) -> eyre::Result<(
@@ -365,10 +382,16 @@ where
         .with_auth_unused_port()
         .with_http_unused_port()
         .with_http();
+    if ws_rpc {
+        rpc_args = rpc_args.with_ws().with_ws_unused_port();
+    }
     if admin_rpc {
         // Expose all standard namespaces (incl. `admin`) so the
         // `admin_tracingDirectives` endpoint is reachable in tests.
         rpc_args = rpc_args.with_http_api(RpcModuleSelection::All);
+    }
+    if let Some(http_api) = http_api {
+        rpc_args = rpc_args.with_http_api(http_api);
     }
 
     let mut node_config: NodeConfig<WorldChainSpec> = NodeConfig::new(chain_spec.clone())
@@ -428,7 +451,13 @@ where
             )
         };
         let mut config = config;
+        config.args.preconfirmed_logs = preconfirmed_logs;
         config.args.builder.block_uncompressed_size_limit = block_uncompressed_size_limit;
+        if ws_rpc && !shared_rpc_port {
+            // Reth combines HTTP and WS when both configured socket addresses use port zero.
+            let listener = TcpListener::bind((node_config.rpc.ws_addr, 0))?;
+            node_config.rpc.ws_port = listener.local_addr()?.port();
+        }
 
         let node = WorldChainNode::<T>::new(config.args.clone().into_config(&mut node_config)?);
 
@@ -455,8 +484,6 @@ where
                     let sequencer_client = config.args.rollup.sequencer.map(SequencerClient::new);
                     let eth_api_ext = WorldChainEthApiExt::new(pool, provider, sequencer_client);
                     ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
-                    ctx.modules
-                        .replace_configured(FlashblocksOpApi.into_rpc())?;
                     Ok(())
                 })
                 .launch_with_fn(|builder| {

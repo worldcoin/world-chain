@@ -33,6 +33,9 @@ cargo xtask launch-node --nodes 2 --spam --flashblocks
 
 Starts N nodes via P2P, drives block production with `EngineDriver`, optionally runs `TxSpammer`. Prints RPC URLs for `cast` interaction.
 
+See [Preconfirmed log API](preconfirmed-logs.md) for the optional resumable HTTP
+and WebSocket log feed, its operating limits, and client recovery requirements.
+
 ## Metrics
 
 Custom metrics are exposed via the standard reth metrics endpoint (`/metrics`). Key namespaces:

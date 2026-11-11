@@ -2,6 +2,7 @@
 
 use core::marker::PhantomData;
 use crossbeam_channel::Receiver;
+use eyre::eyre::eyre;
 
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::Sealed;
@@ -49,7 +50,16 @@ use world_chain_rpc::{
     SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer,
     WorldChainAdminApiExt, WorldChainEthApiExt,
     op::{FlashblocksOpApi, OpApiExtServer},
+    preconfirmed::{
+        rpc::{
+            PreconfirmedLogsQueryApiServer, PreconfirmedLogsRpc,
+            PreconfirmedLogsSubscriptionApiServer,
+        },
+        spawn_preconfirmed_log_feed,
+    },
 };
+use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
+
 /// Primitive bounds required by the OP RPC extensions used by World Chain.
 pub trait WorldChainRpcPrimitives<Tx>:
     OpPayloadPrimitives<_Header = Header, _TX = Tx>
@@ -115,6 +125,10 @@ pub struct WorldChainAddOns<
     min_suggested_priority_fee: u64,
     /// Enables the World Chain simulate namespace.
     simulate_enabled: bool,
+    /// Explicit opt-in for the preconfirmed log feed.
+    preconfirmed_logs: bool,
+    /// Validated Flashblocks source, present only on Flashblocks-enabled nodes.
+    flashblocks_coordinator: Option<FlashblocksExecutionCoordinator>,
     /// Witness oracle plumbing: the shared cache and the receiver drained by the collector thread.
     /// `Some` only when `--witness.collect` is set.
     witness: Option<(ExecutionWitnessHandle, Receiver<BlockExecutionWitness>)>,
@@ -140,6 +154,8 @@ where
         enable_tx_conditional: bool,
         min_suggested_priority_fee: u64,
         simulate_enabled: bool,
+        preconfirmed_logs: bool,
+        flashblocks_coordinator: Option<FlashblocksExecutionCoordinator>,
         witness: Option<(ExecutionWitnessHandle, Receiver<BlockExecutionWitness>)>,
     ) -> Self {
         Self {
@@ -152,6 +168,8 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            preconfirmed_logs,
+            flashblocks_coordinator,
             witness,
             _tx: PhantomData,
         }
@@ -179,6 +197,8 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            preconfirmed_logs,
+            flashblocks_coordinator,
             witness,
             ..
         } = self;
@@ -192,6 +212,8 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            preconfirmed_logs,
+            flashblocks_coordinator,
             witness,
         )
     }
@@ -211,6 +233,8 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            preconfirmed_logs,
+            flashblocks_coordinator,
             witness,
             ..
         } = self;
@@ -224,6 +248,8 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            preconfirmed_logs,
+            flashblocks_coordinator,
             witness,
         )
     }
@@ -243,6 +269,8 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            preconfirmed_logs,
+            flashblocks_coordinator,
             witness,
             ..
         } = self;
@@ -256,6 +284,8 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            preconfirmed_logs,
+            flashblocks_coordinator,
             witness,
         )
     }
@@ -275,6 +305,8 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            preconfirmed_logs,
+            flashblocks_coordinator,
             witness,
             ..
         } = self;
@@ -288,6 +320,8 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            preconfirmed_logs,
+            flashblocks_coordinator,
             witness,
         )
     }
@@ -361,6 +395,8 @@ where
             enable_tx_conditional,
             historical_rpc,
             simulate_enabled,
+            preconfirmed_logs,
+            flashblocks_coordinator,
             witness,
             ..
         } = self;
@@ -378,6 +414,19 @@ where
             );
             DebugWitnessOracle::new(cache)
         });
+
+        let preconfirmed_logs_api = if preconfirmed_logs {
+            let coordinator = flashblocks_coordinator
+                .ok_or_else(|| eyre!("--rpc.preconfirmed-logs requires --flashblocks.enabled"))?;
+            let store = spawn_preconfirmed_log_feed(
+                ctx.node.provider().clone(),
+                coordinator,
+                ctx.node.task_executor(),
+            )?;
+            Some(PreconfirmedLogsRpc::new(store))
+        } else {
+            None
+        };
 
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
@@ -431,8 +480,11 @@ where
             ctx.node.provider().clone(),
             world_chain_sequencer_url.map(WorldChainSequencerClient::new),
         );
-        let flashblocks_op_api = FlashblocksOpApi;
         let provider = ctx.node.provider().clone();
+        let shared_http_ws = ctx.config.rpc.http
+            && ctx.config.rpc.ws
+            && ctx.config.rpc.http_addr == ctx.config.rpc.ws_addr
+            && ctx.config.rpc.http_port == ctx.config.rpc.ws_port;
 
         rpc_add_ons
             .launch_add_ons_with(ctx, move |container| {
@@ -478,7 +530,30 @@ where
                 }
 
                 modules.replace_configured(world_chain_eth_ext.into_rpc())?;
-                modules.replace_configured(flashblocks_op_api.into_rpc())?;
+                let preconfirmed_on_http = preconfirmed_logs_api.is_some()
+                    && modules.module_config().contains_http(&RethRpcModule::Eth);
+                let preconfirmed_on_ws = preconfirmed_logs_api.is_some()
+                    && modules.module_config().contains_ws(&RethRpcModule::Eth);
+                modules.replace_http(FlashblocksOpApi::new(preconfirmed_on_http).into_rpc())?;
+                modules.replace_ws(FlashblocksOpApi::new(preconfirmed_on_ws).into_rpc())?;
+                modules.replace_ipc(FlashblocksOpApi::default().into_rpc())?;
+
+                if let Some(api) = preconfirmed_logs_api {
+                    if preconfirmed_on_http {
+                        modules
+                            .merge_http(PreconfirmedLogsQueryApiServer::into_rpc(api.clone()))?;
+                    }
+                    if preconfirmed_on_ws {
+                        let mut ws = PreconfirmedLogsQueryApiServer::into_rpc(api.clone());
+                        let subscriptions = PreconfirmedLogsSubscriptionApiServer::into_rpc(api);
+                        // Reth's shared listener uses HTTP methods; jsonrpsee rejects HTTP subscriptions.
+                        if shared_http_ws {
+                            modules.merge_http(subscriptions.clone())?;
+                        }
+                        ws.merge(subscriptions)?;
+                        modules.merge_ws(ws)?;
+                    }
+                }
 
                 let admin = RethRpcModule::Admin;
                 let admin_on_http = modules.module_config().contains_http(&admin);

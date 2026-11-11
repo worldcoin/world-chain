@@ -1,4 +1,5 @@
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumHash;
 use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_primitives::B256;
 use eyre::eyre::eyre;
@@ -40,6 +41,7 @@ use crate::{
     execution_strategy::{FlashblocksBalExecutionStrategy, FlashblocksLegacyExecutionStrategy},
     flashblock_types::{BalFlashblockTypes, LegacyFlashblockTypes},
     flashblock_validation_metrics::FlashblockValidationMetrics,
+    preconfirmed::{ValidatedEvent, ValidatedFlashblock, ValidatedSnapshot},
     validator::{FlashblocksBlockValidator, into_executed_payload},
 };
 use world_chain_chainspec::WorldChainSpec;
@@ -61,6 +63,7 @@ pub struct FlashblocksExecutionCoordinator {
     inner: Arc<RwLock<FlashblocksExecutionCoordinatorInner>>,
     p2p_handle: FlashblocksHandle,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
+    validated_events: Sender<ValidatedEvent>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,8 +72,13 @@ pub struct FlashblocksExecutionCoordinatorInner {
     flashblocks: Flashblocks,
     /// The latest built payload with its associated flashblock index
     latest_payload: Option<(OpBuiltPayload, u64)>,
+    latest_payload_at: Option<Instant>,
+    /// Unbound only for a local build whose parent is not yet observed canonical.
+    latest_payload_generation: Option<u64>,
     /// Broadcast channel for built payload events
     payload_events: Option<Sender<Events<OpEngineTypes>>>,
+    validated: ValidatedSnapshot,
+    validated_sequence: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -90,13 +98,19 @@ impl FlashblocksExecutionCoordinator {
         let inner = Arc::new(RwLock::new(FlashblocksExecutionCoordinatorInner {
             flashblocks: Default::default(),
             latest_payload: None,
+            latest_payload_at: None,
+            latest_payload_generation: None,
             payload_events: None,
+            validated: ValidatedSnapshot::default(),
+            validated_sequence: 0,
         }));
+        let (validated_events, _) = broadcast::channel(2);
 
         Self {
             inner,
             p2p_handle,
             pending_block,
+            validated_events,
         }
     }
 
@@ -172,6 +186,123 @@ impl FlashblocksExecutionCoordinator {
         None
     }
 
+    /// Updates the source checkpoint without assigning canonical log semantics.
+    pub fn observe_canonical_tip(&self, tip: BlockNumHash) {
+        let mut inner = self.inner.write();
+        if inner.validated.canonical_tip == Some(tip) {
+            return;
+        }
+        let initial = inner.validated.canonical_tip.is_none();
+        let generation = if initial {
+            inner.validated.canonical_generation
+        } else {
+            let Some(generation) = inner.validated.canonical_generation.checked_add(1) else {
+                error!(target: "flashblocks::coordinator", "validated publication generation exhausted");
+                return;
+            };
+            generation
+        };
+        inner.validated = ValidatedSnapshot {
+            canonical_tip: Some(tip),
+            canonical_generation: generation,
+            current: None,
+        };
+        let bind_local = inner.latest_payload_generation.is_none()
+            && inner.latest_payload.as_ref().is_some_and(|(payload, _)| {
+                payload.block().parent_hash() == tip.hash
+                    && payload.block().number().checked_sub(1) == Some(tip.number)
+            });
+        if bind_local {
+            inner.latest_payload_generation = Some(generation);
+        }
+        // No receivers is normal before the RPC feed starts.
+        let _ = self.validated_events.send(ValidatedEvent::Reset {
+            canonical_tip: Some(tip),
+            canonical_generation: generation,
+        });
+        let bootstrap = (initial || bind_local)
+            .then(|| {
+                let (payload, index) = inner.latest_payload.as_ref()?;
+                Some((
+                    payload.id(),
+                    *index,
+                    inner.latest_payload_generation?,
+                    self.pending_block.borrow().clone()?,
+                    inner.latest_payload_at?,
+                ))
+            })
+            .flatten();
+        drop(inner);
+        if let Some((payload_id, index, generation, executed, validated_at)) = bootstrap {
+            self.publish_validated(payload_id, index, generation, executed, validated_at);
+        }
+    }
+
+    /// Subscribes and captures the current source state under the publication lock.
+    pub fn subscribe_validated(&self) -> (ValidatedSnapshot, broadcast::Receiver<ValidatedEvent>) {
+        let inner = self.inner.read();
+        let receiver = self.validated_events.subscribe();
+        (inner.validated.clone(), receiver)
+    }
+
+    /// Captures the current source checkpoint and validated payload atomically.
+    pub fn snapshot_validated(&self) -> ValidatedSnapshot {
+        self.inner.read().validated.clone()
+    }
+
+    fn publish_validated(
+        &self,
+        payload_id: alloy_rpc_types_engine::PayloadId,
+        index: u64,
+        canonical_generation: u64,
+        executed: ExecutedBlock<OpPrimitives>,
+        validated_at: Instant,
+    ) {
+        let mut inner = self.inner.write();
+        let Some(tip) = inner.validated.canonical_tip else {
+            return;
+        };
+        let block = executed.recovered_block();
+        if canonical_generation != inner.validated.canonical_generation
+            || block.parent_hash() != tip.hash
+            || block.number().checked_sub(1) != Some(tip.number)
+            || !inner
+                .latest_payload
+                .as_ref()
+                .is_some_and(|(latest, latest_index)| {
+                    latest.id() == payload_id
+                        && *latest_index == index
+                        && latest.block().hash() == block.hash()
+                })
+        {
+            return;
+        }
+        if inner
+            .validated
+            .current
+            .as_ref()
+            .is_some_and(|current| current.payload_id == payload_id && current.index >= index)
+        {
+            return;
+        }
+        let Some(sequence) = inner.validated_sequence.checked_add(1) else {
+            error!(target: "flashblocks::coordinator", "validated publication sequence exhausted");
+            return;
+        };
+        let payload = ValidatedFlashblock {
+            sequence,
+            canonical_generation,
+            payload_id,
+            index,
+            executed: Arc::new(executed),
+            validated_at,
+        };
+        inner.validated_sequence = sequence;
+        inner.validated.current = Some(payload.clone());
+        // No receivers is normal before the RPC feed starts.
+        let _ = self.validated_events.send(ValidatedEvent::Payload(payload));
+    }
+
     /// Launches the executor to listen for new flashblocks and build payloads.
     ///
     /// Uses a canon-aware event stream that gates flashblock delivery on canonical
@@ -187,8 +318,12 @@ impl FlashblocksExecutionCoordinator {
         let provider = ctx.provider().clone();
         let pending_block = self.pending_block.clone();
         let pending_block_clone = pending_block.clone();
+        let coordinator = self.clone();
 
         let stream = self.map_worldchain_event_stream(provider.clone(), move |event| {
+            if let WorldChainEvent::Chain(ChainEvent::Canon(tip)) = event {
+                coordinator.observe_canonical_tip(*tip);
+            }
             Self::event_hook(event, &pending_block)
         });
 
@@ -222,7 +357,14 @@ impl FlashblocksExecutionCoordinator {
 
         let mut lock = self.inner.write();
         lock.flashblocks.push(flashblock.clone())?;
+        let checkpoint_matches = lock.validated.canonical_tip.is_some_and(|tip| {
+            built_payload.block().parent_hash() == tip.hash
+                && built_payload.block().number().checked_sub(1) == Some(tip.number)
+        });
         lock.latest_payload = Some((built_payload, index));
+        lock.latest_payload_at = Some(Instant::now());
+        lock.latest_payload_generation =
+            checkpoint_matches.then_some(lock.validated.canonical_generation);
         drop(lock);
 
         self.p2p_handle.publish_new(authorized_payload.clone())?;
@@ -397,19 +539,42 @@ where
     let process_flashblock_started = Instant::now();
     let flashblock = Flashblock { flashblock };
 
-    // --- Short read: check if already processed, extract base info ---
-    let (base, is_new_epoch) = {
+    let cached = {
         let inner = coordinator.inner.read();
-
-        if let Some(latest_payload) = &inner.latest_payload
-            && latest_payload.0.id() == flashblock.flashblock.payload_id
-            && latest_payload.1 >= flashblock.flashblock.index
+        inner.latest_payload.as_ref().and_then(|(payload, index)| {
+            (payload.id() == flashblock.flashblock.payload_id
+                && *index >= flashblock.flashblock.index)
+                .then(|| {
+                    (
+                        payload.clone(),
+                        *index,
+                        inner.latest_payload_generation,
+                        inner.latest_payload_at,
+                    )
+                })
+        })
+    };
+    if let Some((payload, index, generation, validated_at)) = cached {
+        flashblock_validation_metrics.increment_already_processed_flashblocks();
+        let executed = payload.executed_block().map(into_executed_payload);
+        if let (Some(executed), Some(validated_at), Some(generation)) =
+            (&executed, validated_at, generation)
         {
-            flashblock_validation_metrics.increment_already_processed_flashblocks();
-            pending_block
-                .send_replace(latest_payload.0.executed_block().map(into_executed_payload));
-            return Ok(());
+            coordinator.publish_validated(
+                payload.id(),
+                index,
+                generation,
+                executed.clone(),
+                validated_at,
+            );
         }
+        pending_block.send_replace(executed);
+        return Ok(());
+    }
+
+    // --- Short read: extract base info and the validation checkpoint ---
+    let (base, is_new_epoch, canonical_generation) = {
+        let inner = coordinator.inner.read();
 
         let is_new = match inner.flashblocks.is_new_payload(&flashblock) {
             Ok(is_new) => is_new,
@@ -424,12 +589,14 @@ where
             inner.flashblocks.base().clone()
         };
 
-        (base, is_new)
+        (base, is_new, inner.validated.canonical_generation)
     };
 
     // Clear latest_payload on new epoch (brief write lock)
     if is_new_epoch {
-        coordinator.inner.write().latest_payload = None;
+        let mut inner = coordinator.inner.write();
+        inner.latest_payload = None;
+        inner.latest_payload_at = None;
     }
 
     let latest_payload = {
@@ -513,9 +680,12 @@ where
         )?
     };
 
+    let validated_at = Instant::now();
     {
         let mut inner = coordinator.inner.write();
         inner.latest_payload = Some((next_payload.clone(), index));
+        inner.latest_payload_at = Some(validated_at);
+        inner.latest_payload_generation = Some(canonical_generation);
         if let Err(err) = inner.flashblocks.push(flashblock) {
             flashblock_validation_metrics.increment_validation_errors();
             return Err(err);
@@ -523,7 +693,17 @@ where
     }
 
     let into_executed_block_started = Instant::now();
-    pending_block.send_replace(next_payload.executed_block().map(into_executed_payload));
+    let executed = next_payload.executed_block().map(into_executed_payload);
+    if let Some(executed) = &executed {
+        coordinator.publish_validated(
+            next_payload.id(),
+            index,
+            canonical_generation,
+            executed.clone(),
+            validated_at,
+        );
+    }
+    pending_block.send_replace(executed);
     flashblock_validation_metrics.record_into_executed_block(into_executed_block_started.elapsed());
 
     trace!(
@@ -550,9 +730,13 @@ mod tests {
     use alloy_rpc_types_engine::PayloadId;
     use std::time::Duration;
 
+    use reth_node_api::BuiltPayloadExecutedBlock;
     use reth_optimism_primitives::OpTransactionSigned;
-    use reth_primitives_traits::SealedBlock;
-    use world_chain_primitives::ed25519_dalek::SigningKey;
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+    use world_chain_primitives::{
+        ed25519_dalek::SigningKey, p2p::Authorization, primitives::ExecutionPayloadBaseV1,
+    };
+    use world_chain_test_utils::builder::{BenchProvider, CHAIN_SPEC, EVM_CONFIG};
 
     fn test_coordinator() -> (
         FlashblocksExecutionCoordinator,
@@ -582,6 +766,258 @@ mod tests {
         let payload =
             OpBuiltPayload::new(PayloadId::new([0u8; 8]), Arc::new(block), U256::ZERO, None);
         (payload, hash)
+    }
+
+    fn cache_executed_payload(
+        coordinator: &FlashblocksExecutionCoordinator,
+        parent: BlockNumHash,
+        index: u64,
+        validated_at: Instant,
+    ) -> (OpBuiltPayload, ExecutedBlock<OpPrimitives>) {
+        let block = Block {
+            header: Header {
+                number: parent.number + 1,
+                parent_hash: parent.hash,
+                timestamp: index + 1,
+                ..Default::default()
+            },
+            body: BlockBody::<OpTransactionSigned>::default(),
+        };
+        let executed: ExecutedBlock<OpPrimitives> = ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_unhashed(block.clone(), vec![])),
+            ..Default::default()
+        };
+        let payload = OpBuiltPayload::new(
+            PayloadId::new([1u8; 8]),
+            Arc::new(SealedBlock::seal_slow(block)),
+            U256::ZERO,
+            Some(BuiltPayloadExecutedBlock {
+                recovered_block: executed.recovered_block.clone(),
+                execution_output: executed.execution_output.clone(),
+                hashed_state: Arc::default(),
+                trie_updates: Arc::default(),
+            }),
+        );
+        let mut inner = coordinator.inner.write();
+        inner.latest_payload = Some((payload.clone(), index));
+        inner.latest_payload_at = Some(validated_at);
+        inner.latest_payload_generation = Some(inner.validated.canonical_generation);
+        (payload, executed)
+    }
+
+    fn process_cached_payload(
+        coordinator: &FlashblocksExecutionCoordinator,
+        payload_id: PayloadId,
+        index: u64,
+    ) {
+        process_flashblock(
+            BenchProvider::new(),
+            &EVM_CONFIG,
+            coordinator,
+            CHAIN_SPEC.clone(),
+            FlashblocksPayloadV1 {
+                payload_id,
+                index,
+                ..Default::default()
+            },
+            coordinator.pending_block.clone(),
+            Arc::new(FlashblockValidationMetrics::default()),
+        )
+        .expect("cached builder payload");
+    }
+
+    #[tokio::test]
+    async fn cached_builder_payload_publishes_once_without_refreshing_age() {
+        let (coordinator, _) = test_coordinator();
+        let parent = BlockNumHash::new(10, B256::repeat_byte(1));
+        coordinator.observe_canonical_tip(parent);
+        let validated_at = Instant::now() - Duration::from_secs(1);
+        let (payload, _) = cache_executed_payload(&coordinator, parent, 0, validated_at);
+        let (_, mut receiver) = coordinator.subscribe_validated();
+
+        process_cached_payload(&coordinator, payload.id(), 0);
+        let ValidatedEvent::Payload(first) = receiver.try_recv().expect("first publication") else {
+            panic!("expected validated payload");
+        };
+        assert_eq!(first.sequence, 1);
+        assert_eq!(first.validated_at, validated_at);
+
+        process_cached_payload(&coordinator, payload.id(), 0);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        let current = coordinator
+            .snapshot_validated()
+            .current
+            .expect("current payload");
+        assert_eq!(current.sequence, first.sequence);
+        assert_eq!(current.validated_at, validated_at);
+    }
+
+    #[tokio::test]
+    async fn initial_checkpoint_publishes_already_executed_builder_payload() {
+        let (coordinator, _) = test_coordinator();
+        let parent = BlockNumHash::new(10, B256::repeat_byte(1));
+        let validated_at = Instant::now() - Duration::from_secs(1);
+        let (payload, _) = cache_executed_payload(&coordinator, parent, 0, validated_at);
+        process_cached_payload(&coordinator, payload.id(), 0);
+        assert!(coordinator.snapshot_validated().current.is_none());
+
+        coordinator.observe_canonical_tip(parent);
+        let (snapshot, mut receiver) = coordinator.subscribe_validated();
+        assert_eq!(snapshot.canonical_generation, 0);
+        let current = snapshot.current.expect("bootstrap publication");
+        assert_eq!(current.sequence, 1);
+        assert_eq!(current.validated_at, validated_at);
+        process_cached_payload(&coordinator, payload.id(), 0);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn local_builder_binds_once_when_its_parent_becomes_canonical() {
+        let (coordinator, _) = test_coordinator();
+        coordinator.observe_canonical_tip(BlockNumHash::new(10, B256::repeat_byte(1)));
+        let parent = BlockNumHash::new(11, B256::repeat_byte(2));
+        let (payload, _) = cache_executed_payload(&coordinator, parent, 0, Instant::now());
+        let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+        let authorization = Authorization::new(
+            payload.id(),
+            payload.block().timestamp(),
+            &signing_key,
+            signing_key.verifying_key(),
+        );
+        coordinator
+            .p2p_handle
+            .start_publishing(authorization)
+            .unwrap();
+        let flashblock = FlashblocksPayloadV1 {
+            payload_id: payload.id(),
+            index: 0,
+            base: Some(ExecutionPayloadBaseV1 {
+                parent_hash: parent.hash,
+                block_number: parent.number + 1,
+                timestamp: payload.block().timestamp(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        coordinator
+            .publish_built_payload(
+                AuthorizedPayload::new(&signing_key, authorization, flashblock),
+                payload.clone(),
+            )
+            .unwrap();
+        let validated_at = coordinator.inner.read().latest_payload_at.unwrap();
+        assert_eq!(coordinator.inner.read().latest_payload_generation, None);
+        process_cached_payload(&coordinator, payload.id(), 0);
+        assert!(coordinator.snapshot_validated().current.is_none());
+        let (_, mut receiver) = coordinator.subscribe_validated();
+
+        coordinator.observe_canonical_tip(parent);
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            ValidatedEvent::Reset { .. }
+        ));
+        let ValidatedEvent::Payload(published) = receiver.try_recv().unwrap() else {
+            panic!("expected newly bound local payload");
+        };
+        assert_eq!(published.canonical_generation, 1);
+        assert_eq!(published.validated_at, validated_at);
+
+        coordinator.observe_canonical_tip(BlockNumHash::new(12, B256::repeat_byte(3)));
+        coordinator.observe_canonical_tip(parent);
+        let (_, mut receiver) = coordinator.subscribe_validated();
+        process_cached_payload(&coordinator, payload.id(), 0);
+        assert!(coordinator.snapshot_validated().current.is_none());
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn validated_snapshot_and_subscription_cover_following_updates() {
+        let (coordinator, _) = test_coordinator();
+        let parent = BlockNumHash::new(10, B256::repeat_byte(1));
+        coordinator.observe_canonical_tip(parent);
+        let (payload, executed) = cache_executed_payload(&coordinator, parent, 0, Instant::now());
+        coordinator.publish_validated(payload.id(), 0, 0, executed, Instant::now());
+
+        let (snapshot, mut receiver) = coordinator.subscribe_validated();
+        assert_eq!(snapshot.current.expect("snapshot payload").sequence, 1);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+
+        let (payload, executed) = cache_executed_payload(&coordinator, parent, 1, Instant::now());
+        coordinator.publish_validated(payload.id(), 1, 0, executed, Instant::now());
+        let ValidatedEvent::Payload(next) = receiver.try_recv().expect("following update") else {
+            panic!("expected validated payload");
+        };
+        assert_eq!(next.sequence, 2);
+        assert_eq!(next.index, 1);
+
+        let canonical_tip = BlockNumHash::new(payload.block().number(), payload.block().hash());
+        coordinator.observe_canonical_tip(canonical_tip);
+        assert!(matches!(
+            receiver.try_recv().expect("checkpoint reset"),
+            ValidatedEvent::Reset {
+                canonical_tip: Some(tip),
+                canonical_generation: 1,
+            } if tip == canonical_tip
+        ));
+        assert!(coordinator.snapshot_validated().current.is_none());
+        coordinator.observe_canonical_tip(canonical_tip);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn old_generation_cannot_republish_when_parent_checkpoint_returns() {
+        let (coordinator, _) = test_coordinator();
+        let parent = BlockNumHash::new(10, B256::repeat_byte(1));
+        coordinator.observe_canonical_tip(parent);
+        let validated_at = Instant::now();
+        let (payload, executed) = cache_executed_payload(&coordinator, parent, 0, validated_at);
+        coordinator.observe_canonical_tip(BlockNumHash::new(11, B256::repeat_byte(2)));
+        coordinator.observe_canonical_tip(parent);
+        let (_, mut receiver) = coordinator.subscribe_validated();
+
+        coordinator.publish_validated(payload.id(), 0, 0, executed, validated_at);
+        process_cached_payload(&coordinator, payload.id(), 0);
+
+        assert!(coordinator.snapshot_validated().current.is_none());
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        assert!(coordinator.pending_block().borrow().is_some());
+    }
+
+    #[tokio::test]
+    async fn source_lag_is_explicit_and_snapshot_retains_latest_checkpoint() {
+        let (coordinator, _) = test_coordinator();
+        let (_, mut receiver) = coordinator.subscribe_validated();
+        for number in 1..=3 {
+            coordinator.observe_canonical_tip(BlockNumHash::new(number, B256::ZERO));
+        }
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Lagged(1))
+        ));
+        let snapshot = coordinator.snapshot_validated();
+        assert_eq!(
+            snapshot.canonical_tip,
+            Some(BlockNumHash::new(3, B256::ZERO))
+        );
+        assert_eq!(snapshot.canonical_generation, 2);
     }
 
     #[tokio::test]
