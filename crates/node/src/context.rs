@@ -532,6 +532,10 @@ where
             false,
             1_000_000,
             self.config.args.simulate_enabled,
+            self.config.args.preconfirmed_logs,
+            self.components_context
+                .as_ref()
+                .map(|ctx| ctx.flashblocks_state.clone()),
             self.witness
                 .as_ref()
                 .map(|w| (w.cache.clone(), w.receiver.clone())),

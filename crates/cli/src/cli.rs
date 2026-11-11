@@ -74,6 +74,15 @@ pub struct WorldChainArgs {
     )]
     pub disable_bootnodes: bool,
 
+    /// Enable the bounded, resumable preconfirmed log RPC feed on eth HTTP and WebSocket transports.
+    #[arg(
+        long = "rpc.preconfirmed-logs",
+        env = "WORLD_CHAIN_PRECONFIRMED_LOGS",
+        requires = "flashblocks.enabled",
+        default_value_t = false
+    )]
+    pub preconfirmed_logs: bool,
+
     /// Whether the `simulate_unsignedUserOp` RPC endpoint should be served on
     /// HTTP. Derived from `--http.api`: enabled when the selection contains
     /// the `simulate` namespace.
@@ -92,6 +101,9 @@ impl WorldChainArgs {
         config: &mut NodeConfig<WorldChainSpec>,
     ) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
+        if self.preconfirmed_logs && self.flashblocks.as_ref().is_none_or(|args| !args.enabled) {
+            bail!("--rpc.preconfirmed-logs requires --flashblocks.enabled");
+        }
         let spec = &config.chain;
 
         // Require an explicit `Selection` containing `simulate` — `RpcModuleSelection::All`
@@ -713,6 +725,7 @@ mod tests {
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
             simulate_enabled: false,
+            preconfirmed_logs: false,
         };
 
         let spec = WorldChainSpec::from_genesis(Genesis::default());
@@ -728,6 +741,20 @@ mod tests {
         let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "simulate"]);
         let cfg = into_world_config(parsed);
         assert!(cfg.args.simulate_enabled);
+    }
+
+    #[test]
+    fn preconfirmed_logs_are_default_off_and_require_flashblocks() {
+        assert!(!CommandParser::parse_from(["bin"]).world.preconfirmed_logs);
+        assert!(CommandParser::try_parse_from(["bin", "--rpc.preconfirmed-logs"]).is_err());
+        let parsed =
+            CommandParser::parse_from(["bin", "--flashblocks.enabled", "--rpc.preconfirmed-logs"]);
+        assert!(parsed.world.preconfirmed_logs);
+        let mut args = parsed.world;
+        args.flashblocks.as_mut().unwrap().enabled = false;
+        let spec = WorldChainSpec::from_genesis(Genesis::default());
+        let mut config = NodeConfig::new(Arc::new(spec));
+        assert!(args.into_config(&mut config).is_err());
     }
 
     #[test]

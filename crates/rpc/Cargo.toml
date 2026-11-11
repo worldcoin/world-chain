@@ -15,6 +15,7 @@ workspace = true
 world-chain-evm.workspace = true
 world-chain-primitives.workspace = true
 world-chain-validator.workspace = true
+world-chain-chainspec.workspace = true
 
 alloy-rpc-types-debug.workspace = true
 
@@ -73,6 +74,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 eyre.workspace = true
 lru.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
+metrics.workspace = true
 
 [dev-dependencies]
 alloy = { workspace = true, features = ["provider-http"] }

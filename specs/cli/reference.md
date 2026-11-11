@@ -268,4 +268,9 @@ Flashblocks:
       --worldchain.disable-bootnodes
           Disable the default World Chain flashblocks sentries
 
+      --rpc.preconfirmed-logs
+          Enable the bounded, resumable preconfirmed log RPC feed on eth HTTP and WebSocket transports
+          
+          [env: WORLD_CHAIN_PRECONFIRMED_LOGS=]
+
 ```

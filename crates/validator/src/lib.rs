@@ -13,6 +13,9 @@ mod flashblock_types;
 /// Flashblock validation metrics.
 pub mod flashblock_validation_metrics;
 
+/// Bounded validated Flashblock notifications for preconfirmation consumers.
+pub mod preconfirmed;
+
 /// State-root strategy traits and implementations.
 pub mod state_root_strategy;
 
