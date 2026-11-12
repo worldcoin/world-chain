@@ -121,14 +121,23 @@ are not portable across replicas, restarts, or incompatible versions. Keep
 requests for a cursor on the same backend; preserve the address/topic filter.
 Changing `limit` is allowed. Cursors are opaque and are not authorization tokens.
 
-Both query and subscription methods work on WebSocket. Using one authenticated
-WebSocket connection for both keeps them on proxyd's connection-bound backend;
-reconnects still require cursor validation and recovery.
+Both query and subscription methods work on WebSocket. A direct connection to
+one World Chain node uses that node's feed for both. Behind a proxy, verify
+backend affinity separately: proxyd v4.34.1 routes HTTP-mapped methods through
+its HTTP forwarding pipeline even when received over WebSocket. Those queries
+can reach a different backend from the subscription on the same connection.
 
-After a disconnect, reconnect to the same backend with the last fully processed
-cursor. An ordinary disconnect may lose the terminal error notification, so
-silence is never proof that no events occurred. Replayed lifecycle events must
-be processed idempotently. History is bounded and has no time-retention promise.
+A subscription without a cursor supplies its own initial snapshot and drains
+pagination on its selected backend. Cursor-bearing queries and handoffs from a
+query to a subscription require explicit backend affinity or resynchronization;
+sharing a WebSocket connection alone does not establish that affinity.
+
+After a disconnect, resume with the last fully processed cursor when the backend
+accepts it. A different backend, restarted feed or expired history requires the
+recovery below. An ordinary disconnect may lose the terminal error notification,
+so silence is never proof that no events occurred. Replayed lifecycle events
+must be processed idempotently. History is bounded and has no time-retention
+promise.
 
 On a reset, expired/foreign cursor, or unavailable feed:
 
@@ -187,8 +196,10 @@ the actual proxy before exposure. Configure HTTP routing for
 `worldchain_getPreconfirmedLogs` and `op_supportedCapabilities`, without response
 caching. Add `worldchain_subscribe`, `worldchain_unsubscribe`,
 `worldchain_getPreconfirmedLogs`, and `op_supportedCapabilities` to the WebSocket
-method whitelist. HTTP cursor requests need backend affinity or explicit resync
-on backend changes; a persistent WebSocket alone does not provide HTTP affinity.
+method whitelist. Cursor-bearing queries need backend affinity or explicit
+resynchronization on backend changes, whether received over HTTP or WebSocket.
+Keep subscription methods on the proxy's WebSocket forwarding path and verify
+how HTTP method mappings affect queries received over WebSocket.
 The [local pinned proxyd compatibility check](support/proxyd-preconfirmed-qualification.md)
 passed for custom WebSocket forwarding, whitelist enforcement, and test-path
 authentication with a mock backend; it does not qualify deployed routing or an

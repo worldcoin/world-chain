@@ -23,7 +23,7 @@ backend. It verifies:
 - Unchanged `worldchain_subscription` notifications containing nested update
   results, an opaque cursor, and terminal errors, including string and
   maximum-uint64 subscription IDs; unsubscribe `true` is preserved.
-- One WebSocket connection stays on one backend.
+- Forwarded WebSocket requests stay on one backend in this pinned version.
 - Missing and invalid test auth paths return HTTP 401 before backend connection;
   valid test auth permits the handshake.
 - A custom method omitted from the whitelist returns `-32601` without reaching
@@ -47,3 +47,9 @@ proxy, actual node feed, production authentication, backend failover/HTTP
 affinity, cache policy, throughput, or slow-consumer behavior is qualified by
 this check. Production whitelist/routing changes and a real node behind the
 actual proxy remain rollout requirements in [the API guide](../preconfirmed-logs.md).
+
+The connection-affinity result does not cover HTTP-mapped queries in proxyd
+v4.34.1: its [WebSocket request handler](https://github.com/ethereum-optimism/infra/blob/a0201bebab87337b44f70f70fcf921bb2330080c/proxyd/server.go#L998)
+intercepts mapped methods and forwards them through the HTTP backend pipeline.
+Query and subscription cursors therefore need explicit backend affinity or
+resynchronization even when the client uses one WebSocket connection.
