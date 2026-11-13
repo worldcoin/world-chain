@@ -47,7 +47,8 @@ critical. The check summary identifies the paths setting the PR's risk.
 Only a human author with repository write access who owns **every** changed path
 can take the owner fast path. `CODEOWNERS` is read from the current target branch,
 using GitHub's `.github/`, root, then `docs/` precedence and last matching pattern.
-The global owner is `@worldcoin/protocol`; current team members own all files.
+The global owners are `@worldcoin/protocol`, `@worldcoin/worldchain`, and
+`@worldcoin/infrastructure`; current members of any of these teams own all files.
 
 | Risk | Author owns every path | Other authors |
 | --- | --- | --- |
@@ -71,7 +72,7 @@ an additional confirmation. Dismissed approvals do not count, and an active
 **Request changes** review from an authorized human blocks the gate. An ordinary
 comment review does not revoke an earlier approval.
 
-Owner usernames are case-insensitive. Protocol-team membership is fetched live on
+Owner usernames are case-insensitive. Owner-team membership is fetched live on
 each evidence read, including final verification after AI review. New PRs therefore
 use the current roster without changing this repository or rerunning activation.
 Open PRs pick up membership changes on their next gate evaluation; dispatch
