@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS base
+FROM public.ecr.aws/docker/library/rust:1.99.0-bookworm AS base
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
@@ -27,8 +27,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM base AS builder
 WORKDIR /app
 
+# cast ships in the runtime image; 1.8.6+ carries the eMudhra distrust (rustls-webpki 0.103.16).
 RUN curl -L https://foundry.paradigm.xyz | bash && \
-  /root/.foundry/bin/foundryup --install 1.5.1
+  /root/.foundry/bin/foundryup --install 1.8.6
 
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
@@ -70,7 +71,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime
 WORKDIR /app
 
-# Install wget in the final image
+# Install runtime tools and require Debian's eMudhra distrust update.
 RUN apt-get update && \
   apt-get install -y --no-install-recommends \
   ca-certificates \
@@ -81,6 +82,7 @@ RUN apt-get update && \
   jq \
   netcat-traditional \
   tzdata && \
+  dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20250419~deb12u2' && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
 
@@ -90,9 +92,8 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
   /tmp/aws/install && \
   rm -rf /tmp/aws /tmp/awscliv2.zip
 
-# Install s3fcp
-RUN curl -L "https://github.com/Dzejkop/s3fcp/releases/download/v0.3.0/s3fcp-linux-x86_64" -o "/usr/local/bin/s3fcp" && \
-  chmod +x /usr/local/bin/s3fcp
+# The AWS CLI bundles its own CA store; use Debian's, which distrusts the eMudhra roots.
+ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 ARG PROFILE="maxperf"

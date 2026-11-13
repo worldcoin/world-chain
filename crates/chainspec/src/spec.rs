@@ -6,7 +6,7 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
 use alloy_primitives::{B256, U256};
-use derive_more::{Constructor, Deref, Into};
+use derive_more::{Deref, Into};
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainHardforks, ChainSpec, DepositContract, DisplayHardforks,
     EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCondition, ForkFilter, ForkId,
@@ -38,13 +38,19 @@ pub const KARST_UPGRADE_TIMESTAMP_MAINNET: u64 = 1_789_992_000;
 ///
 /// This wraps reth's generic [`ChainSpec`] the same way the OP stack spec does, while using World
 /// Chain hardfork names as the canonical post-Karst schedule.
-#[derive(Debug, Clone, Deref, Into, Constructor, PartialEq, Eq)]
+#[derive(Debug, Clone, Deref, Into, PartialEq, Eq)]
 pub struct WorldChainSpec {
     /// Inner reth chain spec.
     pub inner: ChainSpec,
 }
 
 impl WorldChainSpec {
+    /// Wraps the given reth chain spec.
+    #[inline]
+    pub const fn new(inner: ChainSpec) -> Self {
+        Self { inner }
+    }
+
     /// Converts the given [`Genesis`] into a [`WorldChainSpec`].
     pub fn from_genesis(genesis: Genesis) -> Self {
         genesis.into()

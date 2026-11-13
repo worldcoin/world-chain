@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use alloy_primitives::{Address, B256, BlockNumber, Bytes, keccak256};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -34,10 +36,10 @@ impl ProofBackend {
     }
 }
 
-impl TryFrom<&str> for ProofBackend {
-    type Error = String;
+impl FromStr for ProofBackend {
+    type Err = String;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "sp1" => Ok(Self::Sp1),
             "nitro" => Ok(Self::Nitro),
@@ -127,10 +129,10 @@ impl std::fmt::Display for ProofStatus {
     }
 }
 
-impl TryFrom<&str> for ProofStatus {
-    type Error = String;
+impl FromStr for ProofStatus {
+    type Err = String;
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "CREATED" => Ok(Self::Created),
             "RUNNING" => Ok(Self::Running),
@@ -173,10 +175,10 @@ impl std::fmt::Display for ProofJobStatus {
     }
 }
 
-impl TryFrom<&str> for ProofJobStatus {
-    type Error = String;
+impl FromStr for ProofJobStatus {
+    type Err = String;
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "PENDING" => Ok(Self::Pending),
             "CLAIMED" => Ok(Self::Claimed),
@@ -321,10 +323,10 @@ impl SessionType {
     }
 }
 
-impl TryFrom<&str> for SessionType {
-    type Error = String;
+impl FromStr for SessionType {
+    type Err = String;
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "STARK" => Ok(Self::Stark),
             "SNARK" => Ok(Self::Snark),
@@ -376,10 +378,10 @@ impl BackendSessionStatus {
     }
 }
 
-impl TryFrom<&str> for BackendSessionStatus {
-    type Error = String;
+impl FromStr for BackendSessionStatus {
+    type Err = String;
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "SUBMITTING" => Ok(Self::Submitting),
             "RUNNING" => Ok(Self::Running),

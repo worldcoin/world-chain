@@ -32,15 +32,16 @@ use reth_provider::{
     HashedPostStateProvider, HeaderProvider, ProviderError, ProviderResult, ReceiptProvider,
     ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider, providers::ConsistentViewError,
+    TransactionVariant, TransactionsProvider,
 };
 use reth_revm::revm;
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_errors::provider::ConsistentViewError;
 use reth_trie::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput, updates::TrieUpdates,
 };
-use reth_trie_common::ExecutionWitnessMode;
+use reth_trie_common::{DecodedMultiProofV2, ExecutionWitnessMode, MultiProofTargetsV2};
 use world_chain_chainspec::WorldChainSpec;
 
 /// A mock implementation for Provider interfaces.
@@ -687,6 +688,14 @@ impl StateProofProvider for MockEthProvider {
         Ok(MultiProof::default())
     }
 
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: MultiProofTargetsV2,
+    ) -> ProviderResult<DecodedMultiProofV2> {
+        Ok(DecodedMultiProofV2::default())
+    }
+
     fn witness(
         &self,
         _input: TrieInput,
@@ -698,8 +707,11 @@ impl StateProofProvider for MockEthProvider {
 }
 
 impl HashedPostStateProvider for MockEthProvider {
-    fn hashed_post_state(&self, _state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::default()
+    fn hashed_post_state(
+        &self,
+        _state: &revm::database::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
     }
 }
 

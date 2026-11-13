@@ -271,7 +271,10 @@ mod test {
         flat[0] = semaphore_rs_proof::compression::P;
         let pbh_payload = PBHPayload {
             root,
-            external_nullifier: ExternalNullifier::with_date_marker(DateMarker::from(Utc::now()), 0),
+            external_nullifier: ExternalNullifier::with_date_marker(
+                DateMarker::from(Utc::now()),
+                0,
+            ),
             proof: Proof(semaphore_rs::protocol::Proof::from_flat(flat)),
             ..Default::default()
         };

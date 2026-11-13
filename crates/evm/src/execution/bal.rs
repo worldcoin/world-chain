@@ -93,6 +93,11 @@ pub fn pre_refund_gas_used<'a>(
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
 pub enum BalValidationError {
+    #[error("Received BAL hash mismatch: expected {expected:?}, got {got:?}")]
+    ReceivedBalHashMismatch {
+        expected: FixedBytes<32>,
+        got: FixedBytes<32>,
+    },
     #[error("BAL hash mismatch: expected {expected:?}, got {got:?}")]
     BalHashMismatch {
         expected: FixedBytes<32>,
@@ -336,7 +341,9 @@ where
 
         // calculate the state root
         let state_root_started = Instant::now();
-        let hashed_state = state.hashed_post_state(&bundle);
+        let hashed_state = state
+            .hashed_post_state(&bundle)
+            .map_err(BlockExecutionError::other)?;
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;

@@ -780,6 +780,14 @@ where
     );
 
     executor.gas_used = prev_outcome.as_ref().map_or(0, |o| o.0.block.gas_used());
+    executor.evm_gas_used = prev_outcome.as_ref().map_or(0, |o| {
+        let transactions: Vec<_> = o.0.block.clone_transactions_recovered().collect();
+        pre_refund_gas_used(o.0.block.gas_used(), transactions.iter())
+    });
+    executor.da_footprint_used = prev_outcome
+        .as_ref()
+        .and_then(|o| o.0.block.blob_gas_used())
+        .unwrap_or_default();
     executor.receipts = prev_outcome
         .as_ref()
         .map_or(Vec::new(), |o| o.0.execution_result.receipts.clone());
@@ -822,9 +830,9 @@ where
 // ============================================================================
 // Mock State Provider with In-Memory Trie
 // ============================================================================
-fn create_test_db() -> InMemoryDB {
+fn create_test_db(genesis: &Genesis) -> InMemoryDB {
     let mut db = InMemoryDB::default();
-    for (address, account) in GENESIS.alloc.clone() {
+    for (address, account) in genesis.alloc.clone() {
         db.insert_account_info(
             address,
             AccountInfo {
@@ -921,11 +929,6 @@ impl HashedGenesisState {
         for (hashed_address, hashed_storage) in &post_state.storages {
             let storage_map = merged_storages.entry(*hashed_address).or_default();
 
-            // If storage was wiped, clear existing storage first
-            if hashed_storage.wiped {
-                storage_map.clear();
-            }
-
             // Apply individual slot changes
             for (hashed_slot, value) in &hashed_storage.storage {
                 if value.is_zero() {
@@ -999,8 +1002,25 @@ impl Default for TestStateProvider {
 impl TestStateProvider {
     pub fn new() -> Self {
         Self {
-            db: create_test_db(),
+            db: create_test_db(&GENESIS),
             hashed_genesis: HashedGenesisState::from_genesis(&GENESIS),
+        }
+    }
+
+    /// Creates a state provider including account storage from a custom genesis.
+    pub fn from_genesis(genesis: &Genesis) -> Self {
+        let mut db = create_test_db(genesis);
+        for (address, account) in &genesis.alloc {
+            if let Some(storage) = &account.storage {
+                for (slot, value) in storage {
+                    db.insert_account_storage(*address, (*slot).into(), (*value).into())
+                        .expect("infallible in-memory storage insert");
+                }
+            }
+        }
+        Self {
+            db,
+            hashed_genesis: HashedGenesisState::from_genesis(genesis),
         }
     }
 }
@@ -1130,9 +1150,6 @@ impl reth_provider::StorageRootProvider for TestStateProvider {
             .unwrap_or_default();
 
         // Apply changes from hashed_storage
-        if hashed_storage.wiped {
-            storage.clear();
-        }
         for (hashed_slot, value) in &hashed_storage.storage {
             if value.is_zero() {
                 storage.remove(hashed_slot);
@@ -1186,6 +1203,14 @@ impl reth_provider::StateProofProvider for TestStateProvider {
         unimplemented!()
     }
 
+    fn multiproof_v2(
+        &self,
+        _input: reth_trie_common::TrieInput,
+        _targets: reth_trie_common::MultiProofTargetsV2,
+    ) -> ProviderResult<reth_trie_common::DecodedMultiProofV2> {
+        unimplemented!()
+    }
+
     fn witness(
         &self,
         _input: reth_trie_common::TrieInput,
@@ -1197,10 +1222,13 @@ impl reth_provider::StateProofProvider for TestStateProvider {
 }
 
 impl reth_provider::HashedPostStateProvider for TestStateProvider {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> reth_trie_common::HashedPostState {
-        reth_trie_common::HashedPostState::from_bundle_state::<reth_trie_common::KeccakKeyHasher>(
-            bundle_state.state(),
-        )
+    fn hashed_post_state(
+        &self,
+        bundle_state: &BundleState,
+    ) -> ProviderResult<reth_trie_common::HashedPostState> {
+        Ok(reth_trie_common::HashedPostState::from_bundle_state::<
+            reth_trie_common::KeccakKeyHasher,
+        >(bundle_state.state()))
     }
 }
 
@@ -1442,6 +1470,14 @@ impl reth_provider::StateProofProvider for BenchProvider {
         self.inner.multiproof(input, targets)
     }
 
+    fn multiproof_v2(
+        &self,
+        input: reth_trie_common::TrieInput,
+        targets: reth_trie_common::MultiProofTargetsV2,
+    ) -> ProviderResult<reth_trie_common::DecodedMultiProofV2> {
+        self.inner.multiproof_v2(input, targets)
+    }
+
     fn witness(
         &self,
         input: reth_trie_common::TrieInput,
@@ -1453,7 +1489,7 @@ impl reth_provider::StateProofProvider for BenchProvider {
 }
 
 impl reth_provider::HashedPostStateProvider for BenchProvider {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState> {
         self.inner.hashed_post_state(bundle_state)
     }
 }

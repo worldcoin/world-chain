@@ -15,7 +15,7 @@ use reth_basic_payload_builder::{
 use reth_execution_cache::SavedCache;
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadAttrs};
 use reth_optimism_primitives::OpPrimitives;
-use reth_payload_builder::{KeepPayloadJobAlive, PayloadJob};
+use reth_payload_builder::{KeepPayloadJobAlive, PayloadBuilderLease, PayloadJob};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderError, PayloadKind};
 use reth_primitives_traits::BlockBody;
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
@@ -240,6 +240,8 @@ pub struct FlashblocksPayloadJob<Builder: PayloadBuilder> {
     pub(crate) execution_cache: Option<SavedCache>,
     /// Optional state root task handle, shared with the engine.
     pub(crate) state_root_handle: Option<PayloadStateRootHandle>,
+    /// Resource leases retained while this job or its detached build tasks run.
+    pub(crate) leases: Vec<PayloadBuilderLease>,
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
@@ -290,6 +292,7 @@ where
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
         let state_root_handle = self.state_root_handle.take();
+        let leases = self.leases.clone();
         let builder = self.builder.clone();
 
         self.executor.spawn_blocking_task(Box::pin(async move {
@@ -321,6 +324,7 @@ where
                 }
                 Err(err) => Err(err),
             };
+            drop(leases);
             let _ = tx.send(outcome);
         }));
 
@@ -700,8 +704,10 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
+                    let leases = self.leases.clone();
                     self.executor.spawn_blocking_task(Box::pin(async move {
                         let res = builder.build_empty_payload(config);
+                        drop(leases);
                         let _ = tx.send(res);
                     }));
 
@@ -711,8 +717,11 @@ where
                     debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
+                    let leases = self.leases.clone();
                     self.executor.spawn_blocking_task(Box::pin(async move {
-                        let _ = tx.send(job());
+                        let result = job();
+                        drop(leases);
+                        let _ = tx.send(result);
                     }));
                     empty_payload = Some(rx);
                 }

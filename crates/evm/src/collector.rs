@@ -4,8 +4,9 @@ use alloy_consensus::BlockHeader;
 use crossbeam_channel::{Receiver, TryRecvError};
 use futures::StreamExt;
 use reth_provider::CanonStateSubscriptions;
-use reth_revm::witness::ExecutionWitnessRecord;
+use reth_revm::{State, witness::ExecutionWitnessRecord};
 use reth_tasks::TaskExecutor;
+use revm_database::EmptyDB;
 
 use crate::{BlockExecutionWitness, ExecutionWitnessHandle, ProviderBounds};
 
@@ -22,7 +23,7 @@ pub fn spawn_witness_collector<P>(
 
     tasks.spawn_critical_task("world-chain-witness-collector", async move {
         // Captured records awaiting their block becoming canonical, keyed by block number.
-        let mut queued: BTreeMap<u64, ExecutionWitnessRecord> = BTreeMap::new();
+        let mut queued: BTreeMap<u64, State<EmptyDB>> = BTreeMap::new();
 
         while let Some(notification) = canon.next().await {
             // Drain the channel without blocking.
@@ -58,7 +59,7 @@ pub fn spawn_witness_collector<P>(
                 for (block_number, record) in ready {
                     let parent = block_number.saturating_sub(1);
                     let result = provider.history_by_block_number(parent).and_then(|state| {
-                        record.into_execution_witness(
+                        ExecutionWitnessRecord::new(&record).into_execution_witness(
                             &state,
                             &provider,
                             block_number,

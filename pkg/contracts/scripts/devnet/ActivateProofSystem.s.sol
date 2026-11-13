@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Script} from "forge-std/Script.sol";
+import {SecurityCouncilVerifier} from "../../src/dispute/council/SecurityCouncilVerifier.sol";
+import {Governance} from "./Governance.s.sol";
 
 import {GameTypes} from "../../src/dispute/lib/GameTypes.sol";
 import {IMultiProofGame} from "../../src/dispute/interfaces/IMultiProofGame.sol";
@@ -21,7 +22,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///      registered, respected, and not retired. Blacklisting the current anchor is an incident
 ///      recovery case: the occupied factory UUID requires a new proof domain, so this script
 ///      must still be able to register the replacement implementation.
-contract ActivateProofSystem is Script {
+contract ActivateProofSystem is Governance {
     struct Config {
         uint256 guardianKey;
         uint256 dgfOwnerKey;
@@ -39,13 +40,33 @@ contract ActivateProofSystem is Script {
         gameImpl = config.gameImplementation;
         _validate(config, gameImpl);
 
-        vm.startBroadcast(config.dgfOwnerKey);
-        config.disputeGameFactory
-            .setImplementation(GameTypes.MULTI_PROOF_GAME_TYPE, IDisputeGame(address(gameImpl)), hex"");
-        // Register first so a migration from an ETH-bonded implementation fails closed during
-        // the transaction gap instead of briefly allowing zero-bond legacy games.
-        config.disputeGameFactory.setInitBond(GameTypes.MULTI_PROOF_GAME_TYPE, 0);
-        vm.stopBroadcast();
+        _executeGovernance(
+            config.dgfOwnerKey,
+            address(config.disputeGameFactory),
+            abi.encodeWithSignature(
+                "setImplementation(uint32,address,bytes)",
+                GameTypes.MULTI_PROOF_GAME_TYPE.raw(),
+                address(gameImpl),
+                hex""
+            )
+        );
+        // Register first so the transaction gap cannot allow zero-bond legacy games.
+        _executeGovernance(
+            config.dgfOwnerKey,
+            address(config.disputeGameFactory),
+            abi.encodeCall(IDisputeGameFactory.setInitBond, (GameTypes.MULTI_PROOF_GAME_TYPE, 0))
+        );
+
+        if (_preparingSafe()) {
+            if (config.anchorStateRegistry.respectedGameType().raw() != GameTypes.MULTI_PROOF_GAME_TYPE.raw()) {
+                _executeGovernance(
+                    config.guardianKey,
+                    address(config.anchorStateRegistry),
+                    abi.encodeCall(IAnchorStateRegistry.setRespectedGameType, (GameTypes.MULTI_PROOF_GAME_TYPE))
+                );
+            }
+            return gameImpl;
+        }
 
         require(
             address(config.disputeGameFactory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE)) == address(gameImpl),
@@ -61,9 +82,11 @@ contract ActivateProofSystem is Script {
         );
 
         if (config.anchorStateRegistry.respectedGameType().raw() != GameTypes.MULTI_PROOF_GAME_TYPE.raw()) {
-            vm.startBroadcast(config.guardianKey);
-            config.anchorStateRegistry.setRespectedGameType(GameTypes.MULTI_PROOF_GAME_TYPE);
-            vm.stopBroadcast();
+            _executeGovernance(
+                config.guardianKey,
+                address(config.anchorStateRegistry),
+                abi.encodeCall(IAnchorStateRegistry.setRespectedGameType, (GameTypes.MULTI_PROOF_GAME_TYPE))
+            );
         }
 
         require(
@@ -72,9 +95,9 @@ contract ActivateProofSystem is Script {
         );
     }
 
-    function _readConfig() internal view returns (Config memory config) {
+    function _readConfig() internal view virtual returns (Config memory config) {
         config.guardianKey = vm.envOr("GUARDIAN_KEY", uint256(0));
-        config.dgfOwnerKey = vm.envUint("DGF_OWNER_KEY");
+        config.dgfOwnerKey = vm.envOr("DGF_OWNER_KEY", uint256(0));
         config.disputeGameFactory = IDisputeGameFactory(vm.envAddress("DISPUTE_GAME_FACTORY"));
         config.anchorStateRegistry = IAnchorStateRegistry(vm.envAddress("ANCHOR_STATE_REGISTRY"));
         config.systemConfig = ISystemConfig(vm.envAddress("SYSTEM_CONFIG"));
@@ -85,9 +108,8 @@ contract ActivateProofSystem is Script {
     }
 
     function _validate(Config memory config, IMultiProofGame gameImpl) internal view {
-        require(config.dgfOwnerKey != 0, "ActivateProofSystem: DGF owner key required");
         require(
-            vm.addr(config.dgfOwnerKey) == config.disputeGameFactory.owner(),
+            _governanceAddress(config.dgfOwnerKey) == config.disputeGameFactory.owner(),
             "ActivateProofSystem: DGF owner key mismatch"
         );
         require(
@@ -95,9 +117,8 @@ contract ActivateProofSystem is Script {
             "ActivateProofSystem: DGF and ProxyAdmin owners must match"
         );
         if (config.anchorStateRegistry.respectedGameType().raw() != GameTypes.MULTI_PROOF_GAME_TYPE.raw()) {
-            require(config.guardianKey != 0, "ActivateProofSystem: guardian key required");
             require(
-                vm.addr(config.guardianKey) == config.systemConfig.guardian(),
+                _governanceAddress(config.guardianKey) == config.systemConfig.guardian(),
                 "ActivateProofSystem: guardian key mismatch"
             );
         }
@@ -132,6 +153,12 @@ contract ActivateProofSystem is Script {
                 && gameImpl.teeVerifier() != gameImpl.securityCouncil(),
             "ActivateProofSystem: proof lane verifiers must be distinct"
         );
+        if (_safeMode()) {
+            require(
+                SecurityCouncilVerifier(address(gameImpl.securityCouncil())).council() == address(_governanceSafe()),
+                "ActivateProofSystem: council must be governance Safe"
+            );
+        }
         require(address(gameImpl.bondVault()).code.length > 0, "ActivateProofSystem: ERC-20 staking vault missing");
         require(gameImpl.proposerBond() > 0, "ActivateProofSystem: proposer bond missing");
         require(gameImpl.challengerBond() > 0, "ActivateProofSystem: challenger bond missing");

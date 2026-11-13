@@ -6,11 +6,10 @@ use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_node_core::version::version_metadata;
-use reth_optimism_node::args::{ProofsHistoryStorageArgs, ProofsStorageVersion};
+use reth_optimism_node::args::ProofsHistoryStorageArgs;
 use reth_optimism_trie::{
     InitializationJob, OpProofsProviderRO, OpProofsStorageError, OpProofsStore,
-    RethTrieStorageLayout,
-    db::{MdbxProofsStorage, MdbxProofsStorageV2},
+    RethTrieStorageLayout, db::MdbxProofsStorage,
 };
 use reth_provider::{BlockNumReader, DBProvider, DatabaseProviderFactory, StorageSettingsCache};
 use std::sync::Arc;
@@ -52,22 +51,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec>> InitCommand<C> {
         // During initialization we write billions of entries; the metrics layer's
         // `AtomicBucket::push` (used by `Histogram::record_many`) is append-only and
         // would accumulate ~19 bytes per observation, causing OOM on large chains.
-        match self.history.storage_version {
-            ProofsStorageVersion::V1 => {
-                let storage: Arc<MdbxProofsStorage> = Arc::new(
-                    MdbxProofsStorage::new(&storage_path)
-                        .map_err(|e| eyre!("Failed to create MdbxProofsStorage: {e}"))?,
-                );
-                Self::run_init(&provider_factory, storage)?;
-            }
-            ProofsStorageVersion::V2 => {
-                let storage: Arc<MdbxProofsStorageV2> = Arc::new(
-                    MdbxProofsStorageV2::new(&storage_path)
-                        .map_err(|e| eyre!("Failed to create MdbxProofsStorageV2: {e}"))?,
-                );
-                Self::run_init(&provider_factory, storage.clone())?;
-            }
-        }
+        let storage = Arc::new(
+            MdbxProofsStorage::new(&storage_path)
+                .map_err(|e| eyre!("Failed to create MdbxProofsStorage: {e}"))?,
+        );
+        Self::run_init(&provider_factory, storage)?;
 
         Ok(())
     }

@@ -15,6 +15,7 @@ workspace = true
 world-chain-evm.workspace = true
 world-chain-primitives.workspace = true
 world-chain-validator.workspace = true
+world-chain-chainspec.workspace = true
 
 alloy-rpc-types-debug.workspace = true
 
@@ -39,7 +40,6 @@ reth-optimism-rpc.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
-reth-optimism-evm.workspace = true
 reth-revm.workspace = true
 
 # alloy
@@ -48,6 +48,7 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types.workspace = true
+alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 op-alloy-rpc-types.workspace = true
@@ -56,6 +57,7 @@ op-alloy-rpc-types-engine.workspace = true
 
 # revm
 revm.workspace = true
+revm-inspectors.workspace = true
 revm-primitives.workspace = true
 op-revm.workspace = true
 
@@ -74,6 +76,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 eyre.workspace = true
 lru.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
+metrics.workspace = true
 
 [dev-dependencies]
 alloy = { workspace = true, features = ["provider-http"] }

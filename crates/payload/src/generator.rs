@@ -148,7 +148,7 @@ where
 
     fn new_payload_job(
         &self,
-        input: BuildNewPayload<Builder::Attributes>,
+        mut input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
         let id = force_op_payload_id_v3(id);
@@ -292,8 +292,9 @@ where
             p2p_handler: self.p2p_handler.clone(),
             flashblocks_state: self.flashblocks_state.clone(),
             block_index: index,
-            execution_cache: input.cache,
-            state_root_handle: input.state_root_handle,
+            execution_cache: input.resources.take_execution_cache(),
+            state_root_handle: input.resources.take_state_root_handle(),
+            leases: input.resources.take_leases(),
         };
 
         // start the first job right away

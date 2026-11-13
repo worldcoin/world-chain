@@ -46,7 +46,7 @@ use reth_trie::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput, updates::TrieUpdates,
 };
-use reth_trie_common::ExecutionWitnessMode;
+use reth_trie_common::{DecodedMultiProofV2, ExecutionWitnessMode, MultiProofTargetsV2};
 use revm_primitives::TxKind;
 use std::{
     fmt::Debug,
@@ -129,6 +129,7 @@ pub fn test_config_with_peers_and_gossip(
             tx_peers,
             disable_bootnodes: true,
             simulate_enabled: false,
+            preconfirmed_logs: false,
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),
@@ -612,6 +613,14 @@ impl StateProofProvider for WorldChainNoopProvider {
         Ok(MultiProof::default())
     }
 
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: MultiProofTargetsV2,
+    ) -> ProviderResult<DecodedMultiProofV2> {
+        Ok(DecodedMultiProofV2::default())
+    }
+
     fn witness(
         &self,
         _input: TrieInput,
@@ -633,8 +642,11 @@ impl StateProvider for WorldChainNoopProvider {
 }
 
 impl HashedPostStateProvider for WorldChainNoopProvider {
-    fn hashed_post_state(&self, _bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
-        HashedPostState::default()
+    fn hashed_post_state(
+        &self,
+        _bundle_state: &reth_revm::db::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
     }
 }
 

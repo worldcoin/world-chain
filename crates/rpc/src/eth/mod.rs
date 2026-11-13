@@ -27,7 +27,7 @@ use reth_rpc_eth_api::{
         LoadPendingBlock, LoadState, SpawnBlocking, Trace, pending_block::BuildPendingEnv,
     },
 };
-use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_rpc_eth_types::{EthApiSettings, EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::ProviderHeader;
 use reth_tasks::{
     Runtime,
@@ -78,6 +78,10 @@ where
 
     fn converter(&self) -> &Self::RpcConvert {
         self.inner.converter()
+    }
+
+    fn eth_api_settings(&self) -> &EthApiSettings {
+        self.inner.eth_api_settings()
     }
 }
 

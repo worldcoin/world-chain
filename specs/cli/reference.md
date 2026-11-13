@@ -95,13 +95,9 @@ Rollup:
           Path to the proofs-history storage DB. Defaults to `<reth-data-dir>/historical-proofs` (chain-namespaced via reth's `--datadir`)
 
       --proofs-history.storage-version <PROOFS_HISTORY_STORAGE_VERSION>
-          Storage schema version. Must match the version used when starting the node
-
-          Possible values:
-          - v1: V1 storage schema (original single-table-per-domain layout). Default
-          - v2: V2 storage schema with changeset and history-bitmap tables, enabling history-aware reads at any block number within the proof window
+          Deprecated: v2 is the only storage format, so `v2` is a no-op and any other value is rejected.
           
-          [default: v1]
+          Kept so that deployments which still pass `--proofs-history.storage-version=v2` keep working.
 
       --proofs-history.window <PROOFS_HISTORY_WINDOW>
           The window to span blocks for proofs history. Value is the number of blocks. Default is 1 month of blocks based on 2 seconds block time (`30 * 24 * 60 * 60 / 2 = 1_296_000`)
@@ -271,5 +267,10 @@ Flashblocks:
 
       --worldchain.disable-bootnodes
           Disable the default World Chain flashblocks sentries
+
+      --rpc.preconfirmed-logs
+          Enable the bounded, resumable preconfirmed log RPC feed on eth HTTP and WebSocket transports
+          
+          [env: WORLD_CHAIN_PRECONFIRMED_LOGS=]
 
 ```

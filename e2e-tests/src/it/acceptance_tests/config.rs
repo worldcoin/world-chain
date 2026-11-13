@@ -181,7 +181,9 @@ fn cloudflare_access_from_env() -> eyre::Result<Option<CloudflareAccess>> {
             client_secret,
         })),
         (None, None) => Ok(None),
-        _ => bail!("CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET must be set together"),
+        _ => {
+            bail!("CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET must be set together");
+        }
     }
 }
 
@@ -335,9 +337,11 @@ fn bundler_cloudflare_access_from_env(
             client_secret,
         })),
         (None, None) => Ok(chain_cloudflare_access.cloned()),
-        _ => bail!(
-            "ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_ID and ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_SECRET must be set together"
-        ),
+        _ => {
+            bail!(
+                "ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_ID and ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_SECRET must be set together"
+            );
+        }
     }
 }
 
@@ -365,9 +369,11 @@ fn user_operation_profile_from_env() -> eyre::Result<Option<UserOperationProfile
         .map(|value| match value.as_str() {
             "heavy" => Ok(UserOperationProfile::Heavy),
             "smoke" => Ok(UserOperationProfile::Smoke),
-            _ => bail!(
-                "unsupported ACCEPTANCE_4337_PROFILE {value:?}; expected one of: heavy, smoke"
-            ),
+            _ => {
+                bail!(
+                    "unsupported ACCEPTANCE_4337_PROFILE {value:?}; expected one of: heavy, smoke"
+                );
+            }
         })
         .transpose()
 }
@@ -385,7 +391,7 @@ fn parse_optional_address(
         return Ok(world_chain_devnet_default);
     }
 
-    bail!("{name} is required when ACCEPTANCE_BUNDLER_RPC_URL is set outside chain 69420")
+    bail!("{name} is required when ACCEPTANCE_BUNDLER_RPC_URL is set outside chain 69420");
 }
 
 fn optional_env(name: &str) -> Option<String> {

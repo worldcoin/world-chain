@@ -28,6 +28,7 @@ reth-optimism-primitives.workspace = true
 reth-optimism-evm.workspace = true
 
 # alloy
+alloy-eips.workspace = true
 alloy-consensus.workspace = true
 alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
@@ -54,7 +55,7 @@ metrics.workspace = true
 metrics-derive.workspace = true
 
 [dev-dependencies]
-alloy-eips.workspace = true
+op-revm.workspace = true
 world-chain-test-utils.workspace = true
 world-chain-p2p = { workspace = true, features = ["test-utils"] }
 world-chain-node.workspace = true

@@ -592,7 +592,7 @@ fn deposit_tx_from_receipt(
     bail!(
         "EIP-7825 deposit bypass: no TransactionDeposited event found in L1 receipt {:?}",
         receipt.transaction_hash
-    )
+    );
 }
 
 fn deposit_tx_from_log(log: &Log) -> eyre::Result<Option<TxDeposit>> {
@@ -619,7 +619,9 @@ fn deposit_tx_from_log(log: &Log) -> eyre::Result<Option<TxDeposit>> {
     let is_creation = match opaque[72] {
         0 => false,
         1 => true,
-        value => bail!("EIP-7825 deposit bypass: invalid deposit creation flag {value}"),
+        value => {
+            bail!("EIP-7825 deposit bypass: invalid deposit creation flag {value}");
+        }
     };
     let input = Bytes::copy_from_slice(&opaque[73..]);
     let to = if is_creation {

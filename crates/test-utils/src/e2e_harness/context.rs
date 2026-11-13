@@ -144,6 +144,7 @@ where
 pub struct WorldRpcTypes;
 
 impl RpcTypes for WorldRpcTypes {
+    type Log = alloy_rpc_types_eth::Log;
     type Header = alloy_rpc_types_eth::Header<Header>;
     type Receipt = OpTransactionReceipt;
     type TransactionRequest = OpTransactionRequest;

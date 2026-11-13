@@ -1,0 +1,33 @@
+{
+  "defaultRisk": "important",
+  "riskRules": [
+    { "risk": "critical", "patterns": ["crates/builder/**", "crates/chainspec/**", "crates/evm/**", "crates/node/**", "crates/payload/**", "crates/primitives/**", "crates/validator/**", "proofs/protocol/**", "proofs/services/challenger/**", "proofs/services/defender/**"] },
+    { "risk": "low", "patterns": ["README.md", "LICENSE*", "assets/**", "book/**", "docs/**", "**/README.md", "**/benches/**", "**/tests/**", "**/test_fixtures/**", "pkg/contracts/test/**", "pkg/contracts/etc/**", "crates/pbh/**", "crates/devnet/**", "crates/test-utils/**", "e2e-tests/**", "proofs/debug/**", "proofs/it/**", "scripts/stress/**"] },
+    { "risk": "important", "patterns": ["docs/proof/**", "docs/review-policy.md", "proofs/measurements.json"] },
+    { "risk": "critical", "patterns": ["pkg/contracts/src/dispute/**", "proofs/measured/**", "proofs/backends/sp1/elfs/**", "proofs/succinct/programs/**", ".github/workflows/**", ".github/actions/**", ".github/review-policy.json", ".github/actionlint.yaml", ".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS", "AGENTS.md", "**/AGENTS.md", ".cursor/**", ".agents/**", "scripts/review-policy/**", "scripts/build-eif.sh", "scripts/safe-operation.py", "pkg/contracts/scripts/**", "justfiles/proof.just", "flake.nix", "flake.lock", "rust-toolchain.toml", "Cargo.toml", "Dockerfile.prover"] }
+  ],
+  "ci": [
+    {
+      "id": "rust", "workflow": "rust-ci.yml", "jobs": ["cargo-tests", "clippy", "docs"],
+      "patterns": ["**/*.rs", "**/Cargo.toml", "**/Cargo.lock", "rust-toolchain.toml", ".cargo/**", ".config/nextest.toml", "clippy.toml", "rustfmt.toml", "Justfile", "justfiles/rust.just", "justfiles/contracts.just", "justfiles/proof.just", "pkg/contracts/src/**", "crates/**/res/**", ".github/workflows/rust-ci.yml"]
+    },
+    {
+      "id": "contracts", "workflow": "foundry.yml", "jobs": ["Foundry project"],
+      "patterns": ["pkg/contracts/**", ".gitmodules", "Justfile", "justfiles/contracts.just", ".github/workflows/foundry.yml"]
+    },
+    {
+      "id": "sp1", "workflow": "verify-measurements.yml", "jobs": ["detect measurement-affecting changes", "verify vkeys match source"],
+      "patterns": ["proofs/measured/sp1-programs/**", "proofs/measured/core/**", "proofs/measured/kona-client/**", "proofs/backends/sp1/elfs/**", "proofs/protocol/**", "proofs/measurements.json", "Cargo.toml", "Cargo.lock", "Justfile", "justfiles/proof.just", "rust-toolchain.toml", ".cargo/**", ".github/workflows/verify-measurements.yml"]
+    },
+    {
+      "id": "nitro", "workflow": "verify-measurements.yml", "jobs": ["detect measurement-affecting changes", "verify PCRs match source"],
+      "patterns": ["proofs/measured/nitro-enclave/**", "proofs/measured/core/**", "proofs/measured/kona-client/**", "proofs/measurements.json", "flake.nix", "flake.lock", "rust-toolchain.toml", "scripts/build-eif.sh", "Justfile", "justfiles/proof.just", ".github/actions/install-nix/**", ".github/workflows/verify-measurements.yml"]
+    },
+    {
+      "id": "supply-chain", "workflow": "supply-chain.yml", "jobs": ["audit measured enclave dependencies"],
+      "patterns": ["proofs/measured/**", "justfiles/proof.just", ".github/workflows/supply-chain.yml"]
+    },
+    { "id": "policy", "workflow": "review-policy-tests.yml", "jobs": ["review-policy-tests"], "patterns": ["**"] },
+    { "id": "large-files", "workflow": "large-files.yml", "jobs": ["check-large-files"], "patterns": ["**"] }
+  ]
+}

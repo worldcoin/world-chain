@@ -54,7 +54,6 @@ pub type WorldChainEventsStream<T> = Pin<Box<dyn Stream<Item = WorldChainEvent<T
 /// Constructs a [`WorldChainEventsStream`] by merging a flashblock stream with
 /// canonical chain notifications, reducing through [`BufferedFlashblocks`], and
 /// applying `hook` to each yielded event.
-#[must_use]
 pub fn world_chain_events_stream<T, F>(
     flashblocks: Pin<Box<dyn Stream<Item = ChainEvent> + Send>>,
     canon: Pin<Box<dyn Stream<Item = ChainEvent> + Send>>,

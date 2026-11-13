@@ -2,11 +2,13 @@
 #![allow(clippy::type_complexity)]
 
 pub mod admin;
+pub mod bounded_trace;
 pub use admin::{AdminApiExtServer, WorldChainAdminApiExt};
 
 pub mod engine;
 pub mod eth;
 pub mod op;
+pub mod preconfirmed;
 
 pub mod error;
 pub use error::SequencerClientError;

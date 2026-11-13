@@ -3,12 +3,48 @@ use crate::{
     ProofJobQueueError, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
     ProofResponse, ProofStatus, ProverService, ProverServiceConfig, RecordProofSessionRequest,
     RpcProverServiceClient, SubmitProofRequest, SucceededProofResponse, start_rpc_server,
-    types::{BackendSessionStatus, SessionType},
+    types::{BackendSessionStatus, ProofJobStatus, SessionType},
 };
 use alloy_primitives::{Address, B256, Bytes};
 use std::{sync::Arc, time::Duration};
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
+
+#[test]
+fn proof_states_parse_from_str() {
+    assert_eq!("sp1".parse::<ProofBackend>(), Ok(ProofBackend::Sp1));
+    assert_eq!("RUNNING".parse::<ProofStatus>(), Ok(ProofStatus::Running));
+    assert_eq!(
+        "CLAIMED".parse::<ProofJobStatus>(),
+        Ok(ProofJobStatus::Claimed)
+    );
+    assert_eq!("STARK".parse::<SessionType>(), Ok(SessionType::Stark));
+    assert_eq!(
+        "COMPLETED".parse::<BackendSessionStatus>(),
+        Ok(BackendSessionStatus::Completed)
+    );
+
+    assert_eq!(
+        "SP1".parse::<ProofBackend>(),
+        Err("unknown proof backend \"SP1\"".into())
+    );
+    assert_eq!(
+        "running".parse::<ProofStatus>(),
+        Err("Unknown proof status: running".into())
+    );
+    assert_eq!(
+        "claimed".parse::<ProofJobStatus>(),
+        Err("Unknown proof job status: claimed".into())
+    );
+    assert_eq!(
+        "stark".parse::<SessionType>(),
+        Err("Unknown session type: stark".into())
+    );
+    assert_eq!(
+        "completed".parse::<BackendSessionStatus>(),
+        Err("Unknown session status: completed".into())
+    );
+}
 
 fn test_config() -> ProverServiceConfig {
     ProverServiceConfig {

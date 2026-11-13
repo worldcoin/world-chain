@@ -602,15 +602,19 @@ impl<'a> UserOperationHarness<'a> {
         let send = self.send_sponsored_user_operation(user_op);
 
         match timeout(self.config.user_operation_reject_timeout, send).await {
-            Ok(Ok(hash)) => bail!("{label} was accepted by bundler as {hash:?}"),
+            Ok(Ok(hash)) => {
+                bail!("{label} was accepted by bundler as {hash:?}");
+            }
             Ok(Err(error)) => {
                 info!(%label, %error, "user operation rejected as expected");
                 Ok(())
             }
-            Err(_) => bail!(
-                "{label} did not reject within {:?}",
-                self.config.user_operation_reject_timeout
-            ),
+            Err(_) => {
+                bail!(
+                    "{label} did not reject within {:?}",
+                    self.config.user_operation_reject_timeout
+                );
+            }
         }
     }
 

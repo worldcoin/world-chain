@@ -1,0 +1,15 @@
+name: Review policy events
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # The privileged controller reads live API state, never this run's artifacts or code.
+      - run: 'true'

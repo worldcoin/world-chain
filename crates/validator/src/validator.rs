@@ -52,11 +52,7 @@ pub fn into_executed_payload(
             },
         )
     };
-    let trie_data = ComputedTrieData::new_with_changed_paths(
-        Arc::new(hashed_state),
-        Arc::new(trie_updates),
-        payload.changed_paths,
-    );
+    let trie_data = ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates));
     ExecutedBlock::new(payload.recovered_block, payload.execution_output, trie_data)
 }
 

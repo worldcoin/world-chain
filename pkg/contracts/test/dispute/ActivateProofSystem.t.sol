@@ -10,6 +10,10 @@ import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.so
 import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 
 contract ActivateProofSystemHarness is ActivateProofSystem {
+    function _safeMode() internal pure override returns (bool) {
+        return false;
+    }
+
     function validate(Config memory config, IMultiProofGame implementation) external view {
         _validate(config, implementation);
     }

@@ -3,7 +3,6 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sp1_sdk::{CpuProver, HashableKey, Prover, ProvingKey, env::EnvProver};
-use world_chain_proof_core::types::u32_to_u8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ElfHash {
@@ -56,6 +55,6 @@ pub async fn embedded_vkey_manifest() -> Result<EmbeddedVkeyManifest> {
                 sha256: aggregation_sha256,
             },
         },
-        range_vkey_commitment: B256::from(u32_to_u8(range_pk.verifying_key().hash_u32())),
+        range_vkey_commitment: B256::from(range_pk.verifying_key().hash_bytes()),
     })
 }
