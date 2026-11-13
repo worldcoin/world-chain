@@ -135,6 +135,45 @@ test('PR events dispatch the controller on trusted main without attaching its ca
   assert.equal(calls[0].request.timeout, 20000);
 });
 
+test('Rust CI runs forks and Dependabot without AWS or a compiler wrapper', async (t) => {
+  const workflow = fs.readFileSync('.github/workflows/rust-ci.yml', 'utf8');
+  const expression = workflow.match(/^  RUSTC_WRAPPER: \$\{\{ (.+) \}\}$/m)?.[1];
+  assert(expression, 'compiler wrapper selection must be defined once at workflow scope');
+  const cases = [
+    { name: 'fork PR', actor: 'contributor', event_name: 'pull_request', source: 'contributor/world-chain', wrapper: '' },
+    { name: 'internal PR', actor: 'owner', event_name: 'pull_request', source: 'worldcoin/world-chain', wrapper: 'sccache' },
+    { name: 'Dependabot PR rerun by a human', actor: 'dependabot[bot]', event_name: 'pull_request', source: 'worldcoin/world-chain', wrapper: '' },
+    ...['push', 'merge_group', 'workflow_dispatch'].map((event_name) => ({
+      name: event_name, actor: 'owner', event_name, wrapper: 'sccache',
+    })),
+  ];
+  for (const item of cases) await t.test(item.name, () => {
+    const github = { actor: item.actor, triggering_actor: 'owner', repository: 'worldcoin/world-chain',
+      event_name: item.event_name, event: item.source ? { pull_request: { head: { repo: { full_name: item.source } } } } : {} };
+    const wrapper = vm.runInNewContext(expression, { github });
+    assert.equal(wrapper, item.wrapper);
+    for (const id of ['cargo-tests', 'cargo-clippy', 'cargo-docs']) {
+      const job = workflow.split('  ' + id + ':\n')[1]?.split(/(?=^  [a-zA-Z0-9_-]+:\n)/m)[0];
+      assert(job, id);
+      assert(!job.includes('RUSTC_WRAPPER:'), 'job must not override the workflow compiler selection');
+      for (const name of ['Configure AWS credentials', 'Setup sccache']) {
+        const step = job.split('      - name: ' + name + '\n')[1]?.split('\n      - ')[0];
+        const condition = step?.match(/^        if: (.+)$/m)?.[1];
+        assert(condition, id + ': ' + name + ' must be conditional');
+        assert.equal(vm.runInNewContext(condition, { env: { RUSTC_WRAPPER: wrapper } }),
+          item.wrapper === 'sccache', id + ': ' + name);
+      }
+      const command = {
+        'cargo-tests': 'mold -run just test --profile ci --locked',
+        'cargo-clippy': 'clippy --workspace --all-targets --all-features --locked -- -D warnings',
+        'cargo-docs': 'mold -run cargo xtask docs',
+      }[id];
+      assert(job.includes(command), id + ': Rust check must still execute');
+    }
+  });
+  assert(!workflow.includes('pull_request_target:'), 'fork builds must retain the unprivileged PR trigger');
+});
+
 test('trusted controller publishes four successful checks on PR head, never on main', async () => {
   const result = await run();
   assert.deepEqual(result.failures, []);
@@ -509,6 +548,66 @@ test('event resolution ignores untrusted checks and locates PRs when webhook PR 
   const github = { request: async () => ({ data: [{ number: 1, state: 'open', base: { ref: 'main' }, head: { sha: head } },
     { number: 2, state: 'closed', base: { ref: 'main' }, head: { sha: head } }] }) };
   assert.deepEqual(await targets({ github, context: { ...context, eventName: 'workflow_run', payload: { action: 'completed', workflow_run: { head_sha: head } } } }), [1]);
+});
+
+test('fork event resolution falls back to current open main PR heads when associations omit them', async (t) => {
+  for (const eventName of ['workflow_run', 'check_run']) await t.test(eventName, async () => {
+    const calls = [];
+    const github = { request: async (route, args) => {
+      calls.push({ route, args });
+      if (route.endsWith('/commits/{commit_sha}/pulls')) return { data: [] };
+      assert.equal(route, 'GET /repos/{owner}/{repo}/pulls');
+      assert.equal(args.state, 'open');
+      assert.equal(args.base, 'main');
+      assert.equal(args.owner, repo.owner);
+      assert.equal(args.repo, repo.repo);
+      return { data: [
+        { number: 1187, state: 'open', base: { ref: 'main' }, head: { sha: head } },
+        { number: 2, state: 'closed', base: { ref: 'main' }, head: { sha: head } },
+        { number: 3, state: 'open', base: { ref: 'other' }, head: { sha: head } },
+        { number: 4, state: 'open', base: { ref: 'main' }, head: { sha: 'old-head' } },
+      ] };
+    } };
+    const payload = eventName === 'workflow_run'
+      ? { action: 'completed', workflow_run: { head_sha: head, pull_requests: [{ number: 999 }] } }
+      : { check_run: { head_sha: head, app: { slug: 'cursor' }, pull_requests: [{ number: 999 }] } };
+    assert.deepEqual(await targets({ github, context: { ...context, eventName, payload } }), [1187]);
+    assert.equal(calls.length, 2);
+    assert(calls.every((call) => call.args.request.timeout === 20000));
+  });
+});
+
+test('event fallback paginates open PRs and leaves duplicate heads for the existing identity check', async () => {
+  const calls = [];
+  const github = { request: async (route, args) => {
+    calls.push({ route, args });
+    if (route.includes('/commits/')) return { data: [
+      { number: 1, state: 'closed', base: { ref: 'main' }, head: { sha: head } },
+    ] };
+    return { data: args.page === 1
+      ? Array.from({ length: 100 }, (_, i) => ({ number: i + 10, state: 'open', base: { ref: 'main' }, head: { sha: 'other' } }))
+      : [1187, 1188].map((number) => ({ number, state: 'open', base: { ref: 'main' }, head: { sha: head } })) };
+  } };
+  assert.deepEqual(await targets({ github, context: { ...context, eventName: 'workflow_run',
+    payload: { action: 'completed', workflow_run: { head_sha: head } } } }), [1187, 1188]);
+  assert.deepEqual(calls.filter((call) => !call.route.includes('/commits/')).map((call) => call.args.page), [1, 2]);
+});
+
+test('a matching commit association avoids the fallback and API failures remain visible', async () => {
+  const payload = { action: 'completed', workflow_run: { head_sha: head } };
+  const eventContext = { ...context, eventName: 'workflow_run', payload };
+  const associated = { request: async (route) => {
+    assert(route.includes('/commits/'), 'matching association must avoid listing all PRs');
+    return { data: [{ number: 1, state: 'open', base: { ref: 'main' }, head: { sha: head } }] };
+  } };
+  assert.deepEqual(await targets({ github: associated, context: eventContext }), [1]);
+  for (const failure of ['association', 'fallback']) {
+    const github = { request: async (route) => {
+      if (failure === 'fallback' && route.includes('/commits/')) return { data: [] };
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    } };
+    await assert.rejects(() => targets({ github, context: eventContext }), /Forbidden/);
+  }
 });
 
 test('CI completion and rerun start wake the controller; initial CI start does not restart it', async () => {

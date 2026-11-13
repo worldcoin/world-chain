@@ -163,8 +163,11 @@ async function findTargets(github, context) {
   if (check && check.app?.slug !== 'cursor') return [];
   const sha = check?.head_sha || event.workflow_run?.head_sha;
   if (!sha) return [];
-  const pulls = await api.all('GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls', { commit_sha: sha });
-  return pulls.filter((pr) => pr.state === 'open' && pr.base.ref === 'main' && pr.head.sha === sha).map((pr) => pr.number);
+  const matchesHead = (pr) => pr.state === 'open' && pr.base.ref === 'main' && pr.head.sha === sha;
+  let pulls = await api.all('GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls', { commit_sha: sha });
+  // GitHub's commit association can omit open PRs from forks.
+  if (!pulls.some(matchesHead)) pulls = await api.all('GET /repos/{owner}/{repo}/pulls', { state: 'open', base: 'main' });
+  return pulls.filter(matchesHead).map((pr) => pr.number);
 }
 
 async function readCodeowners(api, ref) {
