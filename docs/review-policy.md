@@ -150,6 +150,12 @@ cannot pass. Non-applicable workflows are excluded explicitly, not accepted mere
 because a job was skipped. Measured changes also require the existing dependency
 audit; all PRs require policy tests and the large-file check.
 
+Rust CI skips AWS authentication and S3-backed compiler caching for fork PRs and
+Dependabot runs. These jobs compile directly with an empty `RUSTC_WRAPPER`;
+internal runs retain the existing S3 cache. The Rust check commands are unchanged.
+RPC-backed tests retain their existing behavior when `WORLDCHAIN_PROVIDER` is
+unavailable; a successful credential-free run does not establish RPC-backed coverage.
+
 ## Execution and recovery
 
 The privileged controller checks out only an immutable commit of `main`. It never
@@ -179,6 +185,11 @@ CI completion wakes the controller. Initial CI start events do not restart an
 evaluation already launched by the PR event; a rerun's start still wakes it so a
 previous successful CI result can be invalidated immediately. Review-event notifier
 completion, author commands and Cursor events retain their existing behavior.
+
+If GitHub's commit association lookup finds no matching PR, target discovery lists
+open PRs to `main` and matches their current head SHA exactly. This also refreshes
+fork approvals when the association endpoint omits them. The controller still
+rechecks each PR's identity and all review evidence before publishing gate results.
 
 An ordinary merge to `main` does not re-evaluate other open PRs. The push handler
 compares Git object identities for the three supported CODEOWNERS locations,
