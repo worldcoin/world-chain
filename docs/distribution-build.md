@@ -71,6 +71,67 @@ behavior against the World Chain baseline.
 
 ## Coordinated release builds
 
+### Binary payload assembly
+
+The binary assembler runs on a POSIX host with Python 3.9 or later and consumes
+prebuilt payloads exported by qualified build jobs. The producer must finish its
+export and keep that tree immutable while assembly runs. The assembler snapshots
+the files once and reuses those bytes for all three bundle
+variants and staged image inputs:
+
+```text
+payloads/
+  linux-amd64/
+    bin/             # exactly the 12 executables in the distribution plan
+    licenses/        # nonempty license/notice files; nested directories allowed
+    README.md        # qualified host/runtime-library and installation instructions
+  linux-arm64/
+    bin/
+    licenses/
+    README.md
+```
+
+Use nonempty regular files, without symlinks. Keep license path components to
+ASCII letters/digits plus `.`, `_`, `+` and `-`, starting with a letter/digit.
+Each component is limited to 128 characters, each license path to 240, and each
+platform to 10,000 files. Extra payload files and missing executables are errors.
+This export layout deliberately excludes source worktrees and credentials.
+
+```sh
+python3 .github/scripts/distribution-package.py \
+  --inputs /path/to/distribution-inputs.json \
+  --payload-root /path/to/payloads \
+  --output /path/to/new-binary-assembly \
+  --source-date-epoch "$WORLD_CHAIN_COMMIT_TIMESTAMP"
+```
+
+The output directory must not exist and must be outside the input tree. The
+assembler produces six `.tar.gz` bundles, `SHA256SUMS`, `binary-manifest.json`,
+and `payloads/linux-*/` snapshots for later image assembly. Executables remain at
+the archive root; README, licenses and recorded distribution inputs accompany
+them. Files use fixed owner/mode/timestamp metadata. With identical inputs,
+source-date epoch and packaging toolchain, archive bytes are reproducible; Python
+and zlib versions are recorded in the intermediate manifest.
+
+The intermediate manifest records hashes of the actual snapshot files and
+archives. The assembler checks ELF header/CPU compatibility, rejects special
+files and detects files changing during a read. These checks do not prove source
+provenance, complete license coverage, executable behavior or runtime ABI/library
+compatibility. The trusted producer and qualification jobs must establish those.
+The input source identities are recorded assertions, not inferred from binaries.
+
+On failure the command exits nonzero and retains private partial output with an
+`INCOMPLETE` marker. Do not upload or reuse that output as a completed assembly.
+Success requires exit zero, no marker, and the completed intermediate manifest.
+Existing output is never overwritten. Inspect/remove a failed output explicitly
+before retrying with that path.
+
+This is a binary assembly stage, not a complete GitHub release. Source/examples
+ZIPs, signed checksums, published image digests and the final external
+`release-manifest.json` are finalized by the subsequent release pipeline.
+
+### Image and release integration
+
 The final assembler must accept the validated distribution inputs, verify source
 identities, and export one built payload per platform. Reuse those files for the
 World Chain-only, OP-only and combined variants and corresponding binary bundles.
