@@ -375,6 +375,9 @@ impl Authorized {
         let sig_bytes = Bytes::decode(&mut rest)?;
         let actor_sig = Signature::try_from(sig_bytes.as_ref())
             .map_err(|_| alloy_rlp::Error::Custom("bad signature"))?;
+        if !rest.is_empty() {
+            return Err(alloy_rlp::Error::Custom("trailing authorized list data").into());
+        }
 
         // advance caller's cursor
         *buf = &buf[header.payload_length..];
@@ -474,6 +477,9 @@ impl Decodable for Authorized {
         let sig_bytes = Bytes::decode(&mut body)?;
         let builder_sig = Signature::try_from(sig_bytes.as_ref())
             .map_err(|_| alloy_rlp::Error::Custom("bad signature"))?;
+        if !body.is_empty() {
+            return Err(alloy_rlp::Error::Custom("trailing authorized list data"));
+        }
 
         // advance caller’s cursor
         *buf = &buf[header.payload_length..];
@@ -561,9 +567,13 @@ impl FlashblocksP2PMsg {
         let id = buf[0];
         let mut rest = &buf[1..];
         match id {
-            0x00 => Ok(FlashblocksP2PMsgParts::Authorized(Box::new(
-                Authorized::parse(&mut rest)?,
-            ))),
+            0x00 => {
+                let authorized = Authorized::parse(&mut rest)?;
+                if !rest.is_empty() {
+                    return Err(alloy_rlp::Error::Custom("trailing authorized frame data").into());
+                }
+                Ok(FlashblocksP2PMsgParts::Authorized(Box::new(authorized)))
+            }
             0x01 => Ok(FlashblocksP2PMsgParts::RequestFlashblocks),
             0x02 => Ok(FlashblocksP2PMsgParts::AcceptFlashblocks),
             0x03 => Ok(FlashblocksP2PMsgParts::RejectFlashblocks),

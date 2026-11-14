@@ -36,6 +36,9 @@ Starts N nodes via P2P, drives block production with `EngineDriver`, optionally 
 See [Preconfirmed log API](preconfirmed-logs.md) for the optional resumable HTTP
 and WebSocket log feed, its operating limits, and client recovery requirements.
 
+See [Flashblock signing evidence](flashblock-evidence.md) for optional signed
+envelope lookups and independent origin verification.
+
 ## Metrics
 
 Custom metrics are exposed via the standard reth metrics endpoint (`/metrics`). Key namespaces:

@@ -7,7 +7,7 @@ use eyre::eyre::eyre;
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::Sealed;
 use op_alloy_consensus::{OpTransaction, TxPostExec};
-use reth_chainspec::ChainSpecProvider;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{ConfigureEvm, EvmFactory, block::BlockExecutorFactory};
 use reth_node_api::{BuildNextEnv, FullNodeComponents, NodeAddOns, NodeTypes, PrimitivesTy};
 use reth_node_builder::rpc::{
@@ -49,6 +49,7 @@ use world_chain_rpc::{
     AdminApiExtServer, DebugWitnessOracle, DebugWitnessOracleApiServer, EthApiExtServer,
     SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer,
     WorldChainAdminApiExt, WorldChainEthApiExt,
+    evidence::{FlashblockEvidenceApiServer, FlashblockEvidenceRpc},
     op::{FlashblocksOpApi, OpApiExtServer},
     preconfirmed::{
         rpc::{
@@ -127,6 +128,7 @@ pub struct WorldChainAddOns<
     simulate_enabled: bool,
     /// Explicit opt-in for the preconfirmed log feed.
     preconfirmed_logs: bool,
+    flashblock_evidence: Option<world_chain_p2p::evidence::FlashblockEvidenceStore>,
     /// Validated Flashblocks source, present only on Flashblocks-enabled nodes.
     flashblocks_coordinator: Option<FlashblocksExecutionCoordinator>,
     /// Witness oracle plumbing: the shared cache and the receiver drained by the collector thread.
@@ -155,6 +157,7 @@ where
         min_suggested_priority_fee: u64,
         simulate_enabled: bool,
         preconfirmed_logs: bool,
+        flashblock_evidence: Option<world_chain_p2p::evidence::FlashblockEvidenceStore>,
         flashblocks_coordinator: Option<FlashblocksExecutionCoordinator>,
         witness: Option<(ExecutionWitnessHandle, Receiver<BlockExecutionWitness>)>,
     ) -> Self {
@@ -169,6 +172,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            flashblock_evidence,
             flashblocks_coordinator,
             witness,
             _tx: PhantomData,
@@ -198,6 +202,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            flashblock_evidence,
             flashblocks_coordinator,
             witness,
             ..
@@ -213,6 +218,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            flashblock_evidence,
             flashblocks_coordinator,
             witness,
         )
@@ -234,6 +240,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            flashblock_evidence,
             flashblocks_coordinator,
             witness,
             ..
@@ -249,6 +256,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            flashblock_evidence,
             flashblocks_coordinator,
             witness,
         )
@@ -270,6 +278,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            flashblock_evidence,
             flashblocks_coordinator,
             witness,
             ..
@@ -285,6 +294,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            flashblock_evidence,
             flashblocks_coordinator,
             witness,
         )
@@ -306,6 +316,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            flashblock_evidence,
             flashblocks_coordinator,
             witness,
             ..
@@ -321,6 +332,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            flashblock_evidence,
             flashblocks_coordinator,
             witness,
         )
@@ -396,6 +408,7 @@ where
             historical_rpc,
             simulate_enabled,
             preconfirmed_logs,
+            flashblock_evidence,
             flashblocks_coordinator,
             witness,
             ..
@@ -415,6 +428,9 @@ where
             DebugWitnessOracle::new(cache)
         });
 
+        let flashblock_evidence_api = flashblock_evidence.map(|store| {
+            FlashblockEvidenceRpc::new(store, ctx.node.provider().chain_spec().chain_id())
+        });
         let preconfirmed_logs_api = if preconfirmed_logs {
             let coordinator = flashblocks_coordinator
                 .ok_or_else(|| eyre!("--rpc.preconfirmed-logs requires --flashblocks.enabled"))?;
@@ -534,9 +550,30 @@ where
                     && modules.module_config().contains_http(&RethRpcModule::Eth);
                 let preconfirmed_on_ws = preconfirmed_logs_api.is_some()
                     && modules.module_config().contains_ws(&RethRpcModule::Eth);
-                modules.replace_http(FlashblocksOpApi::new(preconfirmed_on_http).into_rpc())?;
-                modules.replace_ws(FlashblocksOpApi::new(preconfirmed_on_ws).into_rpc())?;
+                let evidence_on_http = flashblock_evidence_api.is_some()
+                    && modules.module_config().contains_http(&RethRpcModule::Eth);
+                let evidence_on_ws = flashblock_evidence_api.is_some()
+                    && modules.module_config().contains_ws(&RethRpcModule::Eth);
+                modules.replace_http(
+                    FlashblocksOpApi::new(preconfirmed_on_http)
+                        .with_flashblock_evidence(evidence_on_http)
+                        .into_rpc(),
+                )?;
+                modules.replace_ws(
+                    FlashblocksOpApi::new(preconfirmed_on_ws)
+                        .with_flashblock_evidence(evidence_on_ws)
+                        .into_rpc(),
+                )?;
                 modules.replace_ipc(FlashblocksOpApi::default().into_rpc())?;
+
+                if let Some(api) = flashblock_evidence_api {
+                    if evidence_on_http {
+                        modules.merge_http(api.clone().into_rpc())?;
+                    }
+                    if evidence_on_ws {
+                        modules.merge_ws(api.into_rpc())?;
+                    }
+                }
 
                 if let Some(api) = preconfirmed_logs_api {
                     if preconfirmed_on_http {

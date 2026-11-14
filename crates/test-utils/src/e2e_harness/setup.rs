@@ -196,6 +196,8 @@ pub struct WorldChainTestBuilder {
     /// Enables the preconfirmed log API (off by default; requires Flashblocks).
     #[builder(default)]
     preconfirmed_logs: bool,
+    #[builder(default)]
+    flashblock_evidence: bool,
     block_uncompressed_size_limit: Option<u64>,
     #[builder(default = Arc::new(CHAIN_SPEC.clone()))]
     chain_spec: Arc<WorldChainSpec>,
@@ -254,6 +256,7 @@ impl WorldChainTestBuilder {
             self.ws_rpc,
             self.shared_rpc_port,
             self.preconfirmed_logs,
+            self.flashblock_evidence,
             self.block_uncompressed_size_limit,
             self.chain_spec,
         )
@@ -353,6 +356,7 @@ async fn setup_inner<T, G>(
     ws_rpc: bool,
     shared_rpc_port: bool,
     preconfirmed_logs: bool,
+    flashblock_evidence: bool,
     block_uncompressed_size_limit: Option<u64>,
     chain_spec: Arc<WorldChainSpec>,
 ) -> eyre::Result<(
@@ -452,6 +456,7 @@ where
         };
         let mut config = config;
         config.args.preconfirmed_logs = preconfirmed_logs;
+        config.args.flashblock_evidence = flashblock_evidence;
         config.args.builder.block_uncompressed_size_limit = block_uncompressed_size_limit;
         if ws_rpc && !shared_rpc_port {
             // Reth combines HTTP and WS when both configured socket addresses use port zero.

@@ -2653,6 +2653,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
             disable_bootnodes: true,
             simulate_enabled: false,
             preconfirmed_logs: false,
+            flashblock_evidence: false,
         };
 
         let wc_config = args.clone().into_config(&mut node_config)?;

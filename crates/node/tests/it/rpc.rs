@@ -362,6 +362,7 @@ async fn preconfirmed_registered_logs_stream_and_resume() -> eyre::Result<()> {
         .nodes(2)
         .flashblocks(true)
         .preconfirmed_logs(true)
+        .flashblock_evidence(true)
         .ws_rpc(true)
         .build()
         .setup::<WorldChainDefaultContext>()
@@ -501,6 +502,36 @@ async fn preconfirmed_registered_logs_stream_and_resume() -> eyre::Result<()> {
     })
     .await
     .wrap_err("timed out waiting for the follower's Registered log notification")??;
+    let view = &notification["result"]["view"];
+    let id = world_chain_primitives::evidence::FlashblockEvidenceId {
+        payload_id: serde_json::from_value(view["payloadId"].clone())?,
+        index: serde_json::from_value(view["flashblockIndex"].clone())?,
+        block_hash: serde_json::from_value(view["blockHash"].clone())?,
+    };
+    let local = nodes[0]
+        .node
+        .rpc_client()
+        .ok_or_else(|| eyre!("builder RPC unavailable"))?;
+    for evidence in [
+        http.request::<world_chain_primitives::evidence::FlashblockEvidence, _>(
+            "worldchain_getFlashblockEvidence",
+            rpc_params![id],
+        )
+        .await?,
+        ws.request::<world_chain_primitives::evidence::FlashblockEvidence, _>(
+            "worldchain_getFlashblockEvidence",
+            rpc_params![id],
+        )
+        .await?,
+        local
+            .request::<world_chain_primitives::evidence::FlashblockEvidence, _>(
+                "worldchain_getFlashblockEvidence",
+                rpc_params![id],
+            )
+            .await?,
+    ] {
+        evidence.verify(chain_spec.chain.id(), builder.authorizer_vk, id)?;
+    }
     let streamed_logs = response_logs(&notification["result"]);
     assert_eq!(streamed_logs.len(), 2);
     assert_ne!(streamed_logs[0]["eventId"], streamed_logs[1]["eventId"]);

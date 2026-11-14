@@ -11,6 +11,7 @@ pub mod op;
 pub mod preconfirmed;
 
 pub mod error;
+pub mod evidence;
 pub use error::SequencerClientError;
 
 pub mod sequencer;
