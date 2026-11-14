@@ -1,0 +1,25 @@
+[Unit]
+Description=World Chain execution client
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+User=worldchain
+Group=worldchain
+EnvironmentFile=/etc/world-chain/node.env
+ExecStart=/usr/local/bin/world-chain $WORLD_CHAIN_ARGS
+StateDirectory=world-chain/execution
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=180
+LimitNOFILE=1048576
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
