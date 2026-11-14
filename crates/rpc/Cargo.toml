@@ -16,6 +16,7 @@ world-chain-evm.workspace = true
 world-chain-primitives.workspace = true
 world-chain-validator.workspace = true
 world-chain-chainspec.workspace = true
+world-chain-p2p.workspace = true
 
 alloy-rpc-types-debug.workspace = true
 

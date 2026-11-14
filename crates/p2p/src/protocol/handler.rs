@@ -643,6 +643,8 @@ impl FlashblocksP2PState {
 /// infrastructure needed for message verification, signing, and broadcasting.
 #[derive(Clone, Debug)]
 pub struct FlashblocksP2PCtx {
+    /// Opt-in capture of original signed envelopes for public verification.
+    pub evidence: Option<crate::evidence::FlashblockEvidenceStore>,
     /// Authorizer's verifying key used to verify authorization signatures from rollup-boost.
     pub authorizer_vk: VerifyingKey,
     /// Flashblocks configuration including signing keys and fanout args.
@@ -695,6 +697,7 @@ impl FlashblocksHandle {
         let metrics = FlashblocksP2PMetrics::default();
         let recorder = recorder_config.map(FlashblocksRecorder::spawn);
         let ctx = FlashblocksP2PCtx {
+            evidence: None,
             authorizer_vk,
             fanout_args,
             metrics,
@@ -982,6 +985,12 @@ impl<N> FlashblocksP2PProtocol<N> {
 }
 
 impl FlashblocksHandle {
+    /// Configure capture before handing clones to network and execution consumers.
+    pub fn with_evidence_store(mut self, store: crate::evidence::FlashblockEvidenceStore) -> Self {
+        self.ctx.evidence = Some(store);
+        self
+    }
+
     /// Retrieves the next flashblock from the protocol state based on the provided cursor.
     ///
     /// Will return the flashblock at the cursor if it exists.
@@ -1311,6 +1320,15 @@ impl FlashblocksP2PCtx {
         state: &mut FlashblocksP2PState,
         authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
     ) {
+        self.publish_frame(state, authorized_payload, None);
+    }
+
+    pub(crate) fn publish_frame(
+        &self,
+        state: &mut FlashblocksP2PState,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
+        original_wire: Option<BytesMut>,
+    ) {
         let payload = authorized_payload.msg();
         let authorization = authorized_payload.authorized.authorization;
 
@@ -1359,6 +1377,14 @@ impl FlashblocksP2PCtx {
         // If we've already seen this index, skip it
         // Otherwise, add it to the list
         if state.flashblocks[flashblock_index].is_none() {
+            let bytes = original_wire.unwrap_or_else(|| {
+                FlashblocksP2PMsg::Authorized(authorized_payload.authorized.clone()).encode()
+            });
+            if bytes.len() > MAX_FRAME {
+                tracing::error!(target: "flashblocks::p2p", size = bytes.len(), max_size = MAX_FRAME,
+                    "FlashblocksP2PMsg too large");
+                return;
+            }
             // We haven't seen this index yet
             // Add the flashblock to our cache
 
@@ -1370,18 +1396,12 @@ impl FlashblocksP2PCtx {
                 "queueing flashblock",
             );
 
-            let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload.authorized.clone());
-            let bytes = p2p_msg.encode();
             let len = bytes.len();
-
-            if len > MAX_FRAME {
-                tracing::error!(
-                    target: "flashblocks::p2p",
-                    size = bytes.len(),
-                    max_size = MAX_FRAME,
-                    "FlashblocksP2PMsg too large",
+            if let Some(store) = &self.evidence {
+                store.capture(
+                    payload.into(),
+                    alloy_primitives::Bytes::copy_from_slice(&bytes),
                 );
-                return;
             }
             if len > MAX_FRAME / 2 {
                 tracing::warn!(
@@ -1408,6 +1428,9 @@ impl FlashblocksP2PCtx {
             while let Some(Some(flashblock_event)) =
                 state.flashblocks.get(state.flashblock_index).cloned()
             {
+                if let Some(store) = &self.evidence {
+                    store.mark_ordered((&flashblock_event).into());
+                }
                 if let Some(recorder) = &self.recorder {
                     // Record from the ordered stream so the recorder database mirrors what
                     // downstream flashblocks consumers observe.
@@ -1628,6 +1651,7 @@ mod tests {
         let authorizer = SigningKey::from_bytes(&[7; 32]);
 
         FlashblocksP2PCtx {
+            evidence: None,
             authorizer_vk: authorizer.verifying_key(),
             fanout_args,
             metrics: FlashblocksP2PMetrics::default(),
@@ -1817,6 +1841,45 @@ mod tests {
         assert_eq!(recv_direct(&mut send_rx), expected);
         assert!(source_rx.try_recv().is_err());
         assert!(non_send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn received_evidence_preserves_original_signed_metadata_and_forwarding() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../primitives/testdata/flashblock-evidence-v1.json"
+        ))
+        .expect("public verification vector");
+        let evidence: world_chain_primitives::evidence::FlashblockEvidence =
+            serde_json::from_value(fixture["evidence"].clone()).expect("evidence");
+        let mut ctx = test_ctx(test_fanout_args());
+        let store = crate::evidence::FlashblockEvidenceStore::default();
+        ctx.evidence = Some(store.clone());
+        let mut frame = &evidence.wire[1..];
+        let parts = Authorized::parse(&mut frame).expect("wire frame");
+        parts
+            .verify(ctx.authorizer_vk)
+            .expect("original signatures");
+        let authorized = parts.into_authorized().expect("signed body");
+        assert!(
+            authorized.verify(ctx.authorizer_vk).is_err(),
+            "normalizing the metadata would corrupt this signature"
+        );
+        let peer = PeerId::random();
+        let (mut connection, mut rx) = test_peer_state_with_channel(false);
+        connection.send_enabled = true;
+        let mut state = FlashblocksP2PState::default();
+        state.peers.insert(peer, connection);
+        ctx.publish_frame(
+            &mut state,
+            authorized.into_unchecked(),
+            Some(BytesMut::from(evidence.wire.as_ref())),
+        );
+        let retained = store.get(evidence.id).expect("ordered capture");
+        assert_eq!(retained, evidence.wire);
+        assert_eq!(
+            rx.try_recv().expect("forwarded frame").as_ref(),
+            retained.as_ref()
+        );
     }
 
     #[test]

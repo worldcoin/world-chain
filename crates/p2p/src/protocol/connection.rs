@@ -234,10 +234,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
 
                     match &authorized.msg {
                         AuthorizedMsg::FlashblocksPayloadV1(_) => {
-                            this.handle_flashblocks_payload_v1(
-                                authorized.into_unchecked(),
-                                buf.len(),
-                            );
+                            this.handle_flashblocks_payload_v1(authorized.into_unchecked(), buf);
                         }
                         AuthorizedMsg::StartPublish(_) => {
                             this.handle_start_publish(authorized.into_unchecked());
@@ -339,7 +336,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     fn handle_flashblocks_payload_v1(
         &mut self,
         authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
-        buf_len: usize,
+        wire: BytesMut,
     ) {
         let authorization = &authorized_payload.authorized.authorization;
         let msg = authorized_payload.msg();
@@ -385,7 +382,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         };
 
         let peer_metrics = peer_state.metrics.clone();
-        peer_metrics.record_inbound_bandwidth_bytes(buf_len);
+        peer_metrics.record_inbound_bandwidth_bytes(wire.len());
 
         match &peer_state.receive_status {
             ReceiveStatus::Requesting => {
@@ -482,7 +479,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         self.protocol
             .handle
             .ctx
-            .publish(&mut p2p_state, authorized_payload);
+            .publish_frame(&mut p2p_state, authorized_payload, Some(wire));
     }
 
     /// Handles incoming `StartPublish` messages from a peer.

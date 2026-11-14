@@ -83,6 +83,15 @@ pub struct WorldChainArgs {
     )]
     pub preconfirmed_logs: bool,
 
+    /// Retain bounded signed Flashblock evidence and expose its read-only RPC lookup.
+    #[arg(
+        long = "rpc.flashblock-evidence",
+        env = "WORLD_CHAIN_FLASHBLOCK_EVIDENCE",
+        requires = "flashblocks.enabled",
+        default_value_t = false
+    )]
+    pub flashblock_evidence: bool,
+
     /// Whether the `simulate_unsignedUserOp` RPC endpoint should be served on
     /// HTTP. Derived from `--http.api`: enabled when the selection contains
     /// the `simulate` namespace.
@@ -103,6 +112,9 @@ impl WorldChainArgs {
         // Perform arg validation here for things clap can't do.
         if self.preconfirmed_logs && self.flashblocks.as_ref().is_none_or(|args| !args.enabled) {
             bail!("--rpc.preconfirmed-logs requires --flashblocks.enabled");
+        }
+        if self.flashblock_evidence && self.flashblocks.as_ref().is_none_or(|args| !args.enabled) {
+            bail!("--rpc.flashblock-evidence requires --flashblocks.enabled");
         }
         let spec = &config.chain;
 
@@ -726,6 +738,7 @@ mod tests {
             disable_bootnodes: true,
             simulate_enabled: false,
             preconfirmed_logs: false,
+            flashblock_evidence: false,
         };
 
         let spec = WorldChainSpec::from_genesis(Genesis::default());
@@ -755,6 +768,21 @@ mod tests {
         let spec = WorldChainSpec::from_genesis(Genesis::default());
         let mut config = NodeConfig::new(Arc::new(spec));
         assert!(args.into_config(&mut config).is_err());
+    }
+
+    #[test]
+    fn evidence_is_default_off_and_requires_flashblocks() {
+        assert!(!CommandParser::parse_from(["bin"]).world.flashblock_evidence);
+        assert!(CommandParser::try_parse_from(["bin", "--rpc.flashblock-evidence"]).is_err());
+        assert!(
+            CommandParser::parse_from([
+                "bin",
+                "--flashblocks.enabled",
+                "--rpc.flashblock-evidence"
+            ])
+            .world
+            .flashblock_evidence
+        );
     }
 
     #[test]

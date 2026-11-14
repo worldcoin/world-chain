@@ -40,6 +40,7 @@ rand.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
 enr = { version = "0.13.0", default-features = false, features = ["rust-secp256k1"] }

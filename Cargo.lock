@@ -19342,6 +19342,7 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
@@ -19983,6 +19984,7 @@ dependencies = [
  "tracing",
  "world-chain-chainspec",
  "world-chain-evm",
+ "world-chain-p2p",
  "world-chain-primitives",
  "world-chain-validator",
 ]

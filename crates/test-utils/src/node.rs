@@ -130,6 +130,7 @@ pub fn test_config_with_peers_and_gossip(
             disable_bootnodes: true,
             simulate_enabled: false,
             preconfirmed_logs: false,
+            flashblock_evidence: false,
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),

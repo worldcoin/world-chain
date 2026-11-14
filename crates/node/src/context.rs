@@ -535,6 +535,9 @@ where
             self.config.args.preconfirmed_logs,
             self.components_context
                 .as_ref()
+                .and_then(|ctx| ctx.flashblocks_handle.ctx.evidence.clone()),
+            self.components_context
+                .as_ref()
                 .map(|ctx| ctx.flashblocks_state.clone()),
             self.witness
                 .as_ref()
@@ -606,12 +609,15 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             authorizer_vk.as_bytes().encode_hex::<String>()
         );
 
-        let flashblocks_handle = FlashblocksHandle::with_fanout_args_and_recorder(
+        let mut flashblocks_handle = FlashblocksHandle::with_fanout_args_and_recorder(
             authorizer_vk,
             flashblocks.builder_sk.clone(),
             flashblocks.fanout.clone(),
             recorder_config,
         );
+        if value.args.flashblock_evidence {
+            flashblocks_handle = flashblocks_handle.with_evidence_store(Default::default());
+        }
 
         let (pending_block, _) = tokio::sync::watch::channel(None);
 

@@ -273,4 +273,9 @@ Flashblocks:
           
           [env: WORLD_CHAIN_PRECONFIRMED_LOGS=]
 
+      --rpc.flashblock-evidence
+          Retain bounded signed Flashblock evidence and expose its read-only RPC lookup
+          
+          [env: WORLD_CHAIN_FLASHBLOCK_EVIDENCE=]
+
 ```

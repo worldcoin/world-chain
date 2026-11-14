@@ -2,6 +2,7 @@
 
 pub mod access_list;
 pub mod error;
+pub mod evidence;
 pub mod flashblocks;
 pub mod p2p;
 pub mod payload_id;
