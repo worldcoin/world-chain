@@ -10,7 +10,7 @@ Run the commands from `examples/distribution/`. The examples ZIP retains the
 repository-relative `examples/` and `docs/` layout so the included guide links work.
 
 They target Linux hosts with RPC/follower configurations for Sepolia
-(`node.env.example`) and mainnet (`node.mainnet.env.example`). The same
+(`node.sepolia.env.example`) and mainnet (`node.mainnet.env.example`). The same
 configuration paths are used with Compose and systemd. Choose one network per
 deployment directory/host setup and use its matching L1 endpoints; do not reuse
 one database for different networks or concurrent processes.
@@ -27,13 +27,13 @@ deployment. RPC and Engine bind to loopback; P2P uses the clients' P2P ports. Do
 not run Compose and systemd against the same ports or data directories together.
 
 ```sh
-cp -n node.env.example node.env
+cp -n node.sepolia.env.example node.env
 chmod 600 node.env
 install -d -m 0700 data/execution data/op-node
 (umask 077; set -C; openssl rand -hex 32 > jwt.hex)
 ```
 
-For mainnet, copy `node.mainnet.env.example` instead of `node.env.example`.
+For mainnet, copy `node.mainnet.env.example` instead of `node.sepolia.env.example`.
 
 Edit `node.env`: set qualified image digests, your data-directory UID/GID, L1
 execution and beacon endpoints, and review the chain/flags. The generated JWT is

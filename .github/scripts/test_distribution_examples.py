@@ -21,7 +21,7 @@ class DeploymentExamplesTest(unittest.TestCase):
             OP_NODE_L1_BEACON="https://beacon.example.invalid",
         )
         for mode, config in (
-            ("combined", "node.env.example"), ("individual", "node.env.example"),
+            ("combined", "node.sepolia.env.example"), ("individual", "node.sepolia.env.example"),
             ("combined", "node.mainnet.env.example"), ("individual", "node.mainnet.env.example"),
         ):
             with self.subTest(mode=mode, config=config):

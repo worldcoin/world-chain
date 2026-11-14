@@ -29,7 +29,7 @@ All executables are in `/usr/local/bin`.
     cp -n node.mainnet.env.example node.env
     ```
 
-    For Sepolia, use `node.env.example` instead.
+    For Sepolia, use `node.sepolia.env.example` instead.
 
 3. **Edit `node.env`.** Set `COMBINED_IMAGE` to the combined image digest from the
    [release manifest]({{MANIFEST_URL}}), supply the L1 execution and beacon RPC
