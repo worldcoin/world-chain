@@ -14,6 +14,8 @@ They target Linux hosts with RPC/follower configurations for Sepolia
 configuration paths are used with Compose and systemd. Choose one network per
 deployment directory/host setup and use its matching L1 endpoints; do not reuse
 one database for different networks or concurrent processes.
+The mainnet selectors differ: execution uses `--chain worldchain`, while op-node
+uses `--network=worldchain-mainnet`. Both use `worldchain-sepolia` on Sepolia.
 Set the supported sequencer forwarding URL in the execution client's
 `--rollup.sequencer-http` option if the RPC should submit transactions.
 

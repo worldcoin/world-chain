@@ -38,8 +38,9 @@ class DeploymentExamplesTest(unittest.TestCase):
                 args = execution["command"]
                 self.assertEqual(args[0], "node")
                 chain = "worldchain" if "mainnet" in config else "worldchain-sepolia"
+                network = "worldchain-mainnet" if "mainnet" in config else "worldchain-sepolia"
                 self.assertEqual(args[args.index("--chain") + 1], chain)
-                self.assertIn("--network=" + chain, rollup["command"])
+                self.assertIn("--network=" + network, rollup["command"])
                 self.assertEqual(args[args.index("--authrpc.addr") + 1], "127.0.0.1")
                 self.assertEqual(args[args.index("--http.addr") + 1], "127.0.0.1")
                 self.assertNotIn("--builder.enabled", args)
