@@ -25,8 +25,8 @@ MAX_INPUT_BYTES = 64 * 1024
 OP_BINARIES = (*COMPONENTS, "forge", "cast")
 VARIANTS = {
     "world-chain": ("", "world-chain", ("world-chain", "cast")),
-    "op": ("-op", "op-node", OP_BINARIES),
-    "combined": ("-combined", "world-chain", ("world-chain", *OP_BINARIES)),
+    "op": ("op-", "op-node", OP_BINARIES),
+    "combined": ("combined-", "world-chain", ("world-chain", *OP_BINARIES)),
 }
 
 
@@ -73,8 +73,8 @@ def release_plan(inputs):
     version = inputs["bundle_version"]
     if not matches(version, BUNDLE_VERSION):
         raise ValueError("bundle_version must be a canonical World Chain release version starting with vX.Y.Z")
-    if any(len(version + suffix) > 128 for suffix, _, _ in VARIANTS.values()):
-        raise ValueError("bundle_version plus image variant suffix must fit a 128-byte image tag")
+    if any(len(prefix + version) > 128 for prefix, _, _ in VARIANTS.values()):
+        raise ValueError("image variant prefix plus bundle_version must fit a 128-byte image tag")
     sources = inputs["sources"]
     object_fields(sources, ("world_chain", "optimism"), "sources")
     for repository, value in sources.items():
@@ -103,11 +103,11 @@ def release_plan(inputs):
         "image_binary_directory": "/usr/local/bin",
         "images": {
             name: {
-                "reference": f"ghcr.io/worldcoin/world-chain:{version}{suffix}",
+                "reference": f"ghcr.io/worldcoin/world-chain:{prefix}{version}",
                 "entrypoint": f"/usr/local/bin/{entrypoint}",
                 "binaries": list(binaries),
             }
-            for name, (suffix, entrypoint, binaries) in VARIANTS.items()
+            for name, (prefix, entrypoint, binaries) in VARIANTS.items()
         },
         "assets": {
             "binaries": {

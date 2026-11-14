@@ -67,6 +67,17 @@ class DistributionInputsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             distribution.release_plan(value)
 
+    def test_variant_tags_do_not_collide_with_prereleases(self):
+        references = []
+        for version in ("v2.8.3", "v2.8.3-op", "v2.8.3-combined", "v2.8.3-rc.1"):
+            value = inputs()
+            value["bundle_version"] = version
+            references.extend(image["reference"] for image in distribution.release_plan(value)["images"].values())
+        self.assertEqual(len(references), len(set(references)))
+        plan = distribution.release_plan(inputs())
+        self.assertEqual(plan["images"]["op"]["reference"], "ghcr.io/worldcoin/world-chain:op-v2.8.3")
+        self.assertEqual(plan["images"]["combined"]["reference"], "ghcr.io/worldcoin/world-chain:combined-v2.8.3")
+
     def test_reject_invalid_contract(self):
         cases = [
             ("schema_version", True), ("schema_version", 2),

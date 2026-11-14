@@ -11,14 +11,16 @@ image in multiple containers; separate World Chain and OP images remain availabl
 
 | Variant | Proposed version tag | Default executable |
 | --- | --- | --- |
-| Combined (standard) | `ghcr.io/worldcoin/world-chain:vX.Y.Z-combined` | `world-chain` |
+| Combined (standard) | `ghcr.io/worldcoin/world-chain:combined-vX.Y.Z` | `world-chain` |
 | World Chain (existing image) | `ghcr.io/worldcoin/world-chain:vX.Y.Z` | `world-chain` |
-| OP binaries from the maintained fork | `ghcr.io/worldcoin/world-chain:vX.Y.Z-op` | `op-node` |
+| OP binaries from the maintained fork | `ghcr.io/worldcoin/world-chain:op-vX.Y.Z` | `op-node` |
 
 These are distinct images/manifests, not aliases for the combined payload. Keep
 the existing World Chain image's purpose and tag stable. The OP image contains
 the OP components and their helpers; the combined image adds World Chain. Each
 variant's binary archive uses the same payload as that variant's image.
+Variant tags use prefixes so they cannot collide with World Chain prerelease
+versions ending in `-op` or `-combined`; preserve the original image's version tags.
 
 Install every listed executable in `/usr/local/bin` in the combined image,
 including the OP services, operator tools and helpers. Keep those paths stable
@@ -159,8 +161,10 @@ all submodule contents and cannot replace this asset.
 
 ## Deployment documentation and release-page approval
 
-Present release instructions in this order: **combined image**, **individual
-images**, then **direct binaries/systemd**. Include Docker Compose examples,
+Begin the release page with **Changes** and concise actionable upgrade notes.
+Then present deployment instructions in this order: **combined image**,
+**individual images**, then **direct binaries/systemd**. Keep detailed component
+versions/provenance in an expandable section. Include Docker Compose examples,
 standard configuration, systemd units, Docker build instructions, and the source
 ZIP and checksum links. Use the same configuration conventions across deployment
 modes; keep network and role configuration explicit.

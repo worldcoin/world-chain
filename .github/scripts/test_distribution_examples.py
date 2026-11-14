@@ -45,6 +45,8 @@ class DeploymentExamplesTest(unittest.TestCase):
                 self.assertEqual(args[args.index("--http.addr") + 1], "127.0.0.1")
                 self.assertNotIn("--builder.enabled", args)
                 self.assertIn("--l2=http://127.0.0.1:8551", rollup["command"])
+                self.assertIn("--p2p.discovery.path=/var/lib/world-chain/op-node/discovery", rollup["command"])
+                self.assertIn("--p2p.peerstore.path=/var/lib/world-chain/op-node/peerstore", rollup["command"])
                 self.assertNotIn("--sequencer.enabled", rollup["command"])
                 for service in (execution, rollup):
                     self.assertEqual(service["network_mode"], "host")
