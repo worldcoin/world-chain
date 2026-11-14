@@ -42,7 +42,11 @@ def payload_files(root, binaries):
     if {p.name for p in (root / "bin").iterdir()} != set(binaries):
         raise ValueError("payload bin/ must contain exactly the planned executables")
     files = [Path("README.md"), *(Path("bin") / name for name in binaries)]
-    for parent, directories, names in os.walk(root / "licenses", followlinks=False):
+
+    def raise_walk_error(error):
+        raise error
+
+    for parent, directories, names in os.walk(root / "licenses", onerror=raise_walk_error, followlinks=False):
         for name in directories:
             real_directory(Path(parent) / name)
         for name in names:

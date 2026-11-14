@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import importlib.util
 import json
@@ -124,6 +125,28 @@ class BinaryPackagingTest(unittest.TestCase):
             packaging.package(inputs(), self.source, output, EPOCH)
         self.assertTrue((output / "INCOMPLETE").exists())
         self.assertFalse((output / "binary-manifest.json").exists())
+
+    def test_license_traversal_errors_fail_before_output(self):
+        licenses = self.source / "linux-amd64" / "licenses"
+        nested = licenses / "dependency"
+        nested.mkdir()
+        (nested / "NOTICE.txt").write_text("Required dependency notice.\n")
+        original_scandir = os.scandir
+        for blocked in (licenses, nested):
+            with self.subTest(directory=blocked):
+                error = PermissionError(errno.EACCES, "Permission denied", str(blocked))
+
+                def scandir(path):
+                    if Path(path) == blocked.resolve():
+                        raise error
+                    return original_scandir(path)
+
+                output = self.root / "unreadable-licenses"
+                with patch.object(packaging.os, "scandir", side_effect=scandir):
+                    with self.assertRaises(PermissionError) as raised:
+                        packaging.package(inputs(), self.source, output, EPOCH)
+                self.assertIs(raised.exception, error)
+                self.assertFalse(output.exists())
 
     def test_non_elf_and_unsupported_headers_are_rejected(self):
         for label, contents in (
