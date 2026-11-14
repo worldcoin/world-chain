@@ -22,6 +22,12 @@ BUNDLE_VERSION = rf"{BASE_VERSION}(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?"
 WORLDCHAIN_VERSION = rf"({BASE_VERSION})-worldchain(?:\.[1-9][0-9]*)?"
 COMMIT = r"[0-9a-f]{40}"
 MAX_INPUT_BYTES = 64 * 1024
+OP_BINARIES = (*COMPONENTS, "forge", "cast")
+VARIANTS = {
+    "world-chain": ("", "world-chain", ("world-chain", "cast")),
+    "op": ("-op", "op-node", OP_BINARIES),
+    "combined": ("-combined", "world-chain", ("world-chain", *OP_BINARIES)),
+}
 
 
 def object_fields(value, fields, location):
@@ -65,8 +71,10 @@ def release_plan(inputs):
     if type(inputs["schema_version"]) is not int or inputs["schema_version"] != 1:
         raise ValueError("schema_version must be 1")
     version = inputs["bundle_version"]
-    if not matches(version, BUNDLE_VERSION) or len(version) > 128:
+    if not matches(version, BUNDLE_VERSION):
         raise ValueError("bundle_version must be a canonical World Chain release version starting with vX.Y.Z")
+    if any(len(version + suffix) > 128 for suffix, _, _ in VARIANTS.values()):
+        raise ValueError("bundle_version plus image variant suffix must fit a 128-byte image tag")
     sources = inputs["sources"]
     object_fields(sources, ("world_chain", "optimism"), "sources")
     for repository, value in sources.items():
@@ -93,12 +101,27 @@ def release_plan(inputs):
         "inputs": inputs,
         "binaries": ["world-chain", *COMPONENTS, "forge", "cast"],
         "image_binary_directory": "/usr/local/bin",
+        "images": {
+            name: {
+                "reference": f"ghcr.io/worldcoin/world-chain:{version}{suffix}",
+                "entrypoint": f"/usr/local/bin/{entrypoint}",
+                "binaries": list(binaries),
+            }
+            for name, (suffix, entrypoint, binaries) in VARIANTS.items()
+        },
         "assets": {
             "binaries": {
-                platform: f"world-chain-{version}-{target}.tar.gz"
-                for platform, target in TARGETS.items()
+                name: {
+                    platform: f"{prefix}-{version}-{target}.tar.gz"
+                    for platform, target in TARGETS.items()
+                }
+                for name, prefix in (
+                    ("world-chain", "world-chain"), ("op", "world-chain-op"),
+                    ("combined", "world-chain-combined"),
+                )
             },
-            "sources": f"world-chain-{version}-sources.tar.gz",
+            "sources": f"world-chain-{version}-sources.zip",
+            "examples": f"world-chain-{version}-examples.zip",
             "manifest": "release-manifest.json",
             "checksums": "SHA256SUMS",
         },

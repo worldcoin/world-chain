@@ -1,13 +1,24 @@
-# World Chain distribution bundle
+# World Chain distributions
 
-World Chain owns the combined image and GitHub release. Both use the World Chain
-release version. Each OP component keeps its own `vX.Y.Z-worldchain[.N]` version,
+World Chain owns the coordinated images and GitHub release. Image variants and
+binary bundles use the World Chain release version. Each OP component keeps its own `vX.Y.Z-worldchain[.N]` version,
 where `X.Y.Z` is its selected upstream component version. A bundle version does
 not assign a common upstream version to all OP components.
 
-The same image and binary distribution serve World Chain builders and RPC
-operators. Runtime configuration selects the node's role; this does not introduce
-separate builder-only and RPC-only image variants.
+The distributions serve World Chain builders and RPC operators. Runtime
+configuration selects the node's role. The standard deployment uses the combined
+image in multiple containers; separate World Chain and OP images remain available.
+
+| Variant | Proposed version tag | Default executable |
+| --- | --- | --- |
+| Combined (standard) | `ghcr.io/worldcoin/world-chain:vX.Y.Z-combined` | `world-chain` |
+| World Chain (existing image) | `ghcr.io/worldcoin/world-chain:vX.Y.Z` | `world-chain` |
+| OP binaries from the maintained fork | `ghcr.io/worldcoin/world-chain:vX.Y.Z-op` | `op-node` |
+
+These are distinct images/manifests, not aliases for the combined payload. Keep
+the existing World Chain image's purpose and tag stable. The OP image contains
+the OP components and their helpers; the combined image adds World Chain. Each
+variant's binary archive uses the same payload as that variant's image.
 
 Install every listed executable in `/usr/local/bin` in the combined image,
 including the OP services, operator tools and helpers. Keep those paths stable
@@ -118,11 +129,15 @@ and matching commit IDs alone do not establish reproducible builds.
 
 For a bundle version such as `v2.8.3`, the plan names:
 
-- `world-chain-v2.8.3-x86_64-unknown-linux-gnu.tar.gz`
-- `world-chain-v2.8.3-aarch64-unknown-linux-gnu.tar.gz`
-- `world-chain-v2.8.3-sources.tar.gz`
+- `world-chain-combined-v2.8.3-<target>.tar.gz` (standard bundle)
+- `world-chain-v2.8.3-<target>.tar.gz` (World Chain; existing naming)
+- `world-chain-op-v2.8.3-<target>.tar.gz` (OP binaries and helpers)
+- `world-chain-v2.8.3-sources.zip`
+- `world-chain-v2.8.3-examples.zip`
 - `release-manifest.json`
 - `SHA256SUMS`
+
+`<target>` is `x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu`.
 
 Keep `world-chain` at the archive root for existing consumers. Include the other
 executables alongside it, plus runtime instructions, licenses and notices. Image
@@ -141,6 +156,21 @@ build metadata. Include or identify the corresponding sources for imported
 historical Cannon implementations and other redistributed artifacts. GitHub's
 automatic World Chain source archive does not include the other repository or
 all submodule contents and cannot replace this asset.
+
+## Deployment documentation and release-page approval
+
+Present release instructions in this order: **combined image**, **individual
+images**, then **direct binaries/systemd**. Include Docker Compose examples,
+standard configuration, systemd units, Docker build instructions, and the source
+ZIP and checksum links. Use the same configuration conventions across deployment
+modes; keep network and role configuration explicit.
+
+The [release-page preview](release-page-preview.md) is a draft for user approval.
+Do not activate a release-page renderer or publish this format until the user
+approves it. The existing release environment approval remains required too.
+See [deployment examples](../examples/distribution/README.md) and
+[Docker build instructions](distribution-build.md). The examples archive must
+include those guides and corresponding Compose, configuration and systemd files.
 
 Reuse the release environment approval and architecture matrix in
 `.github/workflows/release.yml`. Private cross-repository checkout needs an

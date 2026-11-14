@@ -64,7 +64,7 @@ World Chain is a blockchain designed for humans. It prioritizes scalability and 
 
 World Chain's major and minor version numbers are aligned with the underlying reth release line. For a World Chain `X.Y.Z` release, `X.Y` must match reth's `X.Y`. World Chain patch versions are released independently and do not need to match the reth patch version.
 
-The planned combined World Chain/OP distribution for builders and RPC operators follows the [distribution input and asset contract](docs/distribution.md). OP components retain their own upstream-based versions.
+The planned World Chain, OP-only and combined distributions for builders and RPC operators follow the [distribution input and asset contract](docs/distribution.md). OP components retain their own upstream-based versions.
 
 ## Development
 

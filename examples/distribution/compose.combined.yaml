@@ -1,0 +1,28 @@
+# Draft: requires qualified combined image and the configuration in README.md.
+services:
+  execution:
+    image: ${COMBINED_IMAGE:?Set COMBINED_IMAGE to the qualified image digest}
+    entrypoint: [/usr/local/bin/world-chain]
+    command: ${WORLD_CHAIN_ARGS:?Set WORLD_CHAIN_ARGS}
+    network_mode: host
+    user: "${NODE_UID:?Set NODE_UID}:${NODE_GID:?Set NODE_GID}"
+    restart: unless-stopped
+    stop_grace_period: 3m
+    volumes:
+      - ./data/execution:/var/lib/world-chain/execution
+      - ./jwt.hex:/etc/world-chain/jwt.hex:ro
+  rollup:
+    image: ${COMBINED_IMAGE:?Set COMBINED_IMAGE to the qualified image digest}
+    entrypoint: [/usr/local/bin/op-node]
+    command: ${OP_NODE_ARGS:?Set OP_NODE_ARGS}
+    environment:
+      OP_NODE_L1_ETH_RPC: ${OP_NODE_L1_ETH_RPC:?Set the L1 execution RPC}
+      OP_NODE_L1_BEACON: ${OP_NODE_L1_BEACON:?Set the L1 beacon RPC}
+    network_mode: host
+    user: "${NODE_UID:?Set NODE_UID}:${NODE_GID:?Set NODE_GID}"
+    restart: unless-stopped
+    stop_grace_period: 3m
+    depends_on: [execution]
+    volumes:
+      - ./data/op-node:/var/lib/world-chain/op-node
+      - ./jwt.hex:/etc/world-chain/jwt.hex:ro

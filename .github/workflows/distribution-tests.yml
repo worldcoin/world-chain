@@ -5,14 +5,22 @@ on:
     paths:
       - .github/scripts/distribution-inputs.py
       - .github/scripts/test_distribution_inputs.py
+      - .github/scripts/test_distribution_examples.py
       - docs/distribution.md
+      - docs/distribution-build.md
+      - docs/release-page-preview.md
+      - examples/distribution/**
       - .github/workflows/distribution-tests.yml
   push:
     branches: [main]
     paths:
       - .github/scripts/distribution-inputs.py
       - .github/scripts/test_distribution_inputs.py
+      - .github/scripts/test_distribution_examples.py
       - docs/distribution.md
+      - docs/distribution-build.md
+      - docs/release-page-preview.md
+      - examples/distribution/**
       - .github/workflows/distribution-tests.yml
 
 permissions:
@@ -28,4 +36,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Test distribution inputs and asset plan
-        run: python3 -m unittest discover -s .github/scripts -p 'test_distribution_inputs.py' -v
+        run: python3 -m unittest discover -s .github/scripts -p 'test_distribution*.py' -v

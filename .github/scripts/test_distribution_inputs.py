@@ -34,14 +34,21 @@ class DistributionInputsTest(unittest.TestCase):
         plan = distribution.release_plan(value)
         self.assertEqual(value, original)
         self.assertEqual(plan["image_binary_directory"], "/usr/local/bin")
-        self.assertEqual(plan["assets"]["binaries"]["linux/amd64"], "world-chain-v2.8.3-x86_64-unknown-linux-gnu.tar.gz")
-        self.assertEqual(plan["assets"]["sources"], "world-chain-v2.8.3-sources.tar.gz")
-        self.assertEqual(plan["assets"]["binaries"]["linux/arm64"], "world-chain-v2.8.3-aarch64-unknown-linux-gnu.tar.gz")
+        self.assertEqual(plan["assets"]["binaries"]["world-chain"]["linux/amd64"], "world-chain-v2.8.3-x86_64-unknown-linux-gnu.tar.gz")
+        self.assertEqual(plan["assets"]["sources"], "world-chain-v2.8.3-sources.zip")
+        self.assertEqual(plan["assets"]["examples"], "world-chain-v2.8.3-examples.zip")
+        self.assertEqual(plan["assets"]["binaries"]["combined"]["linux/arm64"], "world-chain-combined-v2.8.3-aarch64-unknown-linux-gnu.tar.gz")
         self.assertEqual(set(plan["binaries"]), {
             "world-chain", "op-node", "op-batcher", "op-proposer", "op-conductor",
             "op-challenger", "op-deployer", "op-dispute-mon", "cannon", "kona-host",
             "forge", "cast",
         })
+        self.assertEqual(set(plan["images"]), {"world-chain", "op", "combined"})
+        self.assertEqual(plan["images"]["world-chain"]["reference"], "ghcr.io/worldcoin/world-chain:v2.8.3")
+        self.assertEqual(plan["images"]["op"]["entrypoint"], "/usr/local/bin/op-node")
+        self.assertNotIn("world-chain", plan["images"]["op"]["binaries"])
+        self.assertEqual(set(plan["images"]["combined"]["binaries"]), set(plan["binaries"]))
+        self.assertEqual(plan["assets"]["binaries"]["op"]["linux/amd64"], "world-chain-op-v2.8.3-x86_64-unknown-linux-gnu.tar.gz")
 
     def test_independent_component_versions(self):
         value = inputs()
@@ -51,6 +58,14 @@ class DistributionInputsTest(unittest.TestCase):
         self.assertIn("v2.8.3", plan["assets"]["sources"])
         value["bundle_version"] = "v2.8.3-rc.1"
         self.assertIn("v2.8.3-rc.1", distribution.release_plan(value)["assets"]["sources"])
+
+    def test_image_variant_tag_length(self):
+        value = inputs()
+        value["bundle_version"] = "v" + "1" * 114 + ".0.0"
+        self.assertEqual(len(distribution.release_plan(value)["images"]["combined"]["reference"].split(":")[-1]), 128)
+        value["bundle_version"] = "v" + "1" * 115 + ".0.0"
+        with self.assertRaises(ValueError):
+            distribution.release_plan(value)
 
     def test_reject_invalid_contract(self):
         cases = [
