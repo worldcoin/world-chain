@@ -375,6 +375,9 @@ impl Authorized {
         let sig_bytes = Bytes::decode(&mut rest)?;
         let actor_sig = Signature::try_from(sig_bytes.as_ref())
             .map_err(|_| alloy_rlp::Error::Custom("bad signature"))?;
+        if !rest.is_empty() {
+            return Err(alloy_rlp::Error::Custom("trailing authorized list data").into());
+        }
 
         // advance caller's cursor
         *buf = &buf[header.payload_length..];
@@ -474,6 +477,9 @@ impl Decodable for Authorized {
         let sig_bytes = Bytes::decode(&mut body)?;
         let builder_sig = Signature::try_from(sig_bytes.as_ref())
             .map_err(|_| alloy_rlp::Error::Custom("bad signature"))?;
+        if !body.is_empty() {
+            return Err(alloy_rlp::Error::Custom("trailing authorized list data"));
+        }
 
         // advance caller’s cursor
         *buf = &buf[header.payload_length..];

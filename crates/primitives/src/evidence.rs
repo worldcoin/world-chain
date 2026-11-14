@@ -102,6 +102,7 @@ impl FlashblockEvidence {
 mod tests {
     use super::*;
     use crate::p2p::FlashblocksP2PMsg;
+    use alloy_rlp::{Decodable, Header};
     use ed25519_dalek::SigningKey;
 
     fn fixture() -> (FlashblockEvidence, VerifyingKey) {
@@ -142,6 +143,29 @@ mod tests {
         decoded
             .verify(480, authorizer, evidence.id)
             .expect("RPC JSON preserves wire bytes");
+    }
+
+    #[test]
+    fn rejects_unsigned_trailing_fields_inside_authorized_list() {
+        let (mut evidence, authorizer) = fixture();
+        evidence
+            .verify(480, authorizer, evidence.id)
+            .expect("original signatures verify");
+        let mut body = &evidence.wire[1..];
+        let mut header = Header::decode(&mut body).expect("authorized list header");
+        assert_eq!(body.len(), header.payload_length);
+        header.payload_length += 1;
+        let mut padded = vec![0];
+        header.encode(&mut padded);
+        padded.extend_from_slice(body);
+        padded.push(0x80);
+
+        assert!(Authorized::parse(&mut &padded[1..]).is_err());
+        assert!(Authorized::decode(&mut &padded[1..]).is_err());
+        assert!(FlashblocksP2PMsg::parse(&padded).is_err());
+        assert!(FlashblocksP2PMsg::decode(&mut padded.as_slice()).is_err());
+        evidence.wire = padded.into();
+        assert!(evidence.verify(480, authorizer, evidence.id).is_err());
     }
 
     #[test]
