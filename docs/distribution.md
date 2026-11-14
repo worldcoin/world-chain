@@ -164,7 +164,9 @@ all submodule contents and cannot replace this asset.
 Begin the release page with **Changes** and concise actionable upgrade notes.
 Then present deployment instructions in this order: **combined image**,
 **individual images**, then **direct binaries/systemd**. Keep detailed component
-versions/provenance in an expandable section. Include Docker Compose examples,
+versions/provenance in an expandable section. Use tables for image and download
+choices, and numbered deployment steps with commands beneath the relevant step.
+Include Docker Compose examples,
 standard configuration, systemd units, Docker build instructions, and the source
 ZIP and checksum links. Use the same configuration conventions across deployment
 modes; keep network and role configuration explicit.

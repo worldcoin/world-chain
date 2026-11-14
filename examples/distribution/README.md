@@ -29,7 +29,7 @@ not run Compose and systemd against the same ports or data directories together.
 ```sh
 cp -n node.env.example node.env
 chmod 600 node.env
-mkdir -p data/execution data/op-node
+install -d -m 0700 data/execution data/op-node
 (umask 077; set -C; openssl rand -hex 32 > jwt.hex)
 ```
 
@@ -38,7 +38,9 @@ For mainnet, copy `node.mainnet.env.example` instead of `node.env.example`.
 Edit `node.env`: set qualified image digests, your data-directory UID/GID, L1
 execution and beacon endpoints, and review the chain/flags. The generated JWT is
 a local Engine API credential shared by these two services, not a blockchain key.
-Keep the file on restart; do not regenerate it for a running deployment.
+Keep the file on restart; do not regenerate it for a running deployment. Keep
+the state directories private: the current local-identity peerstore can contain
+a copy of the node's private P2P key.
 
 ```sh
 docker compose --env-file node.env -f compose.combined.yaml config --quiet
