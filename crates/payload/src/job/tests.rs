@@ -43,7 +43,9 @@ impl PayloadBuilder for Builder {
         _config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         self.empty_builds.fetch_add(1, Ordering::SeqCst);
-        Ok(self.payload.clone())
+        Err(PayloadBuilderError::other(std::io::Error::other(
+            "completed execution must not fall back to an empty build",
+        )))
     }
 }
 
@@ -100,6 +102,7 @@ fn job(handle: FlashblocksHandle) -> FlashblocksPayloadJob<Builder> {
     );
     FlashblocksPayloadJob {
         pending_publication: None,
+        publishing_clearance: None,
         _publishing_lease: Some(lease),
         config,
         executor: Runtime::test(),
@@ -199,7 +202,6 @@ async fn local_handover_preserves_the_execution_job_and_inflight_build() {
         job.pending_block.is_some(),
         "handover must not cancel execution work"
     );
-    assert!(futures::poll!(&mut job).is_pending());
     let (result, _) = job.resolve_kind(PayloadKind::Earliest);
     assert_eq!(
         result
@@ -209,7 +211,83 @@ async fn local_handover_preserves_the_execution_job_and_inflight_build() {
             .hash(),
         job.builder.payload.block().hash()
     );
+    assert_eq!(job.builder.empty_builds.load(Ordering::SeqCst), 0);
     assert!(job.flashblocks_state.snapshot().latest_payload.is_none());
+}
+
+#[derive(Default)]
+struct WakeCounter {
+    count: AtomicUsize,
+    notified: tokio::sync::Notify,
+}
+
+impl futures::task::ArcWake for WakeCounter {
+    fn wake_by_ref(waker: &Arc<Self>) {
+        waker.count.fetch_add(1, Ordering::SeqCst);
+        waker.notified.notify_one();
+    }
+}
+
+fn waiting_job() -> FlashblocksPayloadJob<Builder> {
+    let handle = FlashblocksHandle::new(
+        SigningKey::from_bytes(&[7; 32]).verifying_key(),
+        Some(SigningKey::from_bytes(&[8; 32])),
+    );
+    let job = job(handle);
+    job.p2p_handler.state.lock().publishing_status.send_replace(
+        PublishingStatus::WaitingToPublish {
+            authorization: job.authorization.expect("grant"),
+            active_publishers: vec![],
+        },
+    );
+    job
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pending_clearance_retains_its_wakeup_registration() {
+    let mut job = waiting_job();
+    job.flashblock_deadline
+        .as_mut()
+        .reset(tokio::time::Instant::now() + Duration::from_secs(60));
+    let wakes = Arc::new(WakeCounter::default());
+    let waker = futures::task::waker(wakes.clone());
+    assert!(
+        Pin::new(&mut job)
+            .poll(&mut Context::from_waker(&waker))
+            .is_pending()
+    );
+    assert!(job.publishing_clearance.is_some());
+    assert_eq!(wakes.count.load(Ordering::SeqCst), 0);
+    job.p2p_handler
+        .state
+        .lock()
+        .publishing_status
+        .send_replace(PublishingStatus::Publishing {
+            authorization: job.authorization.expect("grant"),
+        });
+    assert!(
+        wakes.count.load(Ordering::SeqCst) > 0,
+        "clearance must wake the job without another build or recommit tick"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn publication_interval_is_armed_while_clearance_is_pending() {
+    let mut job = waiting_job();
+    job.flashblock_deadline
+        .as_mut()
+        .reset(tokio::time::Instant::now() + Duration::from_millis(10));
+    let wakes = Arc::new(WakeCounter::default());
+    let waker = futures::task::waker(wakes.clone());
+    assert!(
+        Pin::new(&mut job)
+            .poll(&mut Context::from_waker(&waker))
+            .is_pending()
+    );
+    tokio::time::timeout(Duration::from_secs(1), wakes.notified.notified())
+        .await
+        .expect("publication timer must wake the job even before clearance");
+    assert!(job.publishing_clearance.is_some());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

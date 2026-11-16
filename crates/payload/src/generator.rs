@@ -321,6 +321,7 @@ where
             config,
             _publishing_lease: publishing_lease,
             pending_publication: None,
+            publishing_clearance: None,
             executor: self.executor.clone(),
             deadline,
             committed_payload,

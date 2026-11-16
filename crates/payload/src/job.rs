@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    pin::{Pin, pin},
+    pin::Pin,
     task::{Context, Poll, ready},
     time::Duration,
 };
@@ -229,6 +229,8 @@ pub(crate) struct PendingPublication {
 /// terminated if the deadline is reached.
 pub struct FlashblocksPayloadJob<Builder: PayloadBuilder> {
     pub(crate) pending_publication: Option<PendingPublication>,
+    pub(crate) publishing_clearance:
+        Option<futures::future::BoxFuture<'static, Result<(), FlashblocksP2PError>>>,
     pub(crate) _publishing_lease: Option<world_chain_p2p::protocol::PublishingLease>,
     /// The configuration for how the payload will be created.
     pub(crate) config: PayloadConfig<Builder::Attributes, HeaderForPayload<Builder::BuiltPayload>>,
@@ -306,6 +308,7 @@ where
             }
         }
         self.authorization = None;
+        self.publishing_clearance.take();
         self.pending_publication.take();
         self._publishing_lease.take();
     }
@@ -539,6 +542,7 @@ where
                 this.pending_block.take();
             }
             this.pending_publication.take();
+            this.publishing_clearance.take();
             this._publishing_lease.take();
             return Poll::Ready(Ok(()));
         }
@@ -606,22 +610,23 @@ where
             this.spawn_build_job();
         }
 
-        let clearance = {
-            let network_handle = this.p2p_handler.clone();
-            let authorization = this.authorization;
-            let future = async {
-                if let Some(authorization) = authorization {
-                    network_handle
-                        .await_authorized_clearance(authorization)
-                        .await?;
-                }
-                this.flashblock_deadline.as_mut().await;
-                Ok::<(), FlashblocksP2PError>(())
-            };
-            pin!(future).poll_unpin(cx)
-        };
+        if this.publishing_clearance.is_none()
+            && let Some(authorization) = this.authorization
+        {
+            let handle = this.p2p_handler.clone();
+            this.publishing_clearance = Some(Box::pin(async move {
+                handle.await_authorized_clearance(authorization).await
+            }));
+        }
+        let clearance = this
+            .publishing_clearance
+            .as_mut()
+            .map_or(Poll::Ready(Ok(())), |future| future.poll_unpin(cx));
         let clearance = match clearance {
-            Poll::Ready(Ok(())) => true,
+            Poll::Ready(Ok(())) => {
+                this.publishing_clearance.take();
+                true
+            }
             Poll::Ready(Err(error)) => {
                 this.disable_publication(error);
                 cx.waker().wake_by_ref();
@@ -629,7 +634,9 @@ where
             }
             Poll::Pending => false,
         };
+        let interval_ready = this.flashblock_deadline.as_mut().poll(cx).is_ready();
         if clearance
+            && interval_ready
             && !this.best_payload.0.is_frozen()
             && let (Some(payload), access_list) = (
                 this.best_payload.0.payload().cloned(),
@@ -782,23 +789,24 @@ where
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         info!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), ?kind, "resolving payload job");
 
-        let best_payload = if self.p2p_handler.is_remote_publisher() {
+        let pending_execution = if self.p2p_handler.is_remote_publisher() {
             // Sealing needs the executed block, not an optional Flashblock signature.
             let pending = self.pending_publication.take();
+            self.publishing_clearance.take();
             self._publishing_lease.take();
-            pending
-                .map(|pending| pending.payload)
-                .or_else(|| {
-                    if self.authorization.is_none() {
-                        self.best_payload.0.payload().cloned()
-                    } else {
-                        None
-                    }
-                })
-                .or_else(|| self.committed_payload.clone_payload())
+            pending.map(|pending| pending.payload)
         } else {
-            self.committed_payload.clone_payload()
+            None
         };
+        let best_payload = pending_execution
+            .or_else(|| {
+                if self.authorization.is_none() {
+                    self.best_payload.0.payload().cloned()
+                } else {
+                    None
+                }
+            })
+            .or_else(|| self.committed_payload.clone_payload());
 
         if best_payload.is_none() && self.pending_block.is_none() {
             trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "no best payload yet and no active build job, spawning new build job");

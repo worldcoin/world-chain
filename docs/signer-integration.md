@@ -128,6 +128,9 @@ execution-only building, with failure telemetry. PBH signing remains mandatory;
 its failures still fail the affected build attempt. A missing stop notification
 never restores clearance. The existing two-second peer handover fallback remains unchanged.
 
+Clearance waits persist across job polls, and the publication timer is armed even
+while clearance is pending, so successful signing wakes the job without a build tick.
+
 A publishing lease binds a payload job to its generation and deadline. Signing
 checks the exact grant, publisher, payload and current state. Completion rechecks
 cancellation, generation, payload, grant and budget, including at the final cache
