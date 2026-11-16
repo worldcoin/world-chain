@@ -1,5 +1,5 @@
 use crate::config::{FlashblocksPayloadBuilderConfig, FlashblocksStoreConfig};
-use ::eyre::eyre::bail;
+use ::eyre::eyre::{WrapErr, bail, eyre};
 use alloy_chains::NamedChain;
 use alloy_primitives::{Address, address};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, ForkCondition};
@@ -110,6 +110,49 @@ impl WorldChainArgs {
         config: &mut NodeConfig<WorldChainSpec>,
     ) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
+        let protected = self.builder.signer_config.is_some()
+            || self
+                .flashblocks
+                .as_ref()
+                .is_some_and(|fb| fb.signer_config.is_some());
+        if protected {
+            eyre::eyre::ensure!(
+                self.builder.enabled
+                    && self.builder.signer_config.is_some()
+                    && self.builder.private_key.is_none(),
+                "protected signing requires a remote PBH signer and excludes local/default PBH keys"
+            );
+            if let Some(fb) = &self.flashblocks {
+                eyre::eyre::ensure!(
+                    fb.builder_sk.is_none()
+                        && fb.override_authorizer_sk.is_none()
+                        && !fb.force_publish,
+                    "protected signing excludes local publisher/authorizer keys and force-publish"
+                );
+                eyre::eyre::ensure!(
+                    fb.signer_config.is_none() || fb.enabled,
+                    "remote publication signing requires Flashblocks"
+                );
+            }
+        }
+        let pbh_wallet = self.builder.wallet().wrap_err("PBH signer configuration")?;
+        let publication_signer = self
+            .flashblocks
+            .as_ref()
+            .and_then(|fb| fb.signer_config.as_ref())
+            .map(|path| {
+                world_chain_signer::PublicationSigner::new(
+                    world_chain_signer::config::Ed25519Config::load(path)?,
+                )
+            })
+            .transpose()
+            .wrap_err("Flashblock publisher signer configuration")?;
+        if protected {
+            let wallet = pbh_wallet
+                .as_ref()
+                .ok_or_else(|| eyre!("protected signing requires a remote PBH signer"))?;
+            info!(target:"world_chain::signer",pbh_address=%wallet.address(),flashblocks_publisher=publication_signer.is_some(),"protected remote signing configured");
+        }
         if self.preconfirmed_logs && self.flashblocks.as_ref().is_none_or(|args| !args.enabled) {
             bail!("--rpc.preconfirmed-logs requires --flashblocks.enabled");
         }
@@ -321,6 +364,8 @@ impl WorldChainArgs {
             });
 
         Ok(WorldChainNodeConfig {
+            pbh_wallet,
+            publication_signer,
             args: self,
             builder_config: FlashblocksPayloadBuilderConfig {
                 inner: inner_builder_config,
@@ -454,12 +499,95 @@ impl Default for WitnessArgs {
 }
 
 #[cfg(test)]
+#[allow(
+    dead_code,
+    reason = "shared conformance harness includes other signer operations"
+)]
+#[path = "../../signer/tests/common/runtime.rs"]
+mod signer_runtime;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
     use clap::Parser;
     use reth_node_builder::NodeConfig;
     use std::sync::Arc;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires the reviewed disposable mTLS signer harness"]
+    async fn protected_startup_loads_both_role_configs_without_local_keys() {
+        let harness = signer_runtime::Harness::start().await;
+        let files = tempfile::tempdir().expect("signer configuration directory");
+        let connection = |c: world_chain_signer::config::ConnectionConfig| {
+            serde_json::json!({
+                "endpoint": c.endpoint,
+                "tls": {
+                    "ca": c.tls.ca,
+                    "certificate": c.tls.certificate,
+                    "privateKey": c.tls.private_key
+                }
+            })
+        };
+        let pbh = harness.pbh("pbh");
+        let publisher = harness.ed25519(false, "publisher");
+        let pbh_path = files.path().join("pbh.json");
+        let publisher_path = files.path().join("publisher.json");
+        let pbh_json = serde_json::json!({
+            "connection": connection(pbh.connection),
+            "expectedAddress": pbh.expected_address
+        });
+        let publisher_json = serde_json::json!({
+            "connection": connection(publisher.connection),
+            "keyId": publisher.key_id,
+            "expectedPublicKey": publisher.expected_public_key
+        });
+        std::fs::write(&pbh_path, serde_json::to_vec(&pbh_json).expect("PBH JSON"))
+            .expect("write PBH configuration");
+        std::fs::write(
+            &publisher_path,
+            serde_json::to_vec(&publisher_json).expect("publisher JSON"),
+        )
+        .expect("write publisher configuration");
+        let authorizer = hex::encode(
+            ed25519_dalek::SigningKey::from_bytes(&[7; 32])
+                .verifying_key()
+                .to_bytes(),
+        );
+        let parsed = CommandParserWithRpc::try_parse_from([
+            "bin",
+            "--builder.enabled",
+            "--builder.signer-config",
+            pbh_path.to_str().expect("test path"),
+            "--flashblocks.enabled",
+            "--flashblocks.signer-config",
+            publisher_path.to_str().expect("test path"),
+            "--flashblocks.authorizer-vk",
+            &authorizer,
+        ])
+        .expect("protected CLI");
+        let config = into_world_config(parsed);
+        assert!(config.pbh_wallet.as_ref().expect("PBH signer").is_remote());
+        assert!(config.args.builder.private_key.is_none());
+        let flashblocks = config.args.flashblocks.as_ref().expect("Flashblocks");
+        assert!(
+            flashblocks.builder_sk.is_none()
+                && flashblocks.override_authorizer_sk.is_none()
+                && !flashblocks.force_publish
+        );
+        config
+            .publication_signer
+            .as_ref()
+            .expect("remote publisher")
+            .health(signer_runtime::deadline())
+            .await
+            .expect("authenticated protocol endpoint");
+        std::fs::remove_file(pbh_path).expect("remove caller configuration");
+        assert!(
+            config.args.builder.wallet().is_err(),
+            "missing remote configuration cannot select a local/default wallet"
+        );
+    }
 
     #[derive(Debug, Parser)]
     struct CommandParser {
@@ -488,6 +616,86 @@ mod tests {
         let mut node_config = NodeConfig::new(Arc::new(spec));
         node_config.rpc = parsed.rpc;
         parsed.world.into_config(&mut node_config).unwrap()
+    }
+
+    #[test]
+    fn protected_signing_excludes_local_sources_and_never_uses_the_legacy_default() {
+        let test_private_key = "0000000000000000000000000000000000000000000000000000000000000001";
+        assert!(
+            CommandParser::try_parse_from([
+                "bin",
+                "--builder.enabled",
+                "--builder.signer-config",
+                "missing.json",
+                "--builder.private-key",
+                test_private_key
+            ])
+            .is_err()
+        );
+        for extras in [
+            vec![
+                "--flashblocks.enabled",
+                "--flashblocks.builder-sk",
+                test_private_key,
+            ],
+            vec![
+                "--flashblocks.enabled",
+                "--flashblocks.override-authorizer-sk",
+                test_private_key,
+                "--flashblocks.builder-sk",
+                test_private_key,
+                "--flashblocks.force-publish",
+            ],
+        ] {
+            let mut argv = vec![
+                "bin",
+                "--builder.enabled",
+                "--builder.signer-config",
+                "missing.json",
+            ];
+            argv.extend(extras);
+            let parsed =
+                CommandParser::try_parse_from(argv).expect("structurally valid mixed flags");
+            let mut node =
+                NodeConfig::new(Arc::new(WorldChainSpec::from_genesis(Genesis::default())));
+            let error = parsed
+                .world
+                .into_config(&mut node)
+                .expect_err("protected startup rejects local flashblock keys");
+            assert!(error.to_string().contains("protected signing excludes"));
+        }
+        let remote = CommandParser::parse_from([
+            "bin",
+            "--builder.enabled",
+            "--builder.signer-config",
+            "missing.json",
+        ]);
+        assert!(remote.world.builder.private_key.is_none());
+        assert!(remote.world.builder.wallet().is_err());
+    }
+
+    #[test]
+    fn non_builder_startup_has_no_pbh_signer() {
+        let authorizer = hex::encode(
+            ed25519_dalek::SigningKey::from_bytes(&[7; 32])
+                .verifying_key()
+                .to_bytes(),
+        );
+        for argv in [
+            vec!["bin"],
+            vec![
+                "bin",
+                "--flashblocks.enabled",
+                "--flashblocks.authorizer-vk",
+                &authorizer,
+            ],
+        ] {
+            let config = into_world_config(CommandParserWithRpc::parse_from(argv));
+            assert!(!config.args.builder.enabled);
+            assert!(config.args.builder.private_key.is_none());
+            assert!(config.pbh_wallet.is_none());
+            assert!(config.publication_signer.is_none());
+        }
     }
 
     #[test]
@@ -726,10 +934,13 @@ mod tests {
                 signature_aggregator: Default::default(),
             },
             builder: BuilderArgs {
+                signer_config: None,
                 enabled: false,
-                private_key: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-                    .parse()
-                    .unwrap(),
+                private_key: Some(
+                    "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                        .parse()
+                        .unwrap(),
+                ),
                 block_uncompressed_size_limit: None,
             },
             flashblocks: None,

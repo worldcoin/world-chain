@@ -142,7 +142,11 @@ Block Builder:
           Private key for the builder used to update PBH nullifiers
           
           [env: BUILDER_PRIVATE_KEY=]
-          [default: 0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef]
+
+      --builder.signer-config <builder.signer-config>
+          PBH remote signer JSON configuration, including mTLS and expected address
+          
+          [env: BUILDER_SIGNER_CONFIG=]
 
       --builder.block-uncompressed-size-limit <BLOCK_UNCOMPRESSED_SIZE_LIMIT>
           Maximum cumulative uncompressed (EIP-2718 encoded) block size in bytes
@@ -162,6 +166,11 @@ Flashblocks:
           Flashblocks signing key used to sign authorized flashblocks payloads
           
           [env: FLASHBLOCKS_BUILDER_SK=]
+
+      --flashblocks.signer-config <flashblocks.signer-config>
+          Remote publisher JSON configuration, including mTLS and expected key
+          
+          [env: FLASHBLOCKS_SIGNER_CONFIG=]
 
       --flashblocks.override-authorizer-sk <OVERRIDE_AUTHORIZER_SK>
           Override incoming authorizations from rollup boost

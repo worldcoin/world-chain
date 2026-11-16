@@ -25,6 +25,10 @@ pub struct FlashblocksStoreConfig {
 
 #[derive(Debug, Clone)]
 pub struct WorldChainNodeConfig {
+    /// Validated PBH signing backend, absent on nodes without signing credentials.
+    pub pbh_wallet: Option<world_chain_signer::PbhWallet>,
+    /// Remote publisher credentials and expected identity, validated at startup.
+    pub publication_signer: Option<world_chain_signer::PublicationSigner>,
     /// World Chain Specific CLI arguments
     pub args: WorldChainArgs,
     /// World Chain Payload Builder Configuration

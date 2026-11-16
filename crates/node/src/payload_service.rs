@@ -14,7 +14,9 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
-use world_chain_builder::traits::payload_builder::FlashblockPayloadBuilder;
+use world_chain_builder::{
+    signing_deadline::SigningDeadlines, traits::payload_builder::FlashblockPayloadBuilder,
+};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_payload::generator::{
@@ -34,6 +36,7 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
     force_publish: bool,
     interval: Duration,
     recommitment_interval: Duration,
+    signing_deadlines: Option<SigningDeadlines>,
 }
 
 impl<PB> FlashblocksPayloadServiceBuilder<PB> {
@@ -57,7 +60,13 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
             force_publish,
             interval,
             recommitment_interval,
+            signing_deadlines: None,
         }
+    }
+
+    pub fn with_signing_deadlines(mut self, deadlines: Option<SigningDeadlines>) -> Self {
+        self.signing_deadlines = deadlines;
+        self
     }
 }
 
@@ -114,7 +123,8 @@ where
                 self.override_authorizer_sk,
                 self.force_publish,
                 flashblocks_state.clone(),
-            );
+            )
+            .with_signing_deadlines(self.signing_deadlines);
 
             let (payload_service, payload_service_handle) = PayloadBuilderService::new(
                 payload_generator,
@@ -140,6 +150,11 @@ where
                 ctx.task_executor().clone(),
                 payload_job_config,
                 payload_builder,
+            );
+            let payload_generator = world_chain_payload::signing_deadline::DeadlineGenerator::new(
+                payload_generator,
+                self.signing_deadlines,
+                conf.deadline,
             );
             let (payload_service, payload_service_handle) = PayloadBuilderService::new(
                 payload_generator,

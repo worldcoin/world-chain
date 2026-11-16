@@ -10,6 +10,7 @@ test-utils = []
 [dependencies]
 world-chain-cli.workspace = true
 world-chain-primitives.workspace = true
+world-chain-signer.workspace = true
 
 reth-ethereum.workspace = true
 reth-eth-wire.workspace = true
@@ -40,6 +41,7 @@ rand.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+url.workspace = true
 serde_json.workspace = true
 reth-network-api.workspace = true
 reth-network-peers.workspace = true

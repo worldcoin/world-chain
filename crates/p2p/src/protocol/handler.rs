@@ -27,12 +27,10 @@ use std::{
 };
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_util::sync::CancellationToken;
 use world_chain_cli::cli::FanoutArgs;
 use world_chain_primitives::{
-    p2p::{
-        Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
-        StartPublish, StopPublish,
-    },
+    p2p::{Authorization, AuthorizedPayload, FlashblocksP2PMsg},
     primitives::FlashblocksPayloadV1,
 };
 
@@ -42,16 +40,12 @@ use reth_ethereum::network::{
     protocol::{ConnectionHandler, OnNotSupported},
 };
 /// Maximum frame size for rlpx messages.
-const MAX_FRAME: usize = 1 << 24; // 16 MiB
+pub(crate) const MAX_FRAME: usize = 1 << 24; // 16 MiB
 
 /// Maximum index for flashblocks payloads.
 /// Not intended to ever be hit. Since we resize the flashblocks vector dynamically,
 /// this is just a sanity check to prevent excessive memory usage.
 pub(crate) const MAX_FLASHBLOCK_INDEX: usize = 100;
-
-/// The maximum number of seconds we will wait for a previous publisher to stop
-/// before continueing anyways.
-const MAX_PUBLISH_WAIT_SEC: u64 = 2;
 
 /// The maximum number of broadcast channel messages we will buffer
 /// before dropping them. In practice, we should rarely need to buffer any messages.
@@ -143,6 +137,13 @@ pub struct ObservedPayload {
 /// central state management for the flashblocks P2P protocol handler.
 #[derive(Debug)]
 pub struct FlashblocksP2PState {
+    pub(super) publishing_error: watch::Sender<Option<FlashblocksP2PError>>,
+    /// Invalidates unfinished start notifications when publishing intent changes.
+    pub(super) pending_start: CancellationToken,
+    /// Invalidates stop notifications when a new local publishing session begins.
+    pub(super) pending_stop: CancellationToken,
+    /// Prevents an older grant from superseding a start that is still being signed.
+    pub(super) pending_start_timestamp: Option<u64>,
     /// Current publishing status indicating whether we're publishing, waiting, or not publishing.
     pub publishing_status: watch::Sender<PublishingStatus>,
     /// Most recent payload ID for the current block being processed.
@@ -169,6 +170,10 @@ impl Default for FlashblocksP2PState {
         let (publishing_status, _) = watch::channel(PublishingStatus::default());
 
         Self {
+            publishing_error: watch::channel(None).0,
+            pending_start: CancellationToken::new(),
+            pending_stop: CancellationToken::new(),
+            pending_start_timestamp: None,
             publishing_status,
             payload_id: PayloadId::default(),
             payload_timestamp: 0,
@@ -663,11 +668,19 @@ pub struct FlashblocksP2PCtx {
 /// Encapsulates the shared context and mutable state of the flashblocks
 /// P2P protocol.
 #[derive(Clone, Debug)]
+pub enum Publisher {
+    Local(SigningKey),
+    Remote(world_chain_signer::PublicationSigner),
+}
+
+#[derive(Clone, Debug)]
 pub struct FlashblocksHandle {
     /// Shared context containing network handle, keys, and communication channels.
     pub ctx: FlashblocksP2PCtx,
     /// Builder signing key used to sign outgoing authorized P2P messages.
-    pub builder_sk: Option<SigningKey>,
+    pub(crate) publisher: Option<Publisher>,
+    /// One active control and one cancellable handover while old I/O drains.
+    pub(super) control_admission: Arc<tokio::sync::Semaphore>,
     /// Thread-safe mutable state of the flashblocks protocol.
     /// Protected by a mutex to allow concurrent access from multiple connections.
     pub state: Arc<Mutex<FlashblocksP2PState>>,
@@ -692,6 +705,20 @@ impl FlashblocksHandle {
         fanout_args: FanoutArgs,
         recorder_config: Option<FlashblocksRecorderConfig>,
     ) -> Self {
+        Self::with_publisher(
+            authorizer_vk,
+            builder_sk.map(Publisher::Local),
+            fanout_args,
+            recorder_config,
+        )
+    }
+
+    pub fn with_publisher(
+        authorizer_vk: VerifyingKey,
+        publisher: Option<Publisher>,
+        fanout_args: FanoutArgs,
+        recorder_config: Option<FlashblocksRecorderConfig>,
+    ) -> Self {
         let flashblock_tx = broadcast::Sender::new(BROADCAST_BUFFER_CAPACITY);
         let state = Arc::new(Mutex::new(FlashblocksP2PState::default()));
         let metrics = FlashblocksP2PMetrics::default();
@@ -706,7 +733,8 @@ impl FlashblocksHandle {
         };
         let handle = Self {
             ctx,
-            builder_sk,
+            publisher,
+            control_admission: Arc::new(tokio::sync::Semaphore::new(2)),
             state,
         };
         let moved_handle = handle.clone();
@@ -1014,9 +1042,54 @@ impl FlashblocksHandle {
 
     /// Returns the builder signing key if configured.
     pub fn builder_sk(&self) -> Result<&SigningKey, FlashblocksP2PError> {
-        self.builder_sk
-            .as_ref()
-            .ok_or(FlashblocksP2PError::MissingBuilderSk)
+        match &self.publisher {
+            Some(Publisher::Local(key)) => Ok(key),
+            _ => Err(FlashblocksP2PError::MissingBuilderSk),
+        }
+    }
+
+    pub fn publisher_key(&self) -> Result<VerifyingKey, FlashblocksP2PError> {
+        match &self.publisher {
+            Some(Publisher::Local(key)) => Ok(key.verifying_key()),
+            Some(Publisher::Remote(signer)) => Ok(signer.public_key()),
+            None => Err(FlashblocksP2PError::MissingBuilderSk),
+        }
+    }
+
+    pub fn can_publish(&self) -> bool {
+        self.publisher.is_some()
+    }
+    pub fn is_remote_publisher(&self) -> bool {
+        matches!(self.publisher, Some(Publisher::Remote(_)))
+    }
+
+    pub async fn await_authorized_clearance(
+        &self,
+        wanted: Authorization,
+    ) -> Result<(), FlashblocksP2PError> {
+        let (mut status, mut errors) = {
+            let state = self.state.lock();
+            (
+                state.publishing_status.subscribe(),
+                state.publishing_error.subscribe(),
+            )
+        };
+        loop {
+            if let Some(error) = errors.borrow().clone() {
+                return Err(error);
+            }
+            if let PublishingStatus::Publishing { authorization } = *status.borrow() {
+                return if authorization == wanted {
+                    Ok(())
+                } else {
+                    Err(FlashblocksP2PError::StaleControlMessage)
+                };
+            }
+            tokio::select! {
+                result=status.changed()=>result.map_err(|_|FlashblocksP2PError::StaleControlMessage)?,
+                result=errors.changed()=>result.map_err(|_|FlashblocksP2PError::StaleControlMessage)?,
+            }
+        }
     }
 
     /// Publishes a newly created flashblock from the payload builder to the P2P network.
@@ -1039,15 +1112,64 @@ impl FlashblocksHandle {
         &self,
         authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
     ) -> Result<(), FlashblocksP2PError> {
+        self.publish_new_with_commit(authorized_payload, || Ok(()))
+    }
+
+    /// Commit local preconfirmation state only while this exact session is still cleared.
+    pub fn publish_new_with_commit<E: From<FlashblocksP2PError>>(
+        &self,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
+        commit: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.publish_guarded(authorized_payload, None, commit)
+    }
+
+    pub fn publish_new_with_lease<E: From<FlashblocksP2PError>>(
+        &self,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
+        lease: &super::PublishingLease,
+        commit: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.publish_guarded(authorized_payload, Some(lease), commit)
+    }
+
+    fn publish_guarded<E: From<FlashblocksP2PError>>(
+        &self,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
+        scope: Option<&super::PublishingLease>,
+        commit: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
         let mut state = self.state.lock();
         let PublishingStatus::Publishing { authorization } = *state.publishing_status.borrow()
         else {
-            return Err(FlashblocksP2PError::NotClearedToPublish);
+            return Err(FlashblocksP2PError::NotClearedToPublish.into());
         };
 
         if authorization != authorized_payload.authorized.authorization {
-            return Err(FlashblocksP2PError::ExpiredAuthorization);
+            return Err(FlashblocksP2PError::ExpiredAuthorization.into());
         }
+        if authorized_payload.msg().payload_id != authorization.payload_id {
+            return Err(FlashblocksP2PError::ExpiredAuthorization.into());
+        }
+        if self.is_remote_publisher()
+            && (state.payload_timestamp > authorization.timestamp
+                || (state.payload_timestamp == authorization.timestamp
+                    && state.payload_id != authorization.payload_id))
+        {
+            return Err(FlashblocksP2PError::StaleControlMessage.into());
+        }
+        if self.is_remote_publisher() && scope.is_none() {
+            return Err(FlashblocksP2PError::MissingPublishingLease.into());
+        }
+        if scope
+            .is_some_and(|lease| lease.scope.is_cancelled() || lease.scope != state.pending_start)
+        {
+            return Err(FlashblocksP2PError::StaleControlMessage.into());
+        }
+        if scope.is_some_and(|lease| tokio::time::Instant::now() >= lease.deadline) {
+            return Err(FlashblocksP2PError::Signing(world_chain_signer::Error::Deadline).into());
+        }
+        commit()?;
         self.ctx.publish(&mut state, authorized_payload);
         Ok(())
     }
@@ -1080,158 +1202,6 @@ impl FlashblocksHandle {
             .wait_for(|status| matches!(status, PublishingStatus::Publishing { .. }))
             .await
             .unwrap();
-    }
-
-    /// Initiates flashblock publishing for a new block.
-    ///
-    /// This method should be called immediately after receiving a ForkChoiceUpdated
-    /// with payload attributes and the corresponding Authorization token. It coordinates
-    /// with other potential publishers to ensure only one builder publishes at a time.
-    ///
-    /// The method may transition the node to either Publishing or WaitingToPublish state
-    /// depending on whether other builders are currently active.
-    ///
-    /// # Arguments
-    /// * `new_authorization` - Authorization token signed by rollup-boost for this block
-    ///
-    /// # Note
-    /// Calling this method does not guarantee immediate publishing clearance.
-    /// The node may need to wait for other publishers to stop first.
-    pub fn start_publishing(
-        &self,
-        new_authorization: Authorization,
-    ) -> Result<(), FlashblocksP2PError> {
-        let state = self.state.lock();
-        let builder_sk = self.builder_sk()?;
-        state.publishing_status.send_modify(|status| {
-            match status {
-                PublishingStatus::Publishing { authorization } => {
-                    // Ensure that the new authorization's timestamp is strictly greater than the currently
-                    // active one before updating, otherwise it would be possible to reuse outdated authorizations
-                    // for an active publisher.
-                    if new_authorization.timestamp > authorization.timestamp {
-                        // We are already publishing, and the new authorization is newer than the
-                        // current active one, so we just update the authorization.
-                        *authorization = new_authorization;
-                    }
-                }
-                PublishingStatus::WaitingToPublish {
-                    authorization,
-                    active_publishers,
-                } => {
-                    let most_recent_publisher = active_publishers
-                        .iter()
-                        .map(|(_, timestamp)| *timestamp)
-                        .max()
-                        .unwrap_or_default();
-                    // We are waiting to publish, so we update the authorization and
-                    // the block number at which we requested to start publishing.
-                    if new_authorization.timestamp >= most_recent_publisher + MAX_PUBLISH_WAIT_SEC {
-                        // If the block number is greater than the one we requested to start publishing,
-                        // we will update it.
-                        tracing::warn!(
-                            target: "flashblocks::p2p",
-                            payload_id = %new_authorization.payload_id,
-                            timestamp = %new_authorization.timestamp,
-                            "waiting to publish timed out, starting to publish",
-                        );
-                        *status = PublishingStatus::Publishing {
-                            authorization: new_authorization,
-                        };
-                    } else {
-                        // Continue to wait for the previous builder to stop.
-                        *authorization = new_authorization;
-                    }
-                }
-                PublishingStatus::NotPublishing { active_publishers } => {
-                    // Send an authorized `StartPublish` message to direct peers.
-                    let authorized_msg = AuthorizedMsg::StartPublish(StartPublish);
-                    let authorized_payload =
-                        Authorized::new(builder_sk, new_authorization, authorized_msg);
-                    let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload);
-                    state.send_to_all_peers(&p2p_msg.encode());
-
-                    if active_publishers.is_empty() {
-                        // If we have no previous publishers, we can start publishing immediately.
-                        tracing::info!(
-                            target: "flashblocks::p2p",
-                            payload_id = %new_authorization.payload_id,
-                            "starting to publish flashblocks",
-                        );
-                        *status = PublishingStatus::Publishing {
-                            authorization: new_authorization,
-                        };
-                    } else {
-                        // If we have previous publishers, we will wait for them to stop.
-                        tracing::info!(
-                            target: "flashblocks::p2p",
-                            payload_id = %new_authorization.payload_id,
-                            "waiting to publish flashblocks",
-                        );
-                        *status = PublishingStatus::WaitingToPublish {
-                            authorization: new_authorization,
-                            active_publishers: active_publishers.clone(),
-                        };
-                    }
-                }
-            }
-        });
-
-        Ok(())
-    }
-
-    /// Stops flashblock publishing and notifies the P2P network.
-    ///
-    /// This method broadcasts a StopPublish message to all connected peers and transitions
-    /// the node to a non-publishing state. It should be called when receiving a
-    /// ForkChoiceUpdated without payload attributes or without an Authorization token.
-    pub fn stop_publishing(&self) -> Result<(), FlashblocksP2PError> {
-        let state = self.state.lock();
-        let builder_sk = self.builder_sk()?;
-
-        state.publishing_status.send_modify(|status| {
-            match status {
-                PublishingStatus::Publishing { authorization } => {
-                    // We are currently publishing, so we send a stop message.
-                    tracing::info!(
-                        target: "flashblocks::p2p",
-                        payload_id = %authorization.payload_id,
-                        timestamp = %authorization.timestamp,
-                        "stopping to publish flashblocks",
-                    );
-                    let authorized_payload =
-                        Authorized::new(builder_sk, *authorization, StopPublish.into());
-                    let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload);
-                    state.send_to_all_peers(&p2p_msg.encode());
-                    *status = PublishingStatus::NotPublishing {
-                        active_publishers: Vec::new(),
-                    };
-                }
-                PublishingStatus::WaitingToPublish {
-                    authorization,
-                    active_publishers,
-                    ..
-                } => {
-                    // We are waiting to publish, so we just update the status.
-                    tracing::info!(
-                        target: "flashblocks::p2p",
-                        payload_id = %authorization.payload_id,
-                        timestamp = %authorization.timestamp,
-                        "aborting wait to publish flashblocks",
-                    );
-                    let authorized_payload =
-                        Authorized::new(builder_sk, *authorization, StopPublish.into());
-                    let p2p_msg = FlashblocksP2PMsg::Authorized(authorized_payload);
-                    state.send_to_all_peers(&p2p_msg.encode());
-                    *status = PublishingStatus::NotPublishing {
-                        active_publishers: active_publishers.clone(),
-                    };
-                }
-                PublishingStatus::NotPublishing { .. } => {}
-            }
-        });
-
-        Ok(())
     }
 
     /// Returns a stream of ordered flashblocks starting from the beginning of the current payload.
@@ -1534,6 +1504,7 @@ mod tests {
             atomic::{AtomicUsize, Ordering},
         },
     };
+    use world_chain_primitives::p2p::Authorized;
 
     #[derive(Clone, Debug, Default)]
     struct MockNetwork {

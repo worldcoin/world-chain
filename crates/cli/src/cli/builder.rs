@@ -15,12 +15,12 @@ pub const DEFAULT_MAX_SENTRY_CONNECTIONS: usize = 1;
 
 /// Parameters for pbh builder configuration
 #[derive(Debug, Clone, PartialEq, clap::Args)]
-#[command(next_help_heading = "Block Builder")]
+#[command(next_help_heading = "Block Builder", group=ArgGroup::new("pbh.signer").args(["private_key","builder.signer-config"]).multiple(false))]
 pub struct BuilderArgs {
     #[arg(
         long = "builder.enabled",
         id = "builder.enabled",
-        requires = "private_key",
+        requires = "pbh.signer",
         required = false
     )]
     pub enabled: bool,
@@ -32,9 +32,19 @@ pub struct BuilderArgs {
         alias = "builder.private_key",
         env = "BUILDER_PRIVATE_KEY",
         requires = "builder.enabled",
-        default_value = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        conflicts_with = "builder.signer-config"
     )]
-    pub private_key: PrivateKeySigner,
+    pub private_key: Option<PrivateKeySigner>,
+
+    /// PBH remote signer JSON configuration, including mTLS and expected address.
+    #[arg(
+        long = "builder.signer-config",
+        id = "builder.signer-config",
+        env = "BUILDER_SIGNER_CONFIG",
+        requires = "builder.enabled",
+        conflicts_with = "private_key"
+    )]
+    pub signer_config: Option<PathBuf>,
 
     /// Maximum cumulative uncompressed (EIP-2718 encoded) block size in bytes
     #[arg(
@@ -44,11 +54,39 @@ pub struct BuilderArgs {
     pub block_uncompressed_size_limit: Option<u64>,
 }
 
+impl BuilderArgs {
+    pub fn wallet(&self) -> eyre::Result<Option<world_chain_signer::PbhWallet>> {
+        use world_chain_signer::{PbhSigner, PbhWallet, bridge::PbhBridge, config::PbhConfig};
+        match (&self.signer_config, &self.private_key) {
+            (Some(_), Some(_)) => {
+                eyre::eyre::bail!("remote PBH signing conflicts with a local private key");
+            }
+            (Some(path), None) => {
+                eyre::eyre::ensure!(
+                    self.enabled,
+                    "remote PBH signing requires --builder.enabled"
+                );
+                Ok(Some(PbhWallet::Remote(PbhBridge::new(PbhSigner::new(
+                    PbhConfig::load(path)?,
+                )?))))
+            }
+            (None, key) => {
+                eyre::eyre::ensure!(
+                    !self.enabled || key.is_some(),
+                    "enabled builder requires an explicit local key or remote signer"
+                );
+                Ok(key.clone().map(PbhWallet::Local))
+            }
+        }
+    }
+}
+
 /// Flashblocks configuration
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
 #[command(
     next_help_heading = "Flashblocks",
-    group = ArgGroup::new("authorizer").multiple(false)
+    group = ArgGroup::new("authorizer").multiple(false),
+    group = ArgGroup::new("flashblocks.publisher").args(["builder_sk", "flashblocks.signer-config"]).multiple(false)
 )]
 #[group(id = "flashblocks_presence", requires = "flashblocks.enabled")]
 pub struct FlashblocksArgs {
@@ -83,6 +121,10 @@ pub struct FlashblocksArgs {
     )]
     pub builder_sk: Option<SigningKey>,
 
+    /// Remote publisher JSON configuration, including mTLS and expected key.
+    #[arg(long = "flashblocks.signer-config", id = "flashblocks.signer-config", env = "FLASHBLOCKS_SIGNER_CONFIG", requires = "flashblocks.enabled", conflicts_with_all = ["builder_sk", "override_authorizer_sk", "force_publish"])]
+    pub signer_config: Option<PathBuf>,
+
     /// Override incoming authorizations from rollup boost.
     #[arg(
         long = "flashblocks.override-authorizer-sk",
@@ -114,7 +156,7 @@ pub struct FlashblocksArgs {
         long = "flashblocks.interval",
         env = "FLASHBLOCKS_INTERVAL",
         default_value_t = 200,
-        requires = "builder_sk"
+        requires = "flashblocks.publisher"
     )]
     pub flashblocks_interval: u64,
 
@@ -127,7 +169,7 @@ pub struct FlashblocksArgs {
         alias = "flashblocks.recommit_interval",
         env = "FLASHBLOCKS_RECOMMIT_INTERVAL",
         default_value_t = 200,
-        requires = "builder_sk"
+        requires = "flashblocks.publisher"
     )]
     pub recommit_interval: u64,
 
@@ -223,6 +265,69 @@ mod tests {
     use clap::Parser;
 
     #[derive(Debug, Parser)]
+    struct BuilderCommandParser {
+        #[command(flatten)]
+        builder: BuilderArgs,
+    }
+
+    #[test]
+    fn builder_key_formats_preserve_wallet_address() {
+        let key = format!("{:064x}", 1);
+        let prefixed = format!("0x{key}");
+        for flag in ["--builder.private-key", "--builder.private_key"] {
+            for input in [&key, &prefixed] {
+                let args =
+                    BuilderCommandParser::try_parse_from(["bin", "--builder.enabled", flag, input])
+                        .expect("existing public test key format");
+                assert_eq!(
+                    args.builder
+                        .wallet()
+                        .expect("valid local signer configuration")
+                        .expect("explicit local signer")
+                        .address(),
+                    "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+                        .parse::<alloy_primitives::Address>()
+                        .expect("public test address")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn builder_without_signer_requires_credentials_when_enabled() {
+        let mut args = BuilderCommandParser::parse_from(["bin"]);
+        assert!(
+            args.builder
+                .wallet()
+                .expect("non-builder configuration")
+                .is_none()
+        );
+        args.builder.enabled = true;
+        assert!(args.builder.wallet().is_err());
+    }
+
+    #[test]
+    fn builder_rejects_invalid_signing_keys() {
+        for input in [
+            "00".repeat(32),
+            "ff".repeat(32),
+            "01".repeat(33),
+            "0x01".to_owned(),
+            "not-a-key".to_owned(),
+        ] {
+            assert!(
+                BuilderCommandParser::try_parse_from([
+                    "bin",
+                    "--builder.enabled",
+                    "--builder.private-key",
+                    &input,
+                ])
+                .is_err()
+            );
+        }
+    }
+
+    #[derive(Debug, Parser)]
     struct CommandParser {
         #[command(flatten)]
         flashblocks: FlashblocksArgs,
@@ -231,6 +336,7 @@ mod tests {
     #[test]
     fn flashblocks_override_authorizer() {
         let flashblocks = FlashblocksArgs {
+            signer_config: None,
             enabled: true,
             override_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
             authorizer_vk: None,
@@ -266,6 +372,7 @@ mod tests {
     #[test]
     fn flashblocks_authorizer() {
         let flashblocks = FlashblocksArgs {
+            signer_config: None,
             enabled: true,
             override_authorizer_sk: None,
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
