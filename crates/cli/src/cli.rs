@@ -1,5 +1,5 @@
 use crate::config::{FlashblocksPayloadBuilderConfig, FlashblocksStoreConfig};
-use ::eyre::eyre::{WrapErr, bail};
+use ::eyre::eyre::{WrapErr, bail, eyre};
 use alloy_chains::NamedChain;
 use alloy_primitives::{Address, address};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, ForkCondition};
@@ -148,7 +148,10 @@ impl WorldChainArgs {
             .transpose()
             .wrap_err("Flashblock publisher signer configuration")?;
         if protected {
-            info!(target:"world_chain::signer",pbh_address=%pbh_wallet.address(),flashblocks_publisher=publication_signer.is_some(),"protected remote signing configured");
+            let wallet = pbh_wallet
+                .as_ref()
+                .ok_or_else(|| eyre!("protected signing requires a remote PBH signer"))?;
+            info!(target:"world_chain::signer",pbh_address=%wallet.address(),flashblocks_publisher=publication_signer.is_some(),"protected remote signing configured");
         }
         if self.preconfirmed_logs && self.flashblocks.as_ref().is_none_or(|args| !args.enabled) {
             bail!("--rpc.preconfirmed-logs requires --flashblocks.enabled");
@@ -564,7 +567,7 @@ mod tests {
         ])
         .expect("protected CLI");
         let config = into_world_config(parsed);
-        assert!(config.pbh_wallet.is_remote());
+        assert!(config.pbh_wallet.as_ref().expect("PBH signer").is_remote());
         assert!(config.args.builder.private_key.is_none());
         let flashblocks = config.args.flashblocks.as_ref().expect("Flashblocks");
         assert!(
@@ -669,16 +672,30 @@ mod tests {
         ]);
         assert!(remote.world.builder.private_key.is_none());
         assert!(remote.world.builder.wallet().is_err());
-        let local = CommandParser::parse_from(["bin"]);
-        assert!(local.world.builder.private_key.is_none());
-        assert!(
-            !local
-                .world
-                .builder
-                .wallet()
-                .expect("legacy local mode")
-                .is_remote()
+    }
+
+    #[test]
+    fn non_builder_startup_has_no_pbh_signer() {
+        let authorizer = hex::encode(
+            ed25519_dalek::SigningKey::from_bytes(&[7; 32])
+                .verifying_key()
+                .to_bytes(),
         );
+        for argv in [
+            vec!["bin"],
+            vec![
+                "bin",
+                "--flashblocks.enabled",
+                "--flashblocks.authorizer-vk",
+                &authorizer,
+            ],
+        ] {
+            let config = into_world_config(CommandParserWithRpc::parse_from(argv));
+            assert!(!config.args.builder.enabled);
+            assert!(config.args.builder.private_key.is_none());
+            assert!(config.pbh_wallet.is_none());
+            assert!(config.publication_signer.is_none());
+        }
     }
 
     #[test]

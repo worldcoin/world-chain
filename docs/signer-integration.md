@@ -28,8 +28,9 @@ remain separate; see [proof signing boundaries](proof/signing-boundaries.md).
 ## Configuration
 
 Local signing retains the existing flags. An enabled builder requires an explicit
-local key or remote configuration. The legacy default PBH key is never selected
-for an enabled builder or after a remote failure.
+local key or remote configuration. Nodes without either hold no PBH signer and
+fail explicitly if asked to sign a nullifier transaction. There is no embedded
+default PBH private key or fallback after a remote failure.
 
 Protected mode is enabled by `--builder.signer-config`. To publish Flashblocks,
 also supply `--flashblocks.signer-config`:

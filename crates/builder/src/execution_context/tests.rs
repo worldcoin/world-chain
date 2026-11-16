@@ -29,8 +29,9 @@ async fn production_nullifier_transaction_uses_the_remote_signer_without_changin
     let harness = runtime::Harness::start().await;
     let client = world_chain_signer::PbhSigner::new(harness.pbh("pbh")).expect("remote wallet");
     let (mut ctx, cancel) = context(Address::repeat_byte(0x11));
-    ctx.builder_wallet =
-        world_chain_signer::PbhWallet::Remote(world_chain_signer::bridge::PbhBridge::new(client));
+    ctx.builder_wallet = Some(world_chain_signer::PbhWallet::Remote(
+        world_chain_signer::bridge::PbhBridge::new(client),
+    ));
     ctx.signing_deadline = Some(Instant::now() + std::time::Duration::from_secs(3));
     let handle = tokio::runtime::Handle::current();
     let expected: serde_json::Value =
@@ -40,7 +41,7 @@ async fn production_nullifier_transaction_uses_the_remote_signer_without_changin
         handle.block_on(async move {
             let mut db = InMemoryDB::default();
             db.insert_account_info(
-                ctx.builder_wallet.address(),
+                ctx.builder_wallet.as_ref().expect("PBH signer").address(),
                 AccountInfo {
                     nonce: 7,
                     ..Default::default()
@@ -108,9 +109,11 @@ fn context(entry_point: Address) -> (TestContext, CancelOnDrop) {
         pbh_entry_point: entry_point,
         pbh_signature_aggregator: Address::ZERO,
         signing_deadlines: None,
-        builder_wallet: PrivateKeySigner::from_bytes(&B256::with_last_byte(1))
-            .expect("public scalar-one test key")
-            .into(),
+        builder_wallet: Some(
+            PrivateKeySigner::from_bytes(&B256::with_last_byte(1))
+                .expect("public scalar-one test key")
+                .into(),
+        ),
         block_uncompressed_size_limit: None,
     }
     .build(
@@ -135,7 +138,10 @@ fn pbh_signing_matches_independent_transaction_vectors() {
     assert_eq!(vectors.version, 1);
     for vector in vectors.cases {
         let (ctx, _cancel) = context(vector.entry_point);
-        assert_eq!(ctx.builder_wallet.address(), vectors.signer);
+        assert_eq!(
+            ctx.builder_wallet.as_ref().expect("PBH signer").address(),
+            vectors.signer
+        );
         let mut db = InMemoryDB::default();
         if let Some(nonce) = vector.account_nonce {
             db.insert_account_info(
@@ -189,7 +195,7 @@ fn pbh_signing_matches_independent_transaction_vectors() {
 #[test]
 fn pbh_signing_uses_pending_nonce_and_preserves_nullifier_set() {
     let (ctx, _cancel) = context(Address::repeat_byte(0x11));
-    let address = ctx.builder_wallet.address();
+    let address = ctx.builder_wallet.as_ref().expect("PBH signer").address();
     let mut db = InMemoryDB::default();
     db.insert_account_info(
         address,
@@ -256,6 +262,19 @@ impl RevmDatabase for UnavailableDatabase {
             "test block read unavailable",
         )))
     }
+}
+
+#[test]
+fn pbh_signing_without_configured_signer_fails_before_reading_nonce() {
+    let (mut ctx, _cancel) = context(Address::repeat_byte(0x11));
+    ctx.builder_wallet = None;
+    let mut evm = OpEvmFactory::<OpTx>::default().create_evm(UnavailableDatabase, EVM_ENV.clone());
+    let error = spend_nullifiers_tx(&ctx, &mut evm, HashSet::from([Field::from(1)]))
+        .expect_err("an unconfigured node must not sign a nullifier transaction");
+    assert_eq!(
+        error.to_string(),
+        "PBH transaction signing requires a configured signer"
+    );
 }
 
 #[test]

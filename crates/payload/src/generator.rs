@@ -31,7 +31,9 @@ use world_chain_primitives::{
 };
 
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
-use world_chain_builder::traits::payload_builder::FlashblockPayloadBuilder;
+use world_chain_builder::{
+    signing_deadline::SigningDeadlines, traits::payload_builder::FlashblockPayloadBuilder,
+};
 use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 use world_chain_validator::coordinator::{CoordinatorSnapshot, FlashblocksExecutionCoordinator};
 
@@ -59,7 +61,7 @@ pub struct FlashblocksPayloadJobGenerator<Client, Builder> {
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
     flashblocks_state: FlashblocksExecutionCoordinator,
-    signing_deadlines: Option<world_chain_builder::signing_deadline::SigningDeadlines>,
+    signing_deadlines: Option<SigningDeadlines>,
 }
 
 impl<Client, Builder> FlashblocksPayloadJobGenerator<Client, Builder> {
@@ -92,10 +94,7 @@ impl<Client, Builder> FlashblocksPayloadJobGenerator<Client, Builder> {
         }
     }
 
-    pub fn with_signing_deadlines(
-        mut self,
-        deadlines: Option<world_chain_builder::signing_deadline::SigningDeadlines>,
-    ) -> Self {
+    pub fn with_signing_deadlines(mut self, deadlines: Option<SigningDeadlines>) -> Self {
         self.signing_deadlines = deadlines;
         self
     }

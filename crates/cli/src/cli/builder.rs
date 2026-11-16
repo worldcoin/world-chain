@@ -55,7 +55,7 @@ pub struct BuilderArgs {
 }
 
 impl BuilderArgs {
-    pub fn wallet(&self) -> eyre::Result<world_chain_signer::PbhWallet> {
+    pub fn wallet(&self) -> eyre::Result<Option<world_chain_signer::PbhWallet>> {
         use world_chain_signer::{PbhSigner, PbhWallet, bridge::PbhBridge, config::PbhConfig};
         match (&self.signer_config, &self.private_key) {
             (Some(_), Some(_)) => {
@@ -66,20 +66,16 @@ impl BuilderArgs {
                     self.enabled,
                     "remote PBH signing requires --builder.enabled"
                 );
-                Ok(PbhWallet::Remote(PbhBridge::new(PbhSigner::new(
+                Ok(Some(PbhWallet::Remote(PbhBridge::new(PbhSigner::new(
                     PbhConfig::load(path)?,
-                )?)))
+                )?))))
             }
             (None, key) => {
                 eyre::eyre::ensure!(
                     !self.enabled || key.is_some(),
                     "enabled builder requires an explicit local key or remote signer"
                 );
-                Ok(PbhWallet::Local(match key {
-                    Some(key) => key.clone(),
-                    None => "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-                        .parse()?,
-                }))
+                Ok(key.clone().map(PbhWallet::Local))
             }
         }
     }
@@ -285,9 +281,9 @@ mod tests {
                         .expect("existing public test key format");
                 assert_eq!(
                     args.builder
-                        .private_key
-                        .as_ref()
-                        .expect("explicit test key")
+                        .wallet()
+                        .expect("valid local signer configuration")
+                        .expect("explicit local signer")
                         .address(),
                     "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
                         .parse::<alloy_primitives::Address>()
@@ -295,6 +291,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn builder_without_signer_requires_credentials_when_enabled() {
+        let mut args = BuilderCommandParser::parse_from(["bin"]);
+        assert!(
+            args.builder
+                .wallet()
+                .expect("non-builder configuration")
+                .is_none()
+        );
+        args.builder.enabled = true;
+        assert!(args.builder.wallet().is_err());
     }
 
     #[test]

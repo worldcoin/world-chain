@@ -43,7 +43,7 @@ use world_chain_rpc::eth::FlashblocksEthApiBuilder;
 
 use crossbeam_channel::{Receiver, Sender};
 use tracing::{debug, info};
-use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
+use world_chain_builder::{WorldChainPayloadBuilderCtxBuilder, signing_deadline::SigningDeadlines};
 use world_chain_evm::{
     BlockExecutionWitness, ExecutionWitnessHandle, WitnessCache, WorldChainEvmConfig,
     WorldChainExecutorBuilder,
@@ -423,8 +423,9 @@ where
         let signing_deadlines = self
             .config
             .pbh_wallet
-            .is_remote()
-            .then(world_chain_builder::signing_deadline::SigningDeadlines::default);
+            .as_ref()
+            .is_some_and(|wallet| wallet.is_remote())
+            .then(SigningDeadlines::default);
         let ctx_builder = WorldChainPayloadBuilderCtxBuilder {
             verified_blockspace_capacity: pbh.verified_blockspace_capacity,
             pbh_entry_point: pbh.entrypoint,

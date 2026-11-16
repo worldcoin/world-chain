@@ -62,7 +62,7 @@ pub struct WorldChainPayloadBuilderCtx<Client: ChainSpecProvider> {
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub client: Client,
-    pub builder_wallet: PbhWallet,
+    pub builder_wallet: Option<PbhWallet>,
     pub signing_deadline: Option<Instant>,
     pub block_uncompressed_size_limit: Option<u64>,
 }
@@ -72,7 +72,7 @@ pub struct WorldChainPayloadBuilderCtxBuilder {
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
-    pub builder_wallet: PbhWallet,
+    pub builder_wallet: Option<PbhWallet>,
     pub signing_deadlines: Option<SigningDeadlines>,
     pub block_uncompressed_size_limit: Option<u64>,
 }
@@ -543,9 +543,13 @@ where
     DB: revm::Database,
     <DB as revm::Database>::Error: Send + Sync + 'static,
 {
+    let wallet = ctx
+        .builder_wallet
+        .as_ref()
+        .ok_or_else(|| eyre!("PBH transaction signing requires a configured signer"))?;
     let nonce = evm
         .db_mut()
-        .basic(ctx.builder_wallet.address())?
+        .basic(wallet.address())?
         .unwrap_or_default()
         .nonce;
 
@@ -565,11 +569,9 @@ where
     let op_alloy_consensus::OpTypedTransaction::Eip1559(ref mut transaction) = tx else {
         return Err(eyre!("PBH nullifier spending requires type 2"));
     };
-    let signature = ctx
-        .builder_wallet
-        .sign(transaction, ctx.signing_deadline, || {
-            ctx.inner.cancel.is_cancelled()
-        })?;
+    let signature = wallet.sign(transaction, ctx.signing_deadline, || {
+        ctx.inner.cancel.is_cancelled()
+    })?;
     let signed: OpTransactionSigned = tx.into_signed(signature).into();
     Ok(signed.try_into_recovered_unchecked()?)
 }

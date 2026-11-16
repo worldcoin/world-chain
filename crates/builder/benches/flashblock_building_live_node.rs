@@ -103,7 +103,7 @@ where
             verified_blockspace_capacity: 70,
             pbh_entry_point: PBH_DEV_ENTRYPOINT,
             pbh_signature_aggregator: PBH_DEV_SIGNATURE_AGGREGATOR,
-            builder_wallet: signer(6).into(),
+            builder_wallet: Some(signer(6).into()),
             signing_deadlines: None,
             block_uncompressed_size_limit: None,
         },
