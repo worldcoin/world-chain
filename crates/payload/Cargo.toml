@@ -39,3 +39,10 @@ tracing.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
+tempfile.workspace = true
+url.workspace = true
+world-chain-signer.workspace = true
+ed25519-dalek.workspace = true
+serde_json.workspace = true

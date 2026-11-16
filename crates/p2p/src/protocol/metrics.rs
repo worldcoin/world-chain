@@ -10,6 +10,8 @@ const UNTRUSTED_PEER_LABEL: &str = "untrusted";
 pub struct FlashblocksP2PMetrics {
     /// Remote publication/control signing operations that failed.
     pub publishing_signing_failed: Counter,
+    /// Payload jobs continuing without Flashblock publication after fencing or failure.
+    pub publishing_disabled: Counter,
     /// Publishing control results discarded after cancellation or a payload change.
     pub publishing_control_stale: Counter,
     /// Publishing controls rejected because their fields or signatures are invalid.

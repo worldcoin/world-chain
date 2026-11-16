@@ -25,7 +25,7 @@ use tokio::{
     sync::oneshot,
     time::{Interval, Sleep},
 };
-use tracing::{debug, error, info, span, trace};
+use tracing::{debug, error, info, span, trace, warn};
 use world_chain_builder::traits::payload_builder::FlashblockPayloadBuilder;
 use world_chain_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use world_chain_primitives::{
@@ -35,6 +35,9 @@ use world_chain_primitives::{
     primitives::FlashblocksPayloadV1,
 };
 use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
+
+#[cfg(test)]
+mod tests;
 
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
@@ -286,6 +289,27 @@ where
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
 {
+    fn disable_publication(&mut self, error: FlashblocksP2PError) {
+        self.p2p_handler
+            .ctx
+            .metrics
+            .publishing_disabled
+            .increment(1);
+        match error {
+            FlashblocksP2PError::NotClearedToPublish
+            | FlashblocksP2PError::StaleControlMessage
+            | FlashblocksP2PError::ExpiredAuthorization => {
+                debug!(target: "flashblocks::payload_builder", %error, "publication fenced; continuing execution payload building");
+            }
+            _ => {
+                warn!(target: "flashblocks::payload_builder", %error, "publication unavailable; continuing execution payload building");
+            }
+        }
+        self.authorization = None;
+        self.pending_publication.take();
+        self._publishing_lease.take();
+    }
+
     /// Spawns a new payload build task that builds on top of the current `best_payload`.
     ///
     /// This method creates a new build job using the current `best_payload` as the base,
@@ -531,9 +555,7 @@ where
                         .metrics
                         .publishing_signing_failed
                         .increment(1);
-                    this._publishing_lease.take();
-                    this.pending_block.take();
-                    return Poll::Ready(Err(PayloadBuilderError::other(error)));
+                    this.disable_publication(error);
                 }
                 Poll::Ready(Ok(authorized)) => {
                     let result = match &this._publishing_lease {
@@ -547,22 +569,31 @@ where
                         )),
                     };
                     if let Err(error) = result {
-                        this._publishing_lease.take();
-                        this.pending_block.take();
-                        return Poll::Ready(Err(PayloadBuilderError::Other(error.into())));
+                        if let Some(error) = error.downcast_ref::<FlashblocksP2PError>() {
+                            this.disable_publication(error.clone());
+                        } else {
+                            this._publishing_lease.take();
+                            this.pending_block.take();
+                            return Poll::Ready(Err(PayloadBuilderError::Other(error.into())));
+                        }
+                    } else {
+                        let prev_totals = this.committed_payload.payload().map(payload_totals);
+                        this.committed_payload = CommittedPayloadState::from((
+                            PayloadState::Best(pending.payload.clone()),
+                            pending.access_list,
+                        ));
+                        this.record_payload_metrics(
+                            &pending.payload,
+                            prev_totals,
+                            this.block_index,
+                        );
+                        this.block_index += 1;
+                        this.spawn_build_job();
+                        this.recommit_interval.reset();
+                        this.flashblock_deadline
+                            .as_mut()
+                            .reset(tokio::time::Instant::now() + this.flashblock_interval);
                     }
-                    let prev_totals = this.committed_payload.payload().map(payload_totals);
-                    this.committed_payload = CommittedPayloadState::from((
-                        PayloadState::Best(pending.payload.clone()),
-                        pending.access_list,
-                    ));
-                    this.record_payload_metrics(&pending.payload, prev_totals, this.block_index);
-                    this.block_index += 1;
-                    this.spawn_build_job();
-                    this.recommit_interval.reset();
-                    this.flashblock_deadline
-                        .as_mut()
-                        .reset(tokio::time::Instant::now() + this.flashblock_interval);
                 }
             }
         }
@@ -587,16 +618,16 @@ where
                 this.flashblock_deadline.as_mut().await;
                 Ok::<(), FlashblocksP2PError>(())
             };
-            match pin!(future).poll_unpin(cx) {
-                Poll::Ready(Ok(())) => true,
-                Poll::Ready(Err(error)) => {
-                    this.pending_publication.take();
-                    this._publishing_lease.take();
-                    this.pending_block.take();
-                    return Poll::Ready(Err(PayloadBuilderError::other(error)));
-                }
-                Poll::Pending => false,
+            pin!(future).poll_unpin(cx)
+        };
+        let clearance = match clearance {
+            Poll::Ready(Ok(())) => true,
+            Poll::Ready(Err(error)) => {
+                this.disable_publication(error);
+                cx.waker().wake_by_ref();
+                false
             }
+            Poll::Pending => false,
         };
         if clearance
             && !this.best_payload.0.is_frozen()
@@ -751,7 +782,25 @@ where
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         info!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), ?kind, "resolving payload job");
 
-        if self.committed_payload.is_empty() && self.pending_block.is_none() {
+        let best_payload = if self.p2p_handler.is_remote_publisher() {
+            // Sealing needs the executed block, not an optional Flashblock signature.
+            let pending = self.pending_publication.take();
+            self._publishing_lease.take();
+            pending
+                .map(|pending| pending.payload)
+                .or_else(|| {
+                    if self.authorization.is_none() {
+                        self.best_payload.0.payload().cloned()
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| self.committed_payload.clone_payload())
+        } else {
+            self.committed_payload.clone_payload()
+        };
+
+        if best_payload.is_none() && self.pending_block.is_none() {
             trace!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "no best payload yet and no active build job, spawning new build job");
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
             self.spawn_build_job();
@@ -770,7 +819,7 @@ where
 
         let mut empty_payload = None;
 
-        if self.committed_payload.is_empty() {
+        if best_payload.is_none() {
             debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
 
             let args = BuildArguments {
@@ -821,7 +870,7 @@ where
         }
 
         let fut = ResolveBestPayload {
-            best_payload: self.committed_payload.clone_payload(),
+            best_payload,
             maybe_better,
             empty_payload: empty_payload.filter(|_| kind != PayloadKind::WaitForPending),
         };

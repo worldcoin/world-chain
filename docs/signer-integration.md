@@ -122,9 +122,11 @@ budget. The default 200 ms publishing interval is not a three-second latency cla
 
 Preparation and state fencing run synchronously; remote I/O runs outside P2P locks
 and network polling. Start grants no clearance before verified completion. Stop
-and peer handover revoke clearance before signing their notification. Failures
-reach the waiting job and metrics; a missing stop notification never restores
-clearance. The existing two-second peer handover fallback remains unchanged.
+and peer handover revoke clearance before signing their notification. Handover
+and publication signing failures fence broadcasting and switch the job to
+execution-only building, with failure telemetry. PBH signing remains mandatory;
+its failures still fail the affected build attempt. A missing stop notification
+never restores clearance. The existing two-second peer handover fallback remains unchanged.
 
 A publishing lease binds a payload job to its generation and deadline. Signing
 checks the exact grant, publisher, payload and current state. Completion rechecks
@@ -136,9 +138,15 @@ The preconfirmation cache is not mutated by a fenced result.
 Only one publication future is retained per job. It is awaited before committing
 the frame/index or starting work on its precommitted state. Dropping that future
 cancels its RPC. Local and receive-only modes preserve their existing operation.
+When `getPayload` resolves a remote publication in flight, cancel that optional
+publication and return the already-executed full block, preserving its committed
+prefix. This does not insert a Flashblock into the cache or broadcast it. At the
+original job deadline, cancel signing and fence publishing; never commit a late
+signature to recover a final frame.
 `worldchain.remote_signer` records request/failure/in-flight/duration metrics by
 role; `flashblocks.p2p.publishing_signing_failed`, `publishing_control_stale` and
 `publishing_control_invalid` expose failed/discarded publication work.
+`flashblocks.p2p.publishing_disabled` counts jobs entering execution-only mode.
 
 ## Verification and rollout
 
@@ -152,16 +160,18 @@ The original scalar-one corpus is not an enrolled runtime identity.
 
 Offline tests cover configuration exclusion, exact encodings, limits, stale and
 expired results, cache fencing and budget ownership. Explicitly ignored mTLS tests
-exercise protected CLI/configuration loading, the production `spend_nullifiers_tx` path and P2P publishing handler,
+exercise protected CLI/configuration loading, the production `spend_nullifiers_tx` path, payload jobs and P2P publishing handler,
 including finalization/cancellation, denial, rapid handovers, a held signed response
 cancelled by stop, same-grant generation changes and complete 16 MiB frames.
+Job regressions cover build-only handover/denial, resolving a built block while
+signing is held, and deadline cancellation without cache publication.
 Build the pinned signer example with `flashblocks,transactions`, then set its binary
 path and exact revision before running:
 
 ```sh
 cargo nextest run --locked -p world-chain-signer -p world-chain-builder -p world-chain-cli \
-  -p world-chain-p2p --run-ignored only --test-threads 1 \
-  -E 'test(/actual_role_clients|actual_client_signs_complete|production_nullifier_transaction|remote_controls_payload|protected_startup_loads/)'
+  -p world-chain-p2p -p world-chain-payload --run-ignored only --test-threads 1 \
+  -E 'test(/actual_role_clients|actual_client_signs_complete|production_nullifier_transaction|remote_controls_payload|protected_startup_loads|remote_job/)'
 ```
 
 `WORLD_CHAIN_SIGNER_HARNESS_BINARY` identifies the disposable executable;

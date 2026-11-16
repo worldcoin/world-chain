@@ -268,14 +268,28 @@ where
             _ => authorization,
         };
 
-        let authorization = authorization.filter(|_| self.p2p_handler.can_publish());
+        let mut authorization = authorization.filter(|_| self.p2p_handler.can_publish());
 
         let publishing_lease = if let Some(auth) = authorization {
             // Notify the P2P handler to start publishing for this authorization
-            self.p2p_handler
-                .start_publishing_until(auth, until)
-                .map_err(PayloadBuilderError::other)
-                .map(Some)?
+            match self.p2p_handler.start_publishing_until(auth, until) {
+                Ok(lease) => Some(lease),
+                Err(error) => {
+                    self.p2p_handler
+                        .ctx
+                        .metrics
+                        .publishing_disabled
+                        .increment(1);
+                    self.p2p_handler
+                        .ctx
+                        .metrics
+                        .publishing_signing_failed
+                        .increment(1);
+                    warn!(target: "flashblocks::payload_builder", %error, "publication unavailable; starting execution-only payload job");
+                    authorization = None;
+                    None
+                }
+            }
         } else {
             None
         };

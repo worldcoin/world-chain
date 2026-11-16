@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn protected_signing_excludes_local_sources_and_never_uses_the_legacy_default() {
-        let public_key = "0000000000000000000000000000000000000000000000000000000000000001";
+        let test_private_key = "0000000000000000000000000000000000000000000000000000000000000001";
         assert!(
             CommandParser::try_parse_from([
                 "bin",
@@ -625,7 +625,7 @@ mod tests {
                 "--builder.signer-config",
                 "missing.json",
                 "--builder.private-key",
-                public_key
+                test_private_key
             ])
             .is_err()
         );
@@ -633,14 +633,14 @@ mod tests {
             vec![
                 "--flashblocks.enabled",
                 "--flashblocks.builder-sk",
-                public_key,
+                test_private_key,
             ],
             vec![
                 "--flashblocks.enabled",
                 "--flashblocks.override-authorizer-sk",
-                public_key,
+                test_private_key,
                 "--flashblocks.builder-sk",
-                public_key,
+                test_private_key,
                 "--flashblocks.force-publish",
             ],
         ] {
