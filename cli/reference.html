@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-f36b8ddf.js";
+            window.path_to_searchindex_js = "../searchindex-faa72917.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-87388434.js"></script>
@@ -317,7 +317,11 @@ Block Builder:
           Private key for the builder used to update PBH nullifiers
           
           [env: BUILDER_PRIVATE_KEY=]
-          [default: 0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef]
+
+      --builder.signer-config &lt;builder.signer-config&gt;
+          PBH remote signer JSON configuration, including mTLS and expected address
+          
+          [env: BUILDER_SIGNER_CONFIG=]
 
       --builder.block-uncompressed-size-limit &lt;BLOCK_UNCOMPRESSED_SIZE_LIMIT&gt;
           Maximum cumulative uncompressed (EIP-2718 encoded) block size in bytes
@@ -337,6 +341,11 @@ Flashblocks:
           Flashblocks signing key used to sign authorized flashblocks payloads
           
           [env: FLASHBLOCKS_BUILDER_SK=]
+
+      --flashblocks.signer-config &lt;flashblocks.signer-config&gt;
+          Remote publisher JSON configuration, including mTLS and expected key
+          
+          [env: FLASHBLOCKS_SIGNER_CONFIG=]
 
       --flashblocks.override-authorizer-sk &lt;OVERRIDE_AUTHORIZER_SK&gt;
           Override incoming authorizations from rollup boost
