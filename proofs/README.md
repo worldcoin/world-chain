@@ -7,3 +7,4 @@
 ## Architecture and maintenance
 
 - [Reproducible proof builds](../docs/proof/reproducible-builds.md): measured workspaces, verification keys and enclave PCRs.
+- [Signing boundaries](../docs/proof/signing-boundaries.md): proof-result keys, service wallets and dependency remediation gates.

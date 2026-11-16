@@ -11,8 +11,8 @@ use reth_ethereum::network::{api::PeerId, eth_wire::multiplex::ProtocolConnectio
 use reth_network::types::ReputationChangeKind;
 use world_chain_primitives::{
     p2p::{
-        Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg, FlashblocksP2PMsgParts,
-        StartPublish, StopPublish,
+        AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg, FlashblocksP2PMsgParts, StartPublish,
+        StopPublish,
     },
     primitives::FlashblocksPayloadV1,
 };
@@ -191,9 +191,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
 
             match msg {
                 FlashblocksP2PMsgParts::Authorized(parts) => {
-                    if Ok(parts.authorization.builder_vk)
-                        == this.protocol.handle.builder_sk().map(|s| s.verifying_key())
-                    {
+                    if Ok(parts.authorization.builder_vk) == this.protocol.handle.publisher_key() {
                         tracing::trace!(
                             target: "flashblocks::p2p",
                             peer_id = %this.peer_id,
@@ -494,83 +492,36 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     /// - If we are waiting to publish, updates the list of active publishers
     /// - If we are not publishing, adds the new publisher to the list of active publishers
     fn handle_start_publish(&mut self, authorized_payload: AuthorizedPayload<StartPublish>) {
-        let Ok(builder_sk) = self.protocol.handle.builder_sk() else {
-            return;
-        };
-        let authorization = &authorized_payload.authorized.authorization;
-        let state = self.protocol.handle.state.lock();
-
-        // Check if the request is expired for dos protection.
-        // It's important to ensure that this `StartPublish` request
-        // is very recent, or it could be used in a replay attack.
-        if state.payload_timestamp > authorization.timestamp {
-            tracing::warn!(
-                target: "flashblocks::p2p",
-                peer_id = %self.peer_id,
-                current_timestamp = state.payload_timestamp,
-                timestamp = authorized_payload.authorized.authorization.timestamp,
-                "received initiate build request with outdated timestamp",
-            );
-            drop(state);
-            self.protocol
-                .network
-                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
-            return;
-        }
-
-        state.publishing_status.send_modify(|status| {
-            let active_publishers = match status {
-                PublishingStatus::Publishing {
-                    authorization: our_authorization,
-                } => {
+        let authorization = authorized_payload.authorized.authorization;
+        if let Err(error) = self
+            .protocol
+            .handle
+            .peer_start_publishing(self.peer_id, authorization)
+        {
+            match error {
+                super::error::FlashblocksP2PError::ExpiredAuthorization => {
+                    self.protocol
+                        .network
+                        .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+                }
+                super::error::FlashblocksP2PError::StaleControlMessage => {
                     tracing::debug!(
                         target: "flashblocks::p2p",
                         peer_id = %self.peer_id,
-                        "Received StartPublish over p2p, stopping publishing flashblocks"
+                        %error,
+                        "discarding superseded publisher handover response",
                     );
-
-                    let authorized =
-                        Authorized::new(builder_sk, *our_authorization, StopPublish.into());
-                    let p2p_msg = FlashblocksP2PMsg::Authorized(authorized);
-                    state.send_to_all_peers(&p2p_msg.encode());
-
-                    *status = PublishingStatus::NotPublishing {
-                        active_publishers: vec![(
-                            authorization.builder_vk,
-                            authorization.timestamp,
-                        )],
-                    };
-
-                    return;
                 }
-                PublishingStatus::WaitingToPublish {
-                    active_publishers, ..
-                } => {
-                    // We are currently waiting to build, but someone else is requesting to build
-                    // This could happen during a double failover.
-                    // We have a potential race condition here so we'll just wait for the
-                    // build request override to kick in next block.
+                _ => {
                     tracing::warn!(
                         target: "flashblocks::p2p",
                         peer_id = %self.peer_id,
-                        "Received StartPublish over p2p while already waiting to publish, ignoring",
+                        %error,
+                        "failed to sign publisher handover response",
                     );
-                    active_publishers
                 }
-                PublishingStatus::NotPublishing { active_publishers } => active_publishers,
-            };
-
-            if let Some((_, timestamp)) = active_publishers
-                .iter_mut()
-                .find(|(publisher, _)| *publisher == authorization.builder_vk)
-            {
-                // This is an existing publisher, we should update their block number
-                *timestamp = authorization.timestamp;
-            } else {
-                // This is a new publisher, we should add them to the list of active publishers
-                active_publishers.push((authorization.builder_vk, authorization.timestamp));
             }
-        });
+        }
     }
 
     /// Handles incoming `StopPublish` messages from a peer.

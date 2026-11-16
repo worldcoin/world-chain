@@ -4,14 +4,14 @@ use crate::{
 };
 use alloy_consensus::{Block, SignableTransaction, Transaction, transaction::SignerRecoverable};
 use alloy_eips::{Encodable2718, Typed2718};
-use alloy_network::{TransactionBuilder, TxSignerSync};
+use alloy_network::TransactionBuilder;
 use alloy_op_evm::block::PreRefundGasUsed;
 use alloy_primitives::{Address, U256};
-use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
 use op_alloy_consensus::EIP1559ParamError;
 use op_alloy_rpc_types::OpTransactionRequest;
 
+use crate::signing_deadline::SigningDeadlines;
 use alloy_rpc_types_engine::PayloadId;
 use op_revm::{L1BlockInfo, OpSpecId, constants::L1_BLOCK_CONTRACT};
 use reth_basic_payload_builder::PayloadConfig;
@@ -48,6 +48,10 @@ use world_chain_pool::{
     bindings::IPBHEntryPoint::spendNullifierHashesCall,
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
 };
+use world_chain_signer::PbhWallet;
+
+#[cfg(test)]
+mod tests;
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug, Clone)]
@@ -58,7 +62,8 @@ pub struct WorldChainPayloadBuilderCtx<Client: ChainSpecProvider> {
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
     pub client: Client,
-    pub builder_private_key: PrivateKeySigner,
+    pub builder_wallet: PbhWallet,
+    pub signing_deadline: Option<Instant>,
     pub block_uncompressed_size_limit: Option<u64>,
 }
 
@@ -67,7 +72,8 @@ pub struct WorldChainPayloadBuilderCtxBuilder {
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
-    pub builder_private_key: PrivateKeySigner,
+    pub builder_wallet: PbhWallet,
+    pub signing_deadlines: Option<SigningDeadlines>,
     pub block_uncompressed_size_limit: Option<u64>,
 }
 
@@ -488,6 +494,10 @@ where
     where
         Self: Sized,
     {
+        let signing_deadline = self
+            .signing_deadlines
+            .as_ref()
+            .and_then(|budgets| budgets.get(config.payload_id));
         let inner = OpPayloadBuilderCtx {
             evm_config,
             builder_config,
@@ -503,7 +513,8 @@ where
             verified_blockspace_capacity: self.verified_blockspace_capacity,
             pbh_entry_point: self.pbh_entry_point,
             pbh_signature_aggregator: self.pbh_signature_aggregator,
-            builder_private_key: self.builder_private_key.clone(),
+            builder_wallet: self.builder_wallet.clone(),
+            signing_deadline,
             block_uncompressed_size_limit: self.block_uncompressed_size_limit,
         }
     }
@@ -534,7 +545,7 @@ where
 {
     let nonce = evm
         .db_mut()
-        .basic(ctx.builder_private_key.address())?
+        .basic(ctx.builder_wallet.address())?
         .unwrap_or_default()
         .nonce;
 
@@ -551,7 +562,14 @@ where
         .build_typed_tx()
         .map_err(|e| eyre!("{:?}", e))?;
 
-    let signature = ctx.builder_private_key.sign_transaction_sync(&mut tx)?;
+    let op_alloy_consensus::OpTypedTransaction::Eip1559(ref mut transaction) = tx else {
+        return Err(eyre!("PBH nullifier spending requires type 2"));
+    };
+    let signature = ctx
+        .builder_wallet
+        .sign(transaction, ctx.signing_deadline, || {
+            ctx.inner.cancel.is_cancelled()
+        })?;
     let signed: OpTransactionSigned = tx.into_signed(signature).into();
     Ok(signed.try_into_recovered_unchecked()?)
 }

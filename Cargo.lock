@@ -18974,14 +18974,17 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-signer-local 2.5.0",
+ "alloy-sol-types",
  "color-eyre",
  "criterion",
  "crossbeam-channel",
+ "ed25519-dalek",
  "metrics",
  "metrics-derive",
  "op-alloy-consensus 2.0.0 (git+https://github.com/ethereum-optimism/optimism?rev=722072949ce583f361424a160082186ee14cac71)",
  "op-alloy-rpc-types 2.0.0 (git+https://github.com/ethereum-optimism/optimism?rev=722072949ce583f361424a160082186ee14cac71)",
  "op-revm 20.0.0 (git+https://github.com/ethereum-optimism/optimism?rev=722072949ce583f361424a160082186ee14cac71)",
+ "parking_lot",
  "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-evm",
@@ -19003,14 +19006,17 @@ dependencies = [
  "semaphore-rs",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
+ "url",
  "world-chain-builder",
  "world-chain-chainspec",
  "world-chain-evm",
  "world-chain-node",
  "world-chain-pool",
  "world-chain-primitives",
+ "world-chain-signer",
  "world-chain-test-utils",
 ]
 
@@ -19096,10 +19102,15 @@ dependencies = [
  "reth-optimism-payload-builder",
  "reth-rpc-server-types",
  "reth-tracing",
+ "serde_json",
+ "tempfile",
+ "tokio",
  "tracing",
+ "url",
  "world-chain-chainspec",
  "world-chain-commands",
  "world-chain-primitives",
+ "world-chain-signer",
 ]
 
 [[package]]
@@ -19349,8 +19360,10 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "url",
  "world-chain-cli",
  "world-chain-primitives",
+ "world-chain-signer",
 ]
 
 [[package]]
@@ -19987,6 +20000,40 @@ dependencies = [
  "world-chain-p2p",
  "world-chain-primitives",
  "world-chain-validator",
+]
+
+[[package]]
+name = "world-chain-signer"
+version = "2.8.3"
+dependencies = [
+ "alloy-consensus 2.5.0",
+ "alloy-eips 2.5.0",
+ "alloy-network 2.5.0",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-signer-local 2.5.0",
+ "blake3",
+ "bytes",
+ "ed25519-dalek",
+ "hex",
+ "http 1.5.0",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "metrics",
+ "metrics-derive",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tracing",
+ "url",
+ "world-chain-primitives",
+ "zeroize",
 ]
 
 [[package]]

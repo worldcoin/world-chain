@@ -350,25 +350,51 @@ impl FlashblocksExecutionCoordinator {
         authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
         built_payload: OpBuiltPayload,
     ) -> eyre::Result<()> {
+        self.publish_built_payload_checked(authorized_payload, built_payload, None)
+    }
+
+    pub fn publish_built_payload_with_lease(
+        &self,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
+        built_payload: OpBuiltPayload,
+        lease: &world_chain_p2p::protocol::PublishingLease,
+    ) -> eyre::Result<()> {
+        self.publish_built_payload_checked(authorized_payload, built_payload, Some(lease))
+    }
+
+    fn publish_built_payload_checked(
+        &self,
+        authorized_payload: AuthorizedPayload<FlashblocksPayloadV1>,
+        built_payload: OpBuiltPayload,
+        lease: Option<&world_chain_p2p::protocol::PublishingLease>,
+    ) -> eyre::Result<()> {
         let flashblock = authorized_payload.msg().clone();
 
         let index = flashblock.index;
         let flashblock = Flashblock { flashblock };
 
         let mut lock = self.inner.write();
-        lock.flashblocks.push(flashblock.clone())?;
-        let checkpoint_matches = lock.validated.canonical_tip.is_some_and(|tip| {
-            built_payload.block().parent_hash() == tip.hash
-                && built_payload.block().number().checked_sub(1) == Some(tip.number)
-        });
-        lock.latest_payload = Some((built_payload, index));
-        lock.latest_payload_at = Some(Instant::now());
-        lock.latest_payload_generation =
-            checkpoint_matches.then_some(lock.validated.canonical_generation);
-        drop(lock);
-
-        self.p2p_handle.publish_new(authorized_payload.clone())?;
-
+        let commit = || -> eyre::Result<()> {
+            lock.flashblocks.push(flashblock.clone())?;
+            let checkpoint_matches = lock.validated.canonical_tip.is_some_and(|tip| {
+                built_payload.block().parent_hash() == tip.hash
+                    && built_payload.block().number().checked_sub(1) == Some(tip.number)
+            });
+            lock.latest_payload = Some((built_payload, index));
+            lock.latest_payload_at = Some(Instant::now());
+            lock.latest_payload_generation =
+                checkpoint_matches.then_some(lock.validated.canonical_generation);
+            Ok(())
+        };
+        match lease {
+            Some(lease) => {
+                self.p2p_handle
+                    .publish_new_with_lease(authorized_payload, lease, commit)?
+            }
+            None => self
+                .p2p_handle
+                .publish_new_with_commit(authorized_payload, commit)?,
+        }
         Ok(())
     }
 
@@ -803,6 +829,59 @@ mod tests {
         inner.latest_payload_at = Some(validated_at);
         inner.latest_payload_generation = Some(inner.validated.canonical_generation);
         (payload, executed)
+    }
+
+    #[tokio::test]
+    async fn fenced_local_publication_does_not_mutate_preconfirmation_cache() {
+        let (coordinator, _) = test_coordinator();
+        let (payload, _) = cache_executed_payload(
+            &coordinator,
+            BlockNumHash::new(10, B256::repeat_byte(1)),
+            0,
+            Instant::now(),
+        );
+        let before = coordinator.snapshot();
+        let key = SigningKey::from_bytes(&[1; 32]);
+        let auth = Authorization::new(
+            payload.id(),
+            payload.block().timestamp(),
+            &key,
+            key.verifying_key(),
+        );
+        coordinator
+            .p2p_handle
+            .start_publishing(auth)
+            .expect("local start");
+        let flashblock = FlashblocksPayloadV1 {
+            payload_id: payload.id(),
+            index: 0,
+            base: Some(ExecutionPayloadBaseV1 {
+                timestamp: payload.block().timestamp(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let signed = AuthorizedPayload::new(&key, auth, flashblock);
+        coordinator
+            .p2p_handle
+            .stop_publishing()
+            .expect("fence while signing is in flight");
+        assert!(coordinator.publish_built_payload(signed, payload).is_err());
+        let after = coordinator.snapshot();
+        assert_eq!(
+            after.flashblocks.flashblocks(),
+            before.flashblocks.flashblocks()
+        );
+        assert_eq!(
+            after
+                .latest_payload
+                .as_ref()
+                .map(|(p, i)| (p.block().hash(), *i)),
+            before
+                .latest_payload
+                .as_ref()
+                .map(|(p, i)| (p.block().hash(), *i))
+        );
     }
 
     fn process_cached_payload(

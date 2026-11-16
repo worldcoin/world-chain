@@ -8,6 +8,12 @@ const UNTRUSTED_PEER_LABEL: &str = "untrusted";
 #[derive(Clone, Metrics)]
 #[metrics(scope = "flashblocks.p2p")]
 pub struct FlashblocksP2PMetrics {
+    /// Remote publication/control signing operations that failed.
+    pub publishing_signing_failed: Counter,
+    /// Publishing control results discarded after cancellation or a payload change.
+    pub publishing_control_stale: Counter,
+    /// Publishing controls rejected because their fields or signatures are invalid.
+    pub publishing_control_invalid: Counter,
     /// Current number of connected flashblocks peers.
     #[metric(rename = "peers")]
     pub connected_peers: Gauge,

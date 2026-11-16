@@ -59,6 +59,7 @@ pub struct FlashblocksPayloadJobGenerator<Client, Builder> {
     p2p_handler: FlashblocksHandle,
     /// The current flashblocks state
     flashblocks_state: FlashblocksExecutionCoordinator,
+    signing_deadlines: Option<world_chain_builder::signing_deadline::SigningDeadlines>,
 }
 
 impl<Client, Builder> FlashblocksPayloadJobGenerator<Client, Builder> {
@@ -85,9 +86,18 @@ impl<Client, Builder> FlashblocksPayloadJobGenerator<Client, Builder> {
             pre_cached: None,
             p2p_handler,
             authorizations: auth_rx,
+            signing_deadlines: None,
             override_authorizer_sk,
             force_publish,
         }
+    }
+
+    pub fn with_signing_deadlines(
+        mut self,
+        deadlines: Option<world_chain_builder::signing_deadline::SigningDeadlines>,
+    ) -> Self {
+        self.signing_deadlines = deadlines;
+        self
     }
 
     /// Returns the maximum duration a job should be allowed to run.
@@ -171,6 +181,14 @@ where
 
         let timestamp = config.attributes.timestamp();
         let until = self.job_deadline(timestamp);
+        if let Some(deadlines) = &self.signing_deadlines {
+            let lease = deadlines
+                .register(id, until.into_std())
+                .map_err(|error| PayloadBuilderError::other(std::io::Error::other(error)))?;
+            input.resources = input
+                .resources
+                .with_lease(reth_payload_builder::PayloadBuilderLease::new(lease));
+        }
         let deadline = Box::pin(tokio::time::sleep_until(until));
         let flashblock_deadline = Box::pin(tokio::time::sleep(self.config.interval));
         let recommit_interval = tokio::time::interval(self.config.recommitment_interval);
@@ -224,10 +242,15 @@ where
             )
         };
 
-        let authorization = tokio::task::block_in_place(|| {
-            let handle = Handle::current();
-            handle.block_on(pending)
-        })?;
+        let authorization = if self.p2p_handler.can_publish() {
+            tokio::task::block_in_place(|| {
+                let handle = Handle::current();
+                handle.block_on(tokio::time::timeout_at(until, pending))
+            })
+            .map_err(PayloadBuilderError::other)??
+        } else {
+            None
+        };
 
         let can_override = self.force_publish || authorization.is_some();
 
@@ -245,12 +268,17 @@ where
             _ => authorization,
         };
 
-        if let Some(auth) = authorization {
+        let authorization = authorization.filter(|_| self.p2p_handler.can_publish());
+
+        let publishing_lease = if let Some(auth) = authorization {
             // Notify the P2P handler to start publishing for this authorization
             self.p2p_handler
-                .start_publishing(auth)
-                .map_err(PayloadBuilderError::other)?;
-        }
+                .start_publishing_until(auth, until)
+                .map_err(PayloadBuilderError::other)
+                .map(Some)?
+        } else {
+            None
+        };
 
         // Extract pre-built payload from the p2p handler and the latest flashblock index if available
         let (pre_state, index, access_list) = maybe_pre_state
@@ -277,6 +305,8 @@ where
 
         let mut job = FlashblocksPayloadJob {
             config,
+            _publishing_lease: publishing_lease,
+            pending_publication: None,
             executor: self.executor.clone(),
             deadline,
             committed_payload,

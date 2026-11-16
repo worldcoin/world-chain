@@ -82,8 +82,9 @@ pub fn test_config_with_peers_and_gossip(
     use reth_optimism_node::args::RollupArgs;
 
     let builder = BuilderArgs {
+        signer_config: None,
         enabled: true,
-        private_key: signer(6),
+        private_key: Some(signer(6)),
         block_uncompressed_size_limit: None,
     };
 
@@ -96,6 +97,7 @@ pub fn test_config_with_peers_and_gossip(
 
     let flashblocks = if flashblocks_enabled {
         Some(FlashblocksArgs {
+            signer_config: None,
             enabled: true,
             override_authorizer_sk: None,
             authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
@@ -120,6 +122,8 @@ pub fn test_config_with_peers_and_gossip(
     };
 
     WorldChainNodeConfig {
+        pbh_wallet: builder.wallet().expect("test wallet"),
+        publication_signer: None,
         args: WorldChainArgs {
             rollup,
             builder,

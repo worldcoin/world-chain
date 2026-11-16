@@ -14,6 +14,7 @@ members = [
     "crates/node",
     "crates/rpc",
     "crates/primitives",
+    "crates/signer",
     "crates/cli",
     "crates/p2p",
     "crates/builder",
@@ -87,6 +88,7 @@ semicolon_in_expressions_from_macros = "allow"
 world-chain = { path = "bin/world-chain", default-features = false }
 world-chain-chainspec = { path = "crates/chainspec", default-features = false }
 world-chain-primitives = { path = "crates/primitives", default-features = false }
+world-chain-signer = { path = "crates/signer", default-features = false }
 world-chain-cli = { path = "crates/cli", default-features = false }
 world-chain-commands = { path = "crates/commands", default-features = false }
 world-chain-p2p = { path = "crates/p2p", default-features = false }
@@ -342,6 +344,13 @@ test-case = "3"
 serde_json = "1"
 rand = { version = "0.9", features = ["small_rng"] }
 reqwest = { version = "0.12", default-features = false }
+http = "1.5"
+http-body-util = "0.1"
+hyper = { version = "1.11", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1.20", default-features = false, features = ["tokio"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
+zeroize = "1.9"
 sqlx = { version = "0.9.0", default-features = false, features = [
     "runtime-tokio",
     "postgres",

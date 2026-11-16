@@ -420,11 +420,17 @@ where
             (200, 200, None, false)
         };
 
+        let signing_deadlines = self
+            .config
+            .pbh_wallet
+            .is_remote()
+            .then(world_chain_builder::signing_deadline::SigningDeadlines::default);
         let ctx_builder = WorldChainPayloadBuilderCtxBuilder {
             verified_blockspace_capacity: pbh.verified_blockspace_capacity,
             pbh_entry_point: pbh.entrypoint,
             pbh_signature_aggregator: pbh.signature_aggregator,
-            builder_private_key: builder.private_key,
+            builder_wallet: self.config.pbh_wallet.clone(),
+            signing_deadlines: signing_deadlines.clone(),
             block_uncompressed_size_limit: builder.block_uncompressed_size_limit,
         };
 
@@ -438,39 +444,42 @@ where
             .executor(WorldChainExecutorBuilder::new(
                 witness.as_ref().map(|w| w.sender.clone()),
             ))
-            .payload(FlashblocksPayloadServiceBuilder::new(
-                FlashblocksPayloadBuilderBuilder::new(
-                    ctx_builder,
+            .payload(
+                FlashblocksPayloadServiceBuilder::new(
+                    FlashblocksPayloadBuilderBuilder::new(
+                        ctx_builder,
+                        components_context
+                            .as_ref()
+                            .map(|flashblocks_component_ctx| {
+                                flashblocks_component_ctx.flashblocks_state.clone()
+                            }),
+                        builder_config,
+                    ),
                     components_context
                         .as_ref()
-                        .map(|flashblocks_component_ctx| {
-                            flashblocks_component_ctx.flashblocks_state.clone()
+                        .map(|flashblocks_components_ctx| {
+                            flashblocks_components_ctx.flashblocks_handle.clone()
                         }),
-                    builder_config,
-                ),
-                components_context
-                    .as_ref()
-                    .map(|flashblocks_components_ctx| {
-                        flashblocks_components_ctx.flashblocks_handle.clone()
-                    }),
-                components_context
-                    .as_ref()
-                    .map(|flashblocks_components_ctx| {
-                        flashblocks_components_ctx.flashblocks_state.clone()
-                    }),
-                components_context
-                    .as_ref()
-                    .map(|flashblocks_components_ctx| {
-                        flashblocks_components_ctx
-                            .to_jobs_generator
-                            .clone()
-                            .subscribe()
-                    }),
-                override_authorizer_sk,
-                force_publish,
-                Duration::from_millis(flashblocks_interval),
-                Duration::from_millis(flashblocks_recommit_interval),
-            ))
+                    components_context
+                        .as_ref()
+                        .map(|flashblocks_components_ctx| {
+                            flashblocks_components_ctx.flashblocks_state.clone()
+                        }),
+                    components_context
+                        .as_ref()
+                        .map(|flashblocks_components_ctx| {
+                            flashblocks_components_ctx
+                                .to_jobs_generator
+                                .clone()
+                                .subscribe()
+                        }),
+                    override_authorizer_sk,
+                    force_publish,
+                    Duration::from_millis(flashblocks_interval),
+                    Duration::from_millis(flashblocks_recommit_interval),
+                )
+                .with_signing_deadlines(signing_deadlines),
+            )
             .network(wc_network_builder)
             .consensus(OpConsensusBuilder::default())
     }
@@ -609,9 +618,18 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             authorizer_vk.as_bytes().encode_hex::<String>()
         );
 
-        let mut flashblocks_handle = FlashblocksHandle::with_fanout_args_and_recorder(
+        let publisher = value
+            .publication_signer
+            .map(world_chain_p2p::protocol::handler::Publisher::Remote)
+            .or_else(|| {
+                flashblocks
+                    .builder_sk
+                    .clone()
+                    .map(world_chain_p2p::protocol::handler::Publisher::Local)
+            });
+        let mut flashblocks_handle = FlashblocksHandle::with_publisher(
             authorizer_vk,
-            flashblocks.builder_sk.clone(),
+            publisher,
             flashblocks.fanout.clone(),
             recorder_config,
         );
