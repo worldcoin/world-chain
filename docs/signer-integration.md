@@ -142,11 +142,11 @@ The preconfirmation cache is not mutated by a fenced result.
 Only one publication future is retained per job. It is awaited before committing
 the frame/index or starting work on its precommitted state. Dropping that future
 cancels its RPC. Local and receive-only modes preserve their existing operation.
-When `getPayload` resolves a remote publication in flight, cancel that optional
-publication and return the already-executed full block, preserving its committed
-prefix. This does not insert a Flashblock into the cache or broadcast it. At the
-original job deadline, cancel signing and fence publishing; never commit a late
-signature to recover a final frame.
+When `getPayload` resolves a remote job, cancel optional publication and clearance
+and return the already-executed full block, even while start/handover clearance is
+pending. Preserve its committed prefix without inserting a Flashblock into the
+cache or broadcasting it. At the original job deadline, cancel signing and fence
+publishing; never commit a late signature to recover a final frame.
 `worldchain.remote_signer` records request/failure/in-flight/duration metrics by
 role; `flashblocks.p2p.publishing_signing_failed`, `publishing_control_stale` and
 `publishing_control_invalid` expose failed/discarded publication work.
@@ -168,7 +168,7 @@ exercise protected CLI/configuration loading, the production `spend_nullifiers_t
 including finalization/cancellation, denial, rapid handovers, a held signed response
 cancelled by stop, same-grant generation changes and complete 16 MiB frames.
 Job regressions cover build-only handover/denial, resolving a built block while
-signing is held, and deadline cancellation without cache publication.
+clearance or signing is pending, and deadline cancellation without cache publication.
 Build the pinned signer example with `flashblocks,transactions`, then set its binary
 path and exact revision before running:
 

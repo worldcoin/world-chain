@@ -789,16 +789,18 @@ where
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         info!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), ?kind, "resolving payload job");
 
-        let pending_execution = if self.p2p_handler.is_remote_publisher() {
+        let remote_execution = if self.p2p_handler.is_remote_publisher() {
             // Sealing needs the executed block, not an optional Flashblock signature.
             let pending = self.pending_publication.take();
             self.publishing_clearance.take();
             self._publishing_lease.take();
-            pending.map(|pending| pending.payload)
+            pending
+                .map(|pending| pending.payload)
+                .or_else(|| self.best_payload.0.payload().cloned())
         } else {
             None
         };
-        let best_payload = pending_execution
+        let best_payload = remote_execution
             .or_else(|| {
                 if self.authorization.is_none() {
                     self.best_payload.0.payload().cloned()

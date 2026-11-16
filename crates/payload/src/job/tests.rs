@@ -47,6 +47,13 @@ impl PayloadBuilder for Builder {
             "completed execution must not fall back to an empty build",
         )))
     }
+
+    fn on_missing_payload(
+        &self,
+        _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
+        MissingPayloadBehaviour::AwaitInProgress
+    }
 }
 
 impl FlashblockPayloadBuilder for Builder {
@@ -288,6 +295,72 @@ async fn publication_interval_is_armed_while_clearance_is_pending() {
         .await
         .expect("publication timer must wake the job even before clearance");
     assert!(job.publishing_clearance.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the reviewed disposable mTLS signer harness"]
+async fn remote_job_resolution_while_clearance_is_pending_preserves_completed_execution() {
+    let harness = runtime::Harness::start().await;
+    for committed_prefix in [false, true] {
+        let mut job = job(remote_handle(&harness, false));
+        clearance(&job).await.expect("initial remote clearance");
+        if committed_prefix {
+            let earlier = SealedBlock::seal_slow(Block {
+                header: Header {
+                    number: 1,
+                    timestamp: 1,
+                    state_root: B256::repeat_byte(9),
+                    ..Default::default()
+                },
+                body: BlockBody::<OpTransactionSigned>::default(),
+            });
+            job.committed_payload = CommittedPayloadState::Best {
+                payload: OpBuiltPayload::new(
+                    job.builder.payload.id(),
+                    Arc::new(earlier),
+                    U256::ZERO,
+                    None,
+                ),
+                access_list: None,
+            };
+        }
+        let committed_hash = job.committed_payload.block_hash();
+        let (_outcome_tx, outcome_rx) = oneshot::channel();
+        let (_access_tx, access_rx) = oneshot::channel();
+        job.pending_block = Some(FlashblocksPendingPayload::new(
+            CancelOnDrop::default(),
+            outcome_rx,
+            access_rx,
+        ));
+        job.p2p_handler.state.lock().publishing_status.send_replace(
+            PublishingStatus::WaitingToPublish {
+                authorization: job.authorization.expect("grant"),
+                active_publishers: vec![],
+            },
+        );
+        assert!(futures::poll!(&mut job).is_pending());
+        assert!(job.publishing_clearance.is_some());
+        assert!(job.pending_publication.is_none());
+        assert!(job.authorization.is_some());
+
+        let (resolved, keep) = job.resolve_kind(PayloadKind::Earliest);
+        let payload = resolved
+            .now_or_never()
+            .expect("completed execution must not wait for another build")
+            .expect("completed execution remains available before publication clearance");
+        assert_eq!(keep, KeepPayloadJobAlive::No);
+        assert_eq!(payload.block().hash(), job.builder.payload.block().hash());
+        assert_ne!(Some(payload.block().hash()), committed_hash);
+        assert_eq!(job.committed_payload.block_hash(), committed_hash);
+        assert_eq!(job.builder.empty_builds.load(Ordering::SeqCst), 0);
+        assert!(job.publishing_clearance.is_none());
+        assert!(job._publishing_lease.is_none());
+        assert!(job.flashblocks_state.snapshot().latest_payload.is_none());
+        assert!(matches!(
+            job.p2p_handler.publishing_status(),
+            PublishingStatus::NotPublishing { .. }
+        ));
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
