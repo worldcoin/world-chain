@@ -54,8 +54,10 @@ finality.
 When no Flashblock is available, state and execution RPCs use the existing
 OP-Reth fallback. Errors loading a selected Flashblock propagate; a view that no
 longer extends the local canonical tip returns a pending-block-not-found error
-and can be retried. Pending transaction counts retain Reth's consecutive
-transaction-pool nonce adjustment and can exceed the executed Flashblock nonce.
+and can be retried. Pending block, transaction-by-block, and block-receipt reads
+apply the same freshness check before using the selected Flashblock. Pending
+transaction counts retain Reth's consecutive transaction-pool nonce adjustment
+and can exceed the executed Flashblock nonce.
 
 ## Metrics
 

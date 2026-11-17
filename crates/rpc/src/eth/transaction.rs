@@ -121,6 +121,21 @@ where
         }
 
         self.spawn_blocking_io_fut(async move |this| {
+            // Canonical receipts do not depend on the availability of a pending view.
+            let provider = this.provider();
+            if let Some((tx, meta)) = provider
+                .transaction_by_hash_with_meta(hash)
+                .map_err(Self::Error::from_eth_err)?
+            {
+                let tx = tx
+                    .try_into_recovered_unchecked()
+                    .map_err(Self::Error::from_eth_err)?;
+                let receipt = provider
+                    .receipt_by_hash(hash)
+                    .map_err(Self::Error::from_eth_err)?;
+                return Ok(receipt.map(|receipt| (tx, meta, receipt, None, None)));
+            }
+
             let pending_block = this.local_pending_block().await?;
             if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone()
                 && let Some(pos) = block
@@ -159,28 +174,7 @@ where
                 )));
             }
 
-            let provider = this.provider();
-
-            let (tx, meta) = match provider
-                .transaction_by_hash_with_meta(hash)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some((tx, meta)) => (tx, meta),
-                None => return Ok(None),
-            };
-            let tx = tx
-                .try_into_recovered_unchecked()
-                .map_err(Self::Error::from_eth_err)?;
-
-            let receipt = match provider
-                .receipt_by_hash(hash)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
-
-            Ok(Some((tx, meta, receipt, None, None)))
+            Ok(None)
         })
         .await
     }

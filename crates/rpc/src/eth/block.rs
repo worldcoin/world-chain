@@ -7,7 +7,7 @@ use reth_primitives_traits::RecoveredBlock;
 use reth_provider::{BlockIdReader, BlockReader};
 use reth_rpc_eth_api::{
     EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore, RpcNodeCoreExt,
-    helpers::{EthBlocks, LoadBlock, LoadPendingBlock},
+    helpers::{EthBlocks, LoadBlock, LoadPendingBlock, block::BlockAndReceiptsResult},
 };
 use reth_rpc_eth_types::block::BlockAndReceipts;
 use std::sync::Arc;
@@ -24,6 +24,46 @@ where
         + EthApiTypes<Error = OpEthApiError>
         + Clone,
 {
+    async fn load_block_and_receipts(&self, block_id: BlockId) -> BlockAndReceiptsResult<Self> {
+        let pending_block = self.flashblock_pending_block(block_id)?;
+        if block_id.is_pending() {
+            if self.pending_block_kind().is_none() {
+                return Ok(None);
+            }
+
+            // Select the Flashblock before the provider's independent pending candidate.
+            if let Some(pending_block) = pending_block {
+                return Ok(Some((
+                    pending_block.recovered_block,
+                    pending_block.execution_output.receipts.clone().into(),
+                )));
+            }
+
+            if let Some((block, receipts)) = self
+                .provider()
+                .pending_block_and_receipts()
+                .map_err(Self::Error::from_eth_err)?
+            {
+                return Ok(Some((Arc::new(block), Arc::new(receipts))));
+            }
+
+            if let Some(pending) = self.local_pending_block().await? {
+                return Ok(Some((pending.block, pending.receipts)));
+            }
+        }
+
+        let Some(block_hash) = self
+            .provider()
+            .block_hash_for_id(block_id)
+            .map_err(Self::Error::from_eth_err)?
+        else {
+            return Ok(None);
+        };
+        self.cache()
+            .get_block_and_receipts(block_hash)
+            .await
+            .map_err(Self::Error::from_eth_err)
+    }
 }
 
 impl<N, Rpc, const PINNED: bool> LoadBlock for FlashblocksEthApi<N, Rpc, PINNED>
@@ -42,11 +82,12 @@ where
         block_id: BlockId,
     ) -> Result<Option<Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>>, Self::Error>
     {
+        let pending_block = self.flashblock_pending_block(block_id)?;
         if block_id.is_pending() {
-            if let Some(pending_block) = self.flashblock_pending_block() {
+            if let Some(pending_block) = pending_block {
                 return Ok(Some(pending_block.recovered_block));
             }
-            // If no pending block from provider, try to get local pending block
+            // Preserve the local fallback when no Flashblock is available.
             return match self.local_pending_block().await? {
                 Some(BlockAndReceipts { block, receipts: _ }) => Ok(Some(block)),
                 None => Ok(None),
@@ -62,13 +103,10 @@ where
             None => return Ok(None),
         };
 
-        let pending_block = self.local_pending_block().await?;
-
-        if let Some(BlockAndReceipts { block, receipts: _ }) = pending_block {
-            // If the requested block hash matches the pending block, return it
-            if block.hash() == block_hash {
-                return Ok(Some(block));
-            }
+        if let Some(pending_block) = pending_block
+            && pending_block.recovered_block.hash() == block_hash
+        {
+            return Ok(Some(pending_block.recovered_block));
         }
 
         self.cache()
