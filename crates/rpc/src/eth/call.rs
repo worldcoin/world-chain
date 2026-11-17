@@ -31,7 +31,9 @@ where
         block: Option<BlockId>,
         overrides: EvmOverrides,
     ) -> Result<Bytes, Self::Error> {
-        self.pin_pending().call(request, block, overrides).await
+        self.pin_pending(block.unwrap_or_default())?
+            .call(request, block, overrides)
+            .await
     }
 
     async fn estimate_gas_at(
@@ -40,7 +42,7 @@ where
         at: BlockId,
         overrides: EvmOverrides,
     ) -> Result<U256, Self::Error> {
-        EthCall::estimate_gas_at(&self.pin_pending(), request, at, overrides).await
+        EthCall::estimate_gas_at(&self.pin_pending(at)?, request, at, overrides).await
     }
 
     async fn simulate_v1(
@@ -48,7 +50,9 @@ where
         payload: SimulatePayload<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>,
         block: Option<BlockId>,
     ) -> SimulatedBlocksResult<Self::NetworkTypes, Self::Error> {
-        self.pin_pending().simulate_v1(payload, block).await
+        self.pin_pending(block.unwrap_or_default())?
+            .simulate_v1(payload, block)
+            .await
     }
 
     async fn call_many(
@@ -57,9 +61,14 @@ where
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> Result<Vec<Vec<EthCallResponse>>, Self::Error> {
-        self.pin_pending()
-            .call_many(bundles, state_context, state_override)
-            .await
+        self.pin_pending(
+            state_context
+                .as_ref()
+                .and_then(|context| context.block_number)
+                .unwrap_or_default(),
+        )?
+        .call_many(bundles, state_context, state_override)
+        .await
     }
 
     async fn create_access_list_at(
@@ -68,7 +77,7 @@ where
         block: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> Result<AccessListResult, Self::Error> {
-        self.pin_pending()
+        self.pin_pending(block.unwrap_or_default())?
             .create_access_list_at(request, block, state_override)
             .await
     }

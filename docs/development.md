@@ -46,8 +46,10 @@ Flashblock over its parent state. Calls, gas estimates, access lists, and
 `eth_simulateV1` retain one snapshot per request across asynchronous work.
 Internal lookups carry the selected block hash; unavailable views fail instead
 of switching to newer state. Separate requests can observe different snapshots.
-Canonical block tags and `requireCanonical` retain
-their existing behavior; preconfirmation does not establish finality.
+Canonical block tags, explicit hash requests, and `requireCanonical` retain
+their existing selector semantics. Canonicalization does not turn an in-flight
+pending request into a canonical-hash request. Preconfirmation does not establish
+finality.
 
 When no Flashblock is available, state and execution RPCs use the existing
 OP-Reth fallback. Errors loading a selected Flashblock propagate; a view that no

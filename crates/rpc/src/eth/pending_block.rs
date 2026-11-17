@@ -45,6 +45,7 @@ where
 
     fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
         if let Some(pending_block) = self.flashblock_pending_block() {
+            self.ensure_pending_extends_tip(&pending_block)?;
             let evm_env = self
                 .evm_config()
                 .evm_env(pending_block.recovered_block.header())
@@ -68,6 +69,7 @@ where
             return self.inner.local_pending_state().await;
         };
 
+        self.ensure_pending_extends_tip(&pending_block)?;
         let parent_state = self
             .provider()
             .state_by_block_hash(pending_block.recovered_block.parent_hash)
@@ -134,6 +136,7 @@ where
         if at.is_pending()
             && let Some(pending_block) = self.flashblock_pending_block()
         {
+            self.ensure_pending_extends_tip(&pending_block)?;
             // Execution calls only need the header, not a copy of every pending receipt.
             let env = self.evm_env_for_header(pending_block.recovered_block.sealed_header())?;
             return Ok((env, pending_block.recovered_block.hash().into()));
@@ -143,19 +146,18 @@ where
     }
 
     async fn state_at_block_id(&self, at: BlockId) -> Result<StateProviderBox, Self::Error> {
+        if self.pending_request
+            && let Some(pending_block) = &self.pending_snapshot
+        {
+            self.ensure_pending_extends_tip(pending_block)?;
+        }
         let allows_pending = at.is_pending()
             || matches!(at, BlockId::Hash(hash) if hash.require_canonical != Some(true));
         if allows_pending
             && let Some(pending_block) = self.flashblock_pending_block()
             && (at.is_pending() || at.as_block_hash() == Some(pending_block.recovered_block.hash()))
         {
-            let latest = self
-                .provider()
-                .latest_header()?
-                .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
-            let extends_tip = pending_block.recovered_block.parent_hash == latest.hash()
-                && latest.number.checked_add(1) == Some(pending_block.recovered_block.number);
-            if extends_tip {
+            if self.pending_request || self.pending_extends_tip(&pending_block)? {
                 let parent_state = self
                     .provider()
                     .state_by_block_hash(pending_block.recovered_block.parent_hash)
@@ -175,14 +177,47 @@ impl<N, Rpc, const PINNED: bool> FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
+    OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>,
 {
-    /// Freeze the source before upstream helpers resolve the header and state separately.
-    pub(super) fn pin_pending(&self) -> FlashblocksEthApi<N, Rpc, true> {
-        FlashblocksEthApi {
+    fn pending_extends_tip(
+        &self,
+        pending: &ExecutedBlock<OpPrimitives>,
+    ) -> Result<bool, OpEthApiError> {
+        let latest = self
+            .provider()
+            .latest_header()?
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+        Ok(pending.recovered_block.parent_hash == latest.hash()
+            && latest.number.checked_add(1) == Some(pending.recovered_block.number))
+    }
+
+    fn ensure_pending_extends_tip(
+        &self,
+        pending: &ExecutedBlock<OpPrimitives>,
+    ) -> Result<(), OpEthApiError> {
+        if !self.pending_extends_tip(pending)? {
+            return Err(EthApiError::HeaderNotFound(BlockId::pending()).into());
+        }
+        Ok(())
+    }
+
+    /// Freeze the source and retain the original selector's pending policy.
+    pub(super) fn pin_pending(
+        &self,
+        at: BlockId,
+    ) -> Result<FlashblocksEthApi<N, Rpc, true>, OpEthApiError> {
+        let pending_snapshot = self.flashblock_pending_block();
+        if at.is_pending()
+            && let Some(pending) = &pending_snapshot
+        {
+            self.ensure_pending_extends_tip(pending)?;
+        }
+        Ok(FlashblocksEthApi {
             inner: self.inner.clone(),
             pending_block: None,
-            pending_snapshot: self.flashblock_pending_block(),
-        }
+            pending_snapshot,
+            pending_request: at.is_pending(),
+        })
     }
 
     pub(super) fn flashblock_pending_block(&self) -> Option<ExecutedBlock<OpPrimitives>> {
@@ -241,7 +276,10 @@ mod tests {
         use alloy_consensus::{Block, BlockBody};
         use alloy_primitives::{B256, U256};
         use reth_primitives_traits::RecoveredBlock;
-        use reth_rpc_eth_api::{EthApiTypes, helpers::LoadState};
+        use reth_rpc_eth_api::{
+            EthApiTypes,
+            helpers::{LoadBlock, LoadState},
+        };
         use world_chain_node::context::WorldChainDefaultContext;
         use world_chain_test_utils::e2e_harness::setup::WorldChainTestBuilder;
 
@@ -265,7 +303,7 @@ mod tests {
         let inner = OpEthApi::new(backend, None, U256::ZERO, None, false);
         let (sender, receiver) = tokio::sync::watch::channel(None);
         let api = FlashblocksEthApi::new(inner, Some(receiver));
-        let no_flashblock = api.pin_pending();
+        let no_flashblock = api.pin_pending(BlockId::pending())?;
         let parent = node.provider.latest_header()?.expect("genesis header");
         let address = Address::repeat_byte(0x42);
         let make_block = |number: u64, nonce: u64| {
@@ -297,7 +335,7 @@ mod tests {
             executed
         };
         sender.send_replace(Some(make_block(1, 7)));
-        let pinned = api.pin_pending();
+        let pinned = api.pin_pending(BlockId::pending())?;
         let original_env = pinned.pending_block_env_and_cfg()?.evm_env;
         let (_, selected) = api.evm_env_at(BlockId::pending()).await?;
         sender.send_replace(Some(make_block(2, 8)));
@@ -377,6 +415,40 @@ mod tests {
         sender.send_replace(Some(invalid));
         assert!(api.local_pending_state().await.is_err());
         assert!(api.state_at_block_id(BlockId::pending()).await.is_err());
+
+        // Retain the Flashblock after Reth canonicalizes it, before the source clears it.
+        let canonicalized = make_block(1, 7);
+        sender.send_replace(Some(canonicalized.clone()));
+        let pending_request = api.pin_pending(BlockId::pending())?;
+        let (_, selected) = pending_request.evm_env_at(BlockId::pending()).await?;
+        assert!(
+            api.pin_pending(selected)?
+                .recovered_block(selected)
+                .await?
+                .is_some()
+        );
+        let canonical = node.provider.canonical_in_memory_state();
+        canonical.update_chain(reth_chain_state::NewCanonicalChain::Commit {
+            new: vec![canonicalized.clone()],
+        });
+        canonical.set_canonical_head(canonicalized.recovered_block.clone_sealed_header());
+        assert!(api.state_at_block_id(selected).await.is_ok());
+        assert!(api.evm_env_at(selected).await.is_ok());
+        assert!(api.state_at_block_id(BlockId::pending()).await.is_err());
+        assert!(api.evm_env_at(BlockId::pending()).await.is_err());
+        assert!(api.pending_block_env_and_cfg().is_err());
+        assert!(api.local_pending_state().await.is_err());
+        assert!(pending_request.state_at_block_id(selected).await.is_err());
+        assert!(
+            pending_request
+                .state_at_block_id(parent.hash().into())
+                .await
+                .is_err()
+        );
+        assert!(api.pin_pending(BlockId::pending()).is_err());
+        let canonical_request = api.pin_pending(selected)?;
+        assert!(canonical_request.state_at_block_id(selected).await.is_ok());
+        assert!(canonical_request.evm_env_at(selected).await.is_ok());
         Ok(())
     }
 }

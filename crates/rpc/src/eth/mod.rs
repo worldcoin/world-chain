@@ -50,6 +50,7 @@ pub struct FlashblocksEthApi<N: RpcNodeCore, Rpc: RpcConvert, const PINNED: bool
     inner: OpEthApi<N, Rpc>,
     pending_block: Option<tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>>,
     pending_snapshot: Option<ExecutedBlock<OpPrimitives>>,
+    pending_request: bool,
 }
 
 impl<N, Rpc> FlashblocksEthApi<N, Rpc>
@@ -65,6 +66,7 @@ where
             inner,
             pending_block,
             pending_snapshot: None,
+            pending_request: false,
         }
     }
 }
