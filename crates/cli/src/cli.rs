@@ -92,6 +92,13 @@ pub struct WorldChainArgs {
     )]
     pub flashblock_evidence: bool,
 
+    /// Forward only unsafe-block evidence RPCs to this replica's paired op-node.
+    #[arg(
+        long = "rpc.unsafe-block-evidence-url",
+        env = "WORLD_CHAIN_UNSAFE_BLOCK_EVIDENCE_URL"
+    )]
+    pub unsafe_block_evidence_url: Option<String>,
+
     /// Whether the `simulate_unsignedUserOp` RPC endpoint should be served on
     /// HTTP. Derived from `--http.api`: enabled when the selection contains
     /// the `simulate` namespace.
@@ -158,6 +165,12 @@ impl WorldChainArgs {
         }
         if self.flashblock_evidence && self.flashblocks.as_ref().is_none_or(|args| !args.enabled) {
             bail!("--rpc.flashblock-evidence requires --flashblocks.enabled");
+        }
+        if self.unsafe_block_evidence_url.is_some() {
+            eyre::eyre::ensure!(
+                config.rpc.rpc_max_response_size.get() >= 24,
+                "unsafe-block evidence requires --rpc.max-response-size of at least 24 MiB"
+            );
         }
         let spec = &config.chain;
 
@@ -950,6 +963,7 @@ mod tests {
             simulate_enabled: false,
             preconfirmed_logs: false,
             flashblock_evidence: false,
+            unsafe_block_evidence_url: None,
         };
 
         let spec = WorldChainSpec::from_genesis(Genesis::default());
@@ -994,6 +1008,28 @@ mod tests {
             .world
             .flashblock_evidence
         );
+    }
+
+    #[test]
+    fn unsafe_evidence_is_opt_in_and_requires_a_complete_response_budget() {
+        assert!(
+            CommandParser::parse_from(["bin"])
+                .world
+                .unsafe_block_evidence_url
+                .is_none()
+        );
+        let args = CommandParser::parse_from([
+            "bin",
+            "--rpc.unsafe-block-evidence-url",
+            "http://127.0.0.1:9545",
+        ])
+        .world;
+        let mut config =
+            NodeConfig::new(Arc::new(WorldChainSpec::from_genesis(Genesis::default())));
+        config.rpc.rpc_max_response_size = 23.into();
+        assert!(args.clone().into_config(&mut config).is_err());
+        config.rpc.rpc_max_response_size = 24.into();
+        assert!(args.into_config(&mut config).is_ok());
     }
 
     #[test]

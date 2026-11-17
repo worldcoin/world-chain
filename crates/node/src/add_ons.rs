@@ -58,6 +58,7 @@ use world_chain_rpc::{
         },
         spawn_preconfirmed_log_feed,
     },
+    unsafe_evidence::UnsafeBlockEvidenceRpc,
 };
 use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
@@ -128,6 +129,7 @@ pub struct WorldChainAddOns<
     simulate_enabled: bool,
     /// Explicit opt-in for the preconfirmed log feed.
     preconfirmed_logs: bool,
+    unsafe_block_evidence_url: Option<String>,
     flashblock_evidence: Option<world_chain_p2p::evidence::FlashblockEvidenceStore>,
     /// Validated Flashblocks source, present only on Flashblocks-enabled nodes.
     flashblocks_coordinator: Option<FlashblocksExecutionCoordinator>,
@@ -157,6 +159,7 @@ where
         min_suggested_priority_fee: u64,
         simulate_enabled: bool,
         preconfirmed_logs: bool,
+        unsafe_block_evidence_url: Option<String>,
         flashblock_evidence: Option<world_chain_p2p::evidence::FlashblockEvidenceStore>,
         flashblocks_coordinator: Option<FlashblocksExecutionCoordinator>,
         witness: Option<(ExecutionWitnessHandle, Receiver<BlockExecutionWitness>)>,
@@ -172,6 +175,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            unsafe_block_evidence_url,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -202,6 +206,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            unsafe_block_evidence_url,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -218,6 +223,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            unsafe_block_evidence_url,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -240,6 +246,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            unsafe_block_evidence_url,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -256,6 +263,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            unsafe_block_evidence_url,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -278,6 +286,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            unsafe_block_evidence_url,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -294,6 +303,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            unsafe_block_evidence_url,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -316,6 +326,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            unsafe_block_evidence_url,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -332,6 +343,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             preconfirmed_logs,
+            unsafe_block_evidence_url,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -408,6 +420,7 @@ where
             historical_rpc,
             simulate_enabled,
             preconfirmed_logs,
+            unsafe_block_evidence_url,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -428,6 +441,10 @@ where
             DebugWitnessOracle::new(cache)
         });
 
+        let unsafe_block_evidence_api = unsafe_block_evidence_url
+            .as_deref()
+            .map(UnsafeBlockEvidenceRpc::new)
+            .transpose()?;
         let flashblock_evidence_api = flashblock_evidence.map(|store| {
             FlashblockEvidenceRpc::new(store, ctx.node.provider().chain_spec().chain_id())
         });
@@ -565,6 +582,16 @@ where
                         .into_rpc(),
                 )?;
                 modules.replace_ipc(FlashblocksOpApi::default().into_rpc())?;
+
+                if let Some(api) = unsafe_block_evidence_api {
+                    let api = api.into_rpc()?;
+                    if modules.module_config().contains_http(&RethRpcModule::Eth) {
+                        modules.merge_http(api.clone())?;
+                    }
+                    if modules.module_config().contains_ws(&RethRpcModule::Eth) {
+                        modules.merge_ws(api)?;
+                    }
+                }
 
                 if let Some(api) = flashblock_evidence_api {
                     if evidence_on_http {
