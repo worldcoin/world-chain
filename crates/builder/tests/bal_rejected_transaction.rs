@@ -9,6 +9,7 @@ use reth_evm::{
 };
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives_traits::Recovered;
+use reth_provider::StateProvider;
 use reth_revm::{State, database::StateProviderDatabase};
 use revm::database::BundleState;
 use world_chain_builder::payload_builder_metrics::PayloadBuildAttemptMetrics;
@@ -37,7 +38,7 @@ fn finish_next_flashblock(
     let previous_gas_used = previous_outcome.block.gas_used();
     let previous_receipts = previous_outcome.execution_result.receipts.clone();
 
-    let db = StateProviderDatabase::new(state_provider);
+    let db = StateProviderDatabase::new(state_provider.into_evm_state_provider());
     let mut state = State::builder()
         .with_database(db)
         .with_cached_prestate(cache_prestate_from_bundle(&bundle))
@@ -86,6 +87,15 @@ fn finish_next_flashblock(
     let (outcome, _) =
         builder.finish_with_bundle(state_provider, PayloadBuildAttemptMetrics::default())?;
     let access_list = access_list_rx.recv()?;
+    assert_eq!(
+        outcome
+            .block_access_list
+            .as_ref()
+            .expect("built BAL")
+            .hash(),
+        alloy_eip7928::compute_block_access_list_hash(&access_list.changes),
+        "the prepared upstream BAL must commit to the emitted Flashblock changes"
+    );
     let access_list_hash = access_list_hash(&access_list);
 
     Ok((

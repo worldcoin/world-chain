@@ -154,7 +154,7 @@ where
                     tx,
                     meta,
                     receipt,
-                    Some(receipts),
+                    Some(Arc::new(receipts.into_vec())),
                     Some(block.clone()),
                 )));
             }

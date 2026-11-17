@@ -390,6 +390,17 @@ where
             .send(access_list)
             .map_err(BlockExecutionError::other)?;
 
+        let mut encoded_bal = Vec::new();
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash_with_buf(
+            &block_access_list,
+            &mut encoded_bal,
+        );
+        let block_access_list = alloy_eip7928::bal::DecodedBal::new_unchecked(
+            block_access_list.into(),
+            encoded_bal.into(),
+            bal_hash,
+        );
+
         Ok((
             BlockBuilderOutcome {
                 execution_result: result,
