@@ -287,4 +287,9 @@ Flashblocks:
           
           [env: WORLD_CHAIN_FLASHBLOCK_EVIDENCE=]
 
+      --rpc.unsafe-block-evidence-url <UNSAFE_BLOCK_EVIDENCE_URL>
+          Forward only unsafe-block evidence RPCs to this replica's paired op-node
+          
+          [env: WORLD_CHAIN_UNSAFE_BLOCK_EVIDENCE_URL=]
+
 ```
