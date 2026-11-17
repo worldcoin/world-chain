@@ -708,6 +708,128 @@ async fn repeated_peer_start_does_not_cancel_the_handover_stop() {
 }
 
 #[tokio::test]
+async fn older_peer_start_does_not_cancel_a_newer_pending_local_start() {
+    let handle = handle();
+    let mut rx = peer(&handle);
+    let current = authorization(12);
+    let pending = handle
+        .prepare_start_publishing(current)
+        .expect("newer local grant")
+        .expect("start notification");
+    let replay = FlashblocksP2PMsg::Authorized(Authorized::new(
+        &SigningKey::from_bytes(&[9; 32]),
+        peer_authorization(10, 9),
+        StartPublish.into(),
+    ))
+    .encode();
+    let world_chain_primitives::p2p::FlashblocksP2PMsgParts::Authorized(parts) =
+        FlashblocksP2PMsg::parse(&replay).expect("original signed frame")
+    else {
+        panic!("authorized start");
+    };
+    parts
+        .verify(SigningKey::from_bytes(&[7; 32]).verifying_key())
+        .expect("replay retains valid authorizer and publisher signatures");
+    let replay = parts.into_authorized().expect("start body").authorization;
+    assert_eq!(handle.state.lock().payload_timestamp, 0);
+    assert_eq!(
+        handle.peer_start_publishing(PeerId::random(), replay),
+        Err(FlashblocksP2PError::ExpiredAuthorization)
+    );
+    assert!(!pending.cancelled.is_cancelled());
+    {
+        let state = handle.state.lock();
+        assert_eq!(state.pending_start_timestamp, Some(current.timestamp));
+        assert!(state.publishing_error.borrow().is_none());
+        assert!(matches!(
+            &*state.publishing_status.borrow(),
+            PublishingStatus::NotPublishing { active_publishers } if active_publishers.is_empty()
+        ));
+    }
+    assert!(rx.try_recv().is_err());
+    complete(&handle, pending).expect("newer local grant still completes");
+    assert_publishing(&handle, current);
+    assert!(rx.try_recv().is_ok());
+    assert!(rx.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn older_peer_start_preserves_publishing_and_waiting_local_grants() {
+    for waiting in [false, true] {
+        let handle = handle();
+        let mut rx = peer(&handle);
+        let previous = peer_authorization(11, 9);
+        if waiting {
+            handle
+                .peer_start_publishing(PeerId::random(), previous)
+                .expect("previous publisher");
+        }
+        let current = authorization(12);
+        handle.start_publishing(current).expect("newer local grant");
+        rx.try_recv().expect("local start frame");
+        let generation = handle.state.lock().pending_start.clone();
+        assert_eq!(
+            handle.peer_start_publishing(PeerId::random(), peer_authorization(10, 10)),
+            Err(FlashblocksP2PError::ExpiredAuthorization)
+        );
+        assert!(!generation.is_cancelled());
+        let state = handle.state.lock();
+        assert_eq!(state.payload_timestamp, 0);
+        assert_eq!(state.pending_start, generation);
+        assert!(state.publishing_error.borrow().is_none());
+        match &*state.publishing_status.borrow() {
+            PublishingStatus::WaitingToPublish {
+                authorization,
+                active_publishers,
+            } if waiting => {
+                assert_eq!(*authorization, current);
+                assert_eq!(active_publishers, &vec![(previous.builder_vk, 11)]);
+            }
+            PublishingStatus::Publishing { authorization } if !waiting => {
+                assert_eq!(*authorization, current);
+            }
+            status => panic!("local publishing intent changed: {status:?}"),
+        }
+        assert!(rx.try_recv().is_err(), "rejected replay emits no stop");
+    }
+}
+
+#[tokio::test]
+async fn same_timestamp_and_newer_peer_starts_still_handover() {
+    for timestamp in [12, 13] {
+        for pending_start in [false, true] {
+            let handle = handle();
+            let current = authorization(12);
+            let pending = if pending_start {
+                handle
+                    .prepare_start_publishing(current)
+                    .expect("local request")
+            } else {
+                handle.start_publishing(current).expect("local publisher");
+                None
+            };
+            let generation = handle.state.lock().pending_start.clone();
+            let theirs = peer_authorization(timestamp, 9);
+            handle
+                .peer_start_publishing(PeerId::random(), theirs)
+                .expect("legitimate handover");
+            assert!(generation.is_cancelled());
+            assert!(matches!(
+                handle.publishing_status(),
+                PublishingStatus::NotPublishing { active_publishers }
+                    if active_publishers == vec![(theirs.builder_vk, timestamp)]
+            ));
+            if let Some(pending) = pending {
+                assert_eq!(
+                    complete(&handle, pending),
+                    Err(FlashblocksP2PError::StaleControlMessage)
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn peer_start_cancels_a_delayed_local_start() {
     let handle = handle();
     let pending = handle

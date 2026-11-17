@@ -465,11 +465,20 @@ impl FlashblocksHandle {
             return Ok(None);
         }
         let mut state = self.state.lock();
-        if state.payload_timestamp > authorization.timestamp {
+        let local_timestamp = match &*state.publishing_status.borrow() {
+            PublishingStatus::Publishing { authorization }
+            | PublishingStatus::WaitingToPublish { authorization, .. } => authorization.timestamp,
+            PublishingStatus::NotPublishing { .. } => 0,
+        };
+        let current_timestamp = state
+            .payload_timestamp
+            .max(local_timestamp)
+            .max(state.pending_start_timestamp.unwrap_or_default());
+        if current_timestamp > authorization.timestamp {
             tracing::warn!(
                 target: "flashblocks::p2p",
                 %peer_id,
-                current_timestamp = state.payload_timestamp,
+                current_timestamp,
                 timestamp = authorization.timestamp,
                 "received StartPublish with outdated timestamp",
             );
