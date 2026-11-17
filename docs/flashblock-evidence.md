@@ -1,5 +1,7 @@
 # Flashblock signing evidence
 
+For op-node unsafe-block signatures, see [unsafe-block evidence](unsafe-block-evidence.md).
+
 Add `--rpc.flashblock-evidence` to a node running `--flashblocks.enabled`.
 The feature defaults off. Include `eth` in the HTTP/WebSocket namespace selection
 for each transport that should expose the lookup. No additional private keys are

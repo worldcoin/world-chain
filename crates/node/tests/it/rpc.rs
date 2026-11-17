@@ -141,6 +141,12 @@ async fn preconfirmed_logs_are_unavailable_without_opt_in() -> eyre::Result<()> 
     let capabilities: Vec<String> = http
         .request("op_supportedCapabilities", rpc_params![])
         .await?;
+    assert_rpc_error(
+        http.request::<Value, _>("optimism_unsafeBlockEvidenceCapabilities", rpc_params![])
+            .await
+            .expect_err("unsafe evidence requires explicit opt-in"),
+        -32601,
+    );
     assert!(
         !capabilities
             .iter()
@@ -161,6 +167,87 @@ async fn preconfirmed_logs_are_unavailable_without_opt_in() -> eyre::Result<()> 
         .await
         .expect_err("disabled feed must not register subscriptions"),
         -32601,
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn unsafe_evidence_uses_the_paired_op_node_on_enabled_eth_transports() -> eyre::Result<()> {
+    let upstream = jsonrpsee::server::ServerBuilder::default()
+        .build("127.0.0.1:0")
+        .await?;
+    let endpoint = format!("http://{}", upstream.local_addr()?);
+    let mut module = jsonrpsee::RpcModule::new(());
+    module.register_method("optimism_unsafeBlockEvidenceCapabilities", |_, _, _| {
+        vec!["optimism_unsafe_block_evidence_v1"]
+    })?;
+    module.register_method(
+        "optimism_getUnsafeBlockEvidence",
+        |params, _, _| -> jsonrpsee::core::RpcResult<Value> {
+            let hash: B256 = params.one()?;
+            Err(jsonrpsee::types::ErrorObjectOwned::owned(
+                -32080,
+                "unsafe-block signing evidence unavailable",
+                Some(json!({"blockHash": hash, "reason": "notRetained"})),
+            ))
+        },
+    )?;
+    let upstream = upstream.start(module);
+    let (_, nodes, _exec, _env, _spammer) = WorldChainTestBuilder::builder()
+        .unsafe_block_evidence_url(endpoint)
+        .ws_rpc(true)
+        .build()
+        .setup::<WorldChainDefaultContext>()
+        .await?;
+    let http = nodes[0]
+        .node
+        .rpc_client()
+        .ok_or_else(|| eyre!("HTTP client"))?;
+    let ws = nodes[0]
+        .node
+        .inner
+        .rpc_server_handle()
+        .ws_client()
+        .await
+        .ok_or_else(|| eyre!("WS client"))?;
+    for capabilities in [
+        http.request::<Value, _>("optimism_unsafeBlockEvidenceCapabilities", rpc_params![])
+            .await?,
+        ws.request::<Value, _>("optimism_unsafeBlockEvidenceCapabilities", rpc_params![])
+            .await?,
+    ] {
+        assert_eq!(capabilities, json!(["optimism_unsafe_block_evidence_v1"]));
+    }
+    for error in [
+        http.request::<Value, _>("optimism_getUnsafeBlockEvidence", rpc_params![B256::ZERO])
+            .await
+            .expect_err("missing evidence"),
+        ws.request::<Value, _>("optimism_getUnsafeBlockEvidence", rpc_params![B256::ZERO])
+            .await
+            .expect_err("missing evidence"),
+    ] {
+        let RpcError::Call(error) = error else {
+            return Err(eyre!("expected RPC error"));
+        };
+        assert_eq!(error.code(), -32080);
+        assert_eq!(
+            serde_json::from_str::<Value>(error.data().ok_or_else(|| eyre!("error data"))?.get())?,
+            json!({"blockHash": B256::ZERO, "reason":"notRetained"})
+        );
+    }
+    assert_rpc_error(
+        http.request::<Value, _>("optimism_rollupConfig", rpc_params![])
+            .await
+            .expect_err("no generic op-node proxy"),
+        -32601,
+    );
+    upstream.stop()?;
+    upstream.stopped().await;
+    assert_rpc_error(
+        http.request::<Value, _>("optimism_getUnsafeBlockEvidence", rpc_params![B256::ZERO])
+            .await
+            .expect_err("paired node unavailable"),
+        -32081,
     );
     Ok(())
 }
