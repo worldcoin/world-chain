@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::eth::FlashblocksEthApi;
 
-impl<N, Rpc> EthBlocks for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> EthBlocks for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
@@ -26,7 +26,7 @@ where
 {
 }
 
-impl<N, Rpc> LoadBlock for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> LoadBlock for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
@@ -42,6 +42,11 @@ where
         block_id: BlockId,
     ) -> Result<Option<Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>>, Self::Error>
     {
+        if block_id.is_pending()
+            && let Some(pending_block) = self.flashblock_pending_block()
+        {
+            return Ok(Some(pending_block.recovered_block));
+        }
         if block_id.is_pending() {
             // If no pending block from provider, try to get local pending block
             return match self.local_pending_block().await? {

@@ -19975,6 +19975,7 @@ dependencies = [
  "reqwest 0.12.28",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-errors",
  "reth-evm",
  "reth-node-api",
  "reth-node-builder",
@@ -19985,6 +19986,7 @@ dependencies = [
  "reth-primitives-traits 0.7.1",
  "reth-provider",
  "reth-revm",
+ "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
@@ -20004,8 +20006,10 @@ dependencies = [
  "tracing",
  "world-chain-chainspec",
  "world-chain-evm",
+ "world-chain-node",
  "world-chain-p2p",
  "world-chain-primitives",
+ "world-chain-test-utils",
  "world-chain-validator",
 ]
 

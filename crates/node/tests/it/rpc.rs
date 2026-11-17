@@ -607,3 +607,161 @@ async fn preconfirmed_registered_logs_stream_and_resume() -> eyre::Result<()> {
     tokio::time::timeout(Duration::from_secs(2), subscription.unsubscribe()).await??;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pending_rpc_uses_executed_state_on_follower() -> eyre::Result<()> {
+    let (_, nodes, _tasks, env, _spammer) = WorldChainTestBuilder::builder()
+        .nodes(2)
+        .flashblocks(true)
+        .build()
+        .setup::<WorldChainDefaultContext>()
+        .await?;
+    let http = nodes[1]
+        .node
+        .rpc_client()
+        .ok_or_else(|| eyre!("expected follower HTTP RPC"))?;
+    let from = Address::with_last_byte(0x42);
+    let contract = from.create(0);
+    // Store the deployment's NUMBER, then return storage, NUMBER and TIMESTAMP on each call.
+    let runtime = alloy_primitives::hex::decode("600054600052436020524260405260606000f3")?;
+    let length = u8::try_from(runtime.len())?;
+    let mut initcode = vec![
+        0x43, 0x60, 0, 0x55, 0x60, length, 0x60, 16, 0x60, 0, 0x39, 0x60, length, 0x60, 0, 0xf3,
+    ];
+    initcode.extend_from_slice(&runtime);
+    let deposit = TxDeposit {
+        source_hash: B256::with_last_byte(0x23),
+        from,
+        to: TxKind::Create,
+        mint: 1,
+        value: U256::from(1),
+        gas_limit: 200_000,
+        is_system_transaction: false,
+        input: initcode.into(),
+    };
+    let deployment: Bytes = OpTxEnvelope::Deposit(Sealed::new_unchecked(deposit, B256::ZERO))
+        .encoded_2718()
+        .into();
+    let before: U256 = http
+        .request("eth_getTransactionCount", rpc_params![from, "pending"])
+        .await?;
+    assert_eq!(before, U256::ZERO);
+    let parent_hash = nodes[0].node.block_hash(0);
+    let chain_spec = nodes[0].node.inner.chain_spec();
+    let timestamp = current_timestamp() + 2;
+    let attributes = build_payload_attributes(
+        timestamp,
+        encode_eip1559_params(chain_spec.as_ref(), timestamp)?,
+        Some(vec![TX_SET_L1_BLOCK.clone(), deployment]),
+    );
+    let builder = nodes[0]
+        .ext_context
+        .as_ref()
+        .ok_or_else(|| eyre!("expected builder context"))?;
+    let authorization = create_authorization_generator(
+        parent_hash,
+        builder.flashblocks_handle.builder_sk()?.verifying_key(),
+    )(attributes.clone());
+    let engine = env.node_clients[0].engine.http_client();
+    let response =
+        FlashblocksEngineApiExtClient::<OpEngineTypes>::flashblocks_fork_choice_updated_v3(
+            &engine,
+            ForkchoiceState {
+                head_block_hash: parent_hash,
+                safe_block_hash: parent_hash,
+                finalized_block_hash: parent_hash,
+            },
+            Some(attributes),
+            Some(authorization),
+        )
+        .await?;
+    assert!(matches!(
+        response.payload_status.status,
+        PayloadStatusEnum::Valid
+    ));
+    let code: Bytes = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let code: Bytes = http
+                .request("eth_getCode", rpc_params![contract, "pending"])
+                .await?;
+            if !code.is_empty() {
+                break Ok::<_, eyre::Report>(code);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .wrap_err("follower did not execute the deployment Flashblock")??;
+    assert_eq!(code.as_ref(), runtime.as_slice());
+    let balance: U256 = http
+        .request("eth_getBalance", rpc_params![contract, "pending"])
+        .await?;
+    assert_eq!(balance, U256::from(1));
+    let nonce: U256 = http
+        .request("eth_getTransactionCount", rpc_params![from, "pending"])
+        .await?;
+    assert_eq!(nonce, U256::from(1));
+    let storage: B256 = http
+        .request("eth_getStorageAt", rpc_params![contract, "0x0", "pending"])
+        .await?;
+    assert_eq!(U256::from_be_slice(storage.as_slice()), U256::from(1));
+    for tag in ["latest", "safe", "finalized"] {
+        let canonical: Bytes = http
+            .request("eth_getCode", rpc_params![contract, tag])
+            .await?;
+        assert!(
+            canonical.is_empty(),
+            "{tag} must not include the pending deployment"
+        );
+    }
+    let call = json!({"to": contract, "gas": "0x186a0"});
+    let output: Bytes = http
+        .request("eth_call", rpc_params![call.clone(), "pending"])
+        .await?;
+    assert_eq!(output.len(), 96);
+    assert_eq!(U256::from_be_slice(&output[..32]), U256::from(1));
+    assert_eq!(U256::from_be_slice(&output[32..64]), U256::from(1));
+    assert_eq!(U256::from_be_slice(&output[64..]), U256::from(timestamp));
+    let gas: U256 = http
+        .request("eth_estimateGas", rpc_params![call.clone(), "pending"])
+        .await?;
+    assert!(gas > U256::from(21_000));
+    let access_list: Value = http
+        .request("eth_createAccessList", rpc_params![call.clone(), "pending"])
+        .await?;
+    assert!(
+        access_list["accessList"]
+            .as_array()
+            .expect("access list")
+            .iter()
+            .any(|entry| entry["address"] == json!(contract)
+                && entry["storageKeys"]
+                    .as_array()
+                    .is_some_and(|keys| keys.contains(&json!(B256::ZERO))))
+    );
+    let simulated: Value = http
+        .request(
+            "eth_simulateV1",
+            rpc_params![
+                json!({"blockStateCalls": [{"calls": [call]}], "validation": false}),
+                "pending"
+            ],
+        )
+        .await?;
+    let simulated_output: Bytes =
+        serde_json::from_value(simulated[0]["calls"][0]["returnData"].clone())?;
+    assert_eq!(simulated_output.len(), 96);
+    assert_eq!(U256::from_be_slice(&simulated_output[..32]), U256::from(1));
+    assert_eq!(
+        U256::from_be_slice(&simulated_output[32..64]),
+        U256::from(2)
+    );
+    assert!(U256::from_be_slice(&simulated_output[64..]) > U256::from(timestamp));
+    let latest: U256 = http.request("eth_blockNumber", rpc_params![]).await?;
+    assert_eq!(
+        latest,
+        U256::ZERO,
+        "assertions must run before canonicalization"
+    );
+    Ok(())
+}

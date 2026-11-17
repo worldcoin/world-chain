@@ -23,7 +23,7 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use crate::eth::FlashblocksEthApi;
 
-impl<N, Rpc> EthTransactions for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> EthTransactions for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
@@ -186,7 +186,7 @@ where
     }
 }
 
-impl<N, Rpc> LoadTransaction for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> LoadTransaction for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert + Clone,

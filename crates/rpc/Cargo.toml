@@ -25,6 +25,7 @@ reth-chainspec.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
+reth-errors.workspace = true
 reth-node-api.workspace = true
 reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
@@ -82,6 +83,9 @@ rand.workspace = true
 metrics.workspace = true
 
 [dev-dependencies]
+world-chain-test-utils.workspace = true
+world-chain-node.workspace = true
+reth-rpc.workspace = true
 alloy = { workspace = true, features = ["provider-http"] }
 alloy-rpc-types-debug.workspace = true
 alloy-provider-v1 = { package = "alloy-provider", version = "2.0.5", default-features = false, features = [
