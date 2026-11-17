@@ -115,10 +115,17 @@ The author enables **Automatic review / All PRs** and the every-push trigger in
 Codex settings. Bugbot must also run on every push; personal once-per-PR or manual
 overrides cannot satisfy the gate for a later head.
 
-Codex's formal review must reference the current SHA. If there are no findings,
-Codex can instead react to the PR with a thumbs-up. Reactions have no commit SHA,
-so the gate accepts only a Codex thumbs-up created at or after its first observation
-of this head. A neutral `review-policy-observed` check persists that timestamp
+Codex's formal review must reference the current SHA. The gate also accepts its
+canonical `codex-review-state:v1` summary, posted by the Codex bot, when it records
+completed code review for the exact current SHA with Boolean finding fields.
+This SHA-bound record counts even when review finished before the controller's
+first observation. Malformed, unsupported, incomplete and stale summaries do not
+count. Completion does not replace human approval or review-thread resolution.
+
+If there are no findings, Codex can instead react to the PR with a thumbs-up.
+Reactions have no commit SHA, so the gate accepts only a Codex thumbs-up created
+at or after its first observation of this head. A neutral `review-policy-observed`
+check persists that timestamp
 across retries. The known heuristic limitation is a delayed thumbs-up for an old
 head arriving after a new push; this tradeoff is intentional for v1.
 
@@ -139,7 +146,8 @@ active evaluation, excluding waits imposed by GitHub API rate limits.
 Timeout fails the AI gate; rerun **Review policy**, or dispatch it with the PR
 number. A later formal review or Cursor check event also re-evaluates the gate.
 Reactions have no dedicated Actions trigger: a thumbs-up arriving after polling
-ends requires a manual rerun. While polling is active, a thumbs-up can wait up to
+ends requires a manual rerun. Summary-only updates after polling also require a
+manual rerun. While polling is active, a thumbs-up can wait up to
 one polling interval plus API latency to be detected. Human commands, formal reviews
 and CI completion trigger evaluations without waiting for that interval.
 

@@ -109,12 +109,26 @@ function humanGate({ pr, risk, paths, reviews, comments, writable, ownerMembers 
   return { state: reasons.length ? 'failure' : 'success', fastPath, required, confirmations: [...confirmations], reasons };
 }
 
-function codexGate(reviews, reactions, sha, cutoff) {
+function completedCodexSummary(comment, sha) {
+  if (comment.user?.type !== 'Bot' || !CODEX.has(comment.user.login)) return false;
+  const match = /^<!-- codex-pull-request-review-summary -->\r?\n<!-- codex-review-state:v1 ([^\r\n]+) -->/.exec(comment.body || '');
+  if (!match) return false;
+  let state;
+  try { state = JSON.parse(match[1]); }
+  catch { return false; }
+  const review = state?.code_review;
+  return review?.commit_sha === sha && review.status === 'completed'
+    && typeof review.has_any_findings === 'boolean' && typeof review.has_unresolved_findings === 'boolean';
+}
+
+function codexGate(reviews, reactions, sha, cutoff, comments = []) {
   const review = reviews.some((item) => CODEX.has(item.user?.login) && item.commit_id === sha && item.submitted_at
     && ['COMMENTED', 'APPROVED', 'CHANGES_REQUESTED'].includes(item.state));
+  const summary = comments.some((comment) => completedCodexSummary(comment, sha));
   const reaction = reactions.some((item) => CODEX.has(item.user?.login) && item.content === '+1'
     && Date.parse(item.created_at) >= Date.parse(cutoff));
-  return { state: review || reaction ? 'success' : 'pending', reason: review ? 'Review on current SHA' : reaction ? 'Fresh Codex thumbs-up (time heuristic)' : 'Waiting for Codex on current SHA' };
+  return { state: review || summary || reaction ? 'success' : 'pending', reason: review ? 'Review on current SHA'
+    : summary ? 'Completed Codex summary on current SHA' : reaction ? 'Fresh Codex thumbs-up (time heuristic)' : 'Waiting for Codex on current SHA' };
 }
 
 function bugbotGate(checks, reviews, sha) {
