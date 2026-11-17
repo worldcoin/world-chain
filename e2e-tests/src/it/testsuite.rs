@@ -2655,6 +2655,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
             simulate_enabled: false,
             preconfirmed_logs: false,
             flashblock_evidence: false,
+            unsafe_block_evidence_url: None,
         };
 
         let wc_config = args.clone().into_config(&mut node_config)?;
