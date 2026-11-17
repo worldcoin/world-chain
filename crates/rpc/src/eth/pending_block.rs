@@ -446,6 +446,12 @@ mod tests {
         );
         let canonical = node.provider.canonical_in_memory_state();
         canonical.set_pending_block(make_block(2, 9));
+        let unknown_transaction = B256::repeat_byte(0xbb);
+        assert!(
+            api.transaction_receipt(unknown_transaction)
+                .await?
+                .is_none()
+        );
         assert_eq!(
             api.load_transaction_and_receipt(transaction_hash)
                 .await?
@@ -492,6 +498,11 @@ mod tests {
         assert_pending_header_not_found(pending_request.recovered_block(selected).await);
         assert_pending_header_not_found(pending_request.load_block_and_receipts(selected).await);
         assert!(
+            api.transaction_receipt(unknown_transaction)
+                .await?
+                .is_none()
+        );
+        assert!(
             api.cache()
                 .get_transaction_by_hash(transaction_hash)
                 .await
@@ -534,6 +545,11 @@ mod tests {
         assert!(canonical_request.state_at_block_id(selected).await.is_ok());
         assert!(canonical_request.evm_env_at(selected).await.is_ok());
         sender.send_replace(None);
+        assert!(
+            api.transaction_receipt(unknown_transaction)
+                .await?
+                .is_none()
+        );
         assert_eq!(
             api.recovered_block(BlockId::pending())
                 .await?

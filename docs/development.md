@@ -59,6 +59,9 @@ apply the same freshness check before using the selected Flashblock. Pending
 transaction counts retain Reth's consecutive transaction-pool nonce adjustment
 and can exceed the executed Flashblock nonce.
 
+Receipt misses by transaction hash return `null` even while the cached Flashblock
+is stale; provider errors still propagate.
+
 ## Metrics
 
 Custom metrics are exposed via the standard reth metrics endpoint (`/metrics`). Key namespaces:

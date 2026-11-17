@@ -16,7 +16,7 @@ use reth_rpc_eth_api::{
         EthTransactions, LoadPendingBlock, LoadTransaction, SpawnBlocking, spec::SignersForRpc,
     },
 };
-use reth_rpc_eth_types::block::BlockAndReceipts;
+use reth_rpc_eth_types::{EthApiError, block::BlockAndReceipts};
 use reth_transaction_pool::{PoolPooledTx, PoolTx, TransactionOrigin};
 
 use std::{future::Future, sync::Arc, time::Duration};
@@ -136,7 +136,14 @@ where
                 return Ok(receipt.map(|receipt| (tx, meta, receipt, None, None)));
             }
 
-            let pending_block = this.local_pending_block().await?;
+            let pending_block = match this.local_pending_block().await {
+                Ok(pending) => pending,
+                // An unavailable pending view is a miss for hash-only receipt requests.
+                Err(OpEthApiError::Eth(EthApiError::HeaderNotFound(at))) if at.is_pending() => {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
             if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone()
                 && let Some(pos) = block
                     .body()
