@@ -198,6 +198,7 @@ pub struct WorldChainTestBuilder {
     preconfirmed_logs: bool,
     #[builder(default)]
     flashblock_evidence: bool,
+    unsafe_block_evidence_url: Option<String>,
     block_uncompressed_size_limit: Option<u64>,
     #[builder(default = Arc::new(CHAIN_SPEC.clone()))]
     chain_spec: Arc<WorldChainSpec>,
@@ -257,6 +258,7 @@ impl WorldChainTestBuilder {
             self.shared_rpc_port,
             self.preconfirmed_logs,
             self.flashblock_evidence,
+            self.unsafe_block_evidence_url,
             self.block_uncompressed_size_limit,
             self.chain_spec,
         )
@@ -357,6 +359,7 @@ async fn setup_inner<T, G>(
     shared_rpc_port: bool,
     preconfirmed_logs: bool,
     flashblock_evidence: bool,
+    unsafe_block_evidence_url: Option<String>,
     block_uncompressed_size_limit: Option<u64>,
     chain_spec: Arc<WorldChainSpec>,
 ) -> eyre::Result<(
@@ -457,6 +460,7 @@ where
         let mut config = config;
         config.args.preconfirmed_logs = preconfirmed_logs;
         config.args.flashblock_evidence = flashblock_evidence;
+        config.args.unsafe_block_evidence_url = unsafe_block_evidence_url.clone();
         config.args.builder.block_uncompressed_size_limit = block_uncompressed_size_limit;
         if ws_rpc && !shared_rpc_port {
             // Reth combines HTTP and WS when both configured socket addresses use port zero.

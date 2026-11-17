@@ -135,6 +135,7 @@ pub fn test_config_with_peers_and_gossip(
             simulate_enabled: false,
             preconfirmed_logs: false,
             flashblock_evidence: false,
+            unsafe_block_evidence_url: None,
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),
