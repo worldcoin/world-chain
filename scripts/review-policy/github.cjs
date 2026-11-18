@@ -387,7 +387,7 @@ async function evaluateOnce({ github, context, core, number, teamGithub, sleep, 
       const human = await readHumanEvidence(reviews, comments);
       const cursorChecks = checks.filter((check) => check.name === 'Cursor Bugbot' && check.app?.slug === 'cursor');
       const evidenceResults = {
-        'codex-review-gate': policy.codexGate(reviews, reactions, sha, observation.started_at),
+        'codex-review-gate': policy.codexGate(reviews, reactions, sha, observation.started_at, comments),
         'bugbot-review-gate': policy.bugbotGate(cursorChecks, reviews, sha),
         'human-review-gate': human.result,
         'required-ci-gate': policy.ciGate(groups, runs, jobs, workflowIds, pr),
