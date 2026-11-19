@@ -126,10 +126,7 @@ where
         &self,
         at: BlockId,
     ) -> Result<(EvmEnvFor<Self::Evm>, BlockId), Self::Error> {
-        let pending_block = self.flashblock_pending_block(at)?;
-        if at.is_pending()
-            && let Some(pending_block) = pending_block
-        {
+        if let Some(pending_block) = self.flashblock_state_block(at)? {
             // Execution calls only need the header, not a copy of every pending receipt.
             let env = self.evm_env_for_header(pending_block.recovered_block.sealed_header())?;
             return Ok((env, pending_block.recovered_block.hash().into()));
@@ -221,7 +218,7 @@ where
         &self,
         at: BlockId,
     ) -> Result<FlashblocksEthApi<N, Rpc, true>, OpEthApiError> {
-        let pending_snapshot = self.flashblock_pending_block(at)?;
+        let pending_snapshot = self.flashblock_state_block(at)?;
         Ok(FlashblocksEthApi {
             inner: self.inner.clone(),
             pending_block: None,
@@ -345,6 +342,9 @@ mod tests {
         let (env, at) = pinned.evm_env_at(BlockId::pending()).await?;
         assert_eq!(env, original_env);
         assert_eq!(at, selected);
+        let (hash_env, hash_at) = pinned.evm_env_at(selected).await?;
+        assert_eq!(hash_env, original_env);
+        assert_eq!(hash_at, selected);
         assert_eq!(
             pinned
                 .state_at_block_id(selected)
@@ -378,6 +378,7 @@ mod tests {
             "requireCanonical": true,
         }))?;
         assert!(pinned.state_at_block_id(canonical).await.is_err());
+        assert!(pinned.evm_env_at(canonical).await.is_err());
         assert!(
             pinned
                 .spawn_blocking_io_with_state(canonical, |_, _| Ok(()))
@@ -477,6 +478,13 @@ mod tests {
             "requireCanonical": true,
         }))?;
         assert!(api.load_block_and_receipts(canonical_hash).await?.is_none());
+        assert!(
+            api.pin_pending(canonical_hash)?
+                .recovered_block(selected)
+                .await?
+                .is_none(),
+            "canonical-only selection must survive internal hash rewriting"
+        );
         let canonical = node.provider.canonical_in_memory_state();
         canonical.set_pending_block(make_block(2, 9));
         let unknown_transaction = B256::repeat_byte(0xbb);
