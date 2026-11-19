@@ -198,7 +198,39 @@ async fn remote_grants_fence_superseded_stopped_and_denied_jobs() {
         panic!("authorized start")
     };
     assert_eq!(start.authorization, auth);
+    let rejected = handle.request_grant_until(
+        signer.clone(),
+        PayloadId::new([99; 8]),
+        auth.timestamp,
+        runtime::deadline(),
+    );
+    assert!(
+        !lease.scope.is_cancelled(),
+        "a rejected same-slot rebuild must preserve the active publisher"
+    );
+    assert!(matches!(
+        rejected,
+        Err(FlashblocksP2PError::StaleControlMessage)
+    ));
+    assert_publishing(&handle, auth);
+    let (same, renewed) = handle
+        .request_grant_until(
+            signer.clone(),
+            auth.payload_id,
+            auth.timestamp,
+            runtime::deadline(),
+        )
+        .expect("same-grant refresh intent")
+        .await
+        .expect("same grant stays usable");
+    assert_eq!(same, auth);
+    assert!(
+        lease.scope.is_cancelled(),
+        "same-grant refresh still owns a new generation"
+    );
     drop(lease);
+    assert_publishing(&handle, auth);
+    drop(renewed);
     assert!(matches!(
         handle.publishing_status(),
         PublishingStatus::NotPublishing { .. }
@@ -247,6 +279,23 @@ async fn remote_grants_fence_superseded_stopped_and_denied_jobs() {
         handle.publishing_status(),
         PublishingStatus::NotPublishing { .. }
     ));
+    let signer = world_chain_signer::GrantSigner::new(harness.ed25519(true, "authorizer"))
+        .expect("grant signer");
+    let scope = {
+        let mut state = handle.state.lock();
+        state.payload_timestamp = 20;
+        state.payload_id = PayloadId::new([20; 8]);
+        state.pending_start.clone()
+    };
+    assert!(matches!(
+        handle.request_grant_until(signer, PayloadId::new([99; 8]), 20, runtime::deadline()),
+        Err(FlashblocksP2PError::StaleControlMessage)
+    ));
+    assert_eq!(
+        scope,
+        handle.state.lock().pending_start,
+        "a conflicting cached payload cannot reserve a generation"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

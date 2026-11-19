@@ -161,6 +161,10 @@ impl FlashblocksHandle {
                 < current_timestamp
                     .max(state.payload_timestamp)
                     .max(state.pending_start_timestamp.unwrap_or_default())
+                || (timestamp == state.payload_timestamp && payload_id != state.payload_id)
+                || matches!(*state.publishing_status.borrow(), PublishingStatus::Publishing { authorization }
+                    if timestamp == authorization.timestamp
+                        && (payload_id != authorization.payload_id || publisher != authorization.builder_vk))
             {
                 return Err(FlashblocksP2PError::StaleControlMessage);
             }
