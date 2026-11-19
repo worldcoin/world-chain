@@ -1,10 +1,9 @@
 # Docker build instructions
 
-This is the build-reference draft for the distribution work. Existing World
-Chain and per-component OP Docker recipes are listed below. The coordinated
-OP-only/combined image assembler and bundle exports are tracked in BLO-1253;
-their build commands must be added and tested before the new release is published.
-Do not infer that the proposed image tags already exist from the release preview.
+This reference covers source builds and assembly of three image variants from
+one platform payload. Payload production, source/example exports and final
+release qualification are tracked in BLO-1253. Local image builds do not publish
+the proposed tags or qualify a deployment.
 
 ## Inputs and prerequisites
 
@@ -26,6 +25,7 @@ From the selected World Chain source tree:
 
 ```sh
 docker buildx build --platform linux/amd64 --load \
+  --build-arg "VERGEN_GIT_SHA=${WORLD_CHAIN_COMMIT:?Set the recorded full source commit}" \
   --file Dockerfile --tag world-chain:local .
 docker run --rm --entrypoint /usr/local/bin/world-chain world-chain:local --version
 ```
@@ -145,17 +145,59 @@ This is a binary assembly stage, not a complete GitHub release. Source/examples
 ZIPs, signed checksums, published image digests and the final external
 `release-manifest.json` are finalized by the subsequent release pipeline.
 
-### Image and release integration
+### Image assembly
 
-The final assembler must accept the validated distribution inputs, verify source
-identities, and export one built payload per platform. Reuse those files for the
-World Chain-only, OP-only and combined variants and corresponding binary bundles.
-The OP-only image defaults to `op-node`; World Chain and combined images default
-to `world-chain`. All executables live in `/usr/local/bin`.
+Use a completed binary assembly's `payloads/linux-amd64` or
+`payloads/linux-arm64` directory as the `qualified-payload` named build context.
+The Docker targets copy the selected executable subset from that snapshot;
+they do not rebuild the node or OP components. The source and version inputs
+and license files accompany each image. Final image digests belong in the
+external release receipt, avoiding a receipt that contains its own image hash.
 
-Complete this section with the tested assembler commands, exact output paths,
-source ZIP creation, Compose/systemd checks and verification commands as part of
-BLO-1253. Resolve all external image/material digests and publish a final external
-receipt after generating the images and archives. Release-page layout approval
-and the existing release environment approval are separate prerequisites for
-publication.
+From the selected World Chain source directory:
+
+```sh
+platform=linux/amd64
+payload=/absolute/path/to/new-binary-assembly/payloads/linux-amd64
+docker buildx build --platform "$platform" --load \
+  --target distribution-combined \
+  --build-context "qualified-payload=$payload" \
+  --no-cache-filter runtime-tools,distribution-op \
+  --file Dockerfile --tag world-chain:combined-local .
+docker run --rm --network none world-chain:combined-local --version
+docker run --rm --network none --entrypoint /usr/local/bin/op-node \
+  world-chain:combined-local --version
+```
+
+| Variant | Docker target | Local tag | Default executable |
+| --- | --- | --- | --- |
+| Combined | `distribution-combined` | `world-chain:combined-local` | `world-chain` |
+| World Chain | `distribution-world-chain` | `world-chain:local` | `world-chain` |
+| OP | `distribution-op` | `world-chain:op-local` | `op-node` |
+
+Repeat the build with each target and tag. For arm64, select `linux/arm64` and
+the matching `payloads/linux-arm64` directory. Do not relabel an amd64 payload
+as arm64. The targets check ELF class, endianness and CPU before their version
+probes. The empty fallback context makes a missing `qualified-payload` fail
+without pulling an image of that name. The final/default `runtime` target
+continues to build the existing World Chain image from source.
+
+The OP and combined variants copy a pinned, patched Alpine musl loader for
+historical Cannon embeds; Bookworm's musl package lacks current security fixes.
+They install the C++ and udev libraries required by Kona/Foundry from Debian.
+Cannon extracts and executes its embedded helpers in `TMPDIR`: provide writable,
+executable temporary storage even when the container root is read-only. For
+example, a bounded `--tmpfs /tmp:rw,exec,nosuid,size=256m` supports the retained
+state-fixture checks. Size production temporary storage for the actual workload.
+Native arm64 and amd64 qualification must exercise all supported Cannon state
+versions, not just the top-level binary's `--version`.
+
+Before publication, compare the installed executable hashes with the binary
+assembly receipt on both platforms, check entrypoints and exact variant subsets,
+run each service/helper and retain all native runtime/library versions. The
+assembler's ELF checks and Docker version probes do not prove correct chain
+execution, source provenance or complete license coverage. Complete source/example
+ZIP creation, Compose/systemd and builder/signer qualification under BLO-1253,
+then finalize the external receipt with resolved materials and image digests.
+Release-page layout approval and the release environment approval remain
+separate prerequisites for publication.

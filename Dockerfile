@@ -103,6 +103,58 @@ RUN case "$TARGETARCH" in \
 # The AWS CLI bundles its own CA store; use Debian's, which distrusts the eMudhra roots.
 ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
+# Bookworm's musl lacks current security fixes; pin the patched loader separately.
+FROM public.ecr.aws/docker/library/alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS cannon-runtime
+RUN apk --no-network info --installed 'musl>=1.2.6-r3'
+
+# Supply --build-context qualified-payload=<assembled platform payload>.
+FROM scratch AS qualified-payload
+
+FROM runtime-tools AS distribution-world-chain
+COPY --from=qualified-payload --chmod=0755 /bin/world-chain /bin/cast /usr/local/bin/
+COPY --from=qualified-payload /licenses/ /usr/share/licenses/world-chain/
+COPY --from=qualified-payload /distribution-inputs.json /usr/share/world-chain/distribution-inputs.json
+COPY scripts/* /usr/local/bin/
+RUN case "$TARGETARCH" in amd64) machine=62 ;; arm64) machine=183 ;; *) exit 1 ;; esac && \
+  for name in world-chain cast; do \
+    test "$(od -An -tx1 -N6 /usr/local/bin/$name | tr -d ' \n')" = 7f454c460201 && \
+    test "$(od -An -tu2 -j18 -N2 /usr/local/bin/$name)" -eq "$machine" || \
+    { echo "Invalid ELF for $TARGETARCH: $name" >&2; exit 1; }; \
+  done && chmod +x /usr/local/bin/*.sh && world-chain --version && cast --version
+EXPOSE 30303 30303/udp 9001 8545 8546
+ENTRYPOINT ["/usr/local/bin/world-chain"]
+
+FROM runtime-tools AS distribution-op
+RUN apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && \
+  apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+  install -y --no-install-recommends libstdc++6 libudev1 && \
+  apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY --from=cannon-runtime /lib/ld-musl-*.so.1 /lib/libc.musl-*.so.1 /lib/
+COPY --from=qualified-payload --chmod=0755 \
+  /bin/op-node /bin/op-batcher /bin/op-proposer /bin/op-conductor \
+  /bin/op-challenger /bin/op-deployer /bin/op-dispute-mon \
+  /bin/cannon /bin/kona-host /bin/forge /bin/cast /usr/local/bin/
+COPY --from=qualified-payload /licenses/ /usr/share/licenses/world-chain/
+COPY --from=qualified-payload /distribution-inputs.json /usr/share/world-chain/distribution-inputs.json
+RUN case "$TARGETARCH" in amd64) machine=62 ;; arm64) machine=183 ;; *) exit 1 ;; esac && \
+  for name in op-node op-batcher op-proposer op-conductor op-challenger op-deployer \
+    op-dispute-mon cannon kona-host forge cast; do \
+    test "$(od -An -tx1 -N6 /usr/local/bin/$name | tr -d ' \n')" = 7f454c460201 && \
+    test "$(od -An -tu2 -j18 -N2 /usr/local/bin/$name)" -eq "$machine" || \
+    { echo "Invalid ELF for $TARGETARCH: $name" >&2; exit 1; }; \
+  done && op-node --version && op-deployer --version && forge --version && cast --version
+ENTRYPOINT ["/usr/local/bin/op-node"]
+
+FROM distribution-op AS distribution-combined
+COPY --from=qualified-payload --chmod=0755 /bin/world-chain /usr/local/bin/
+COPY scripts/* /usr/local/bin/
+RUN case "$TARGETARCH" in amd64) machine=62 ;; arm64) machine=183 ;; *) exit 1 ;; esac && \
+  test "$(od -An -tx1 -N6 /usr/local/bin/world-chain | tr -d ' \n')" = 7f454c460201 && \
+  test "$(od -An -tu2 -j18 -N2 /usr/local/bin/world-chain)" -eq "$machine" && \
+  chmod +x /usr/local/bin/*.sh && world-chain --version
+EXPOSE 30303 30303/udp 9001 8545 8546
+ENTRYPOINT ["/usr/local/bin/world-chain"]
+
 FROM runtime-tools AS runtime
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
