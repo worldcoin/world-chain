@@ -12,6 +12,11 @@ source trees at the exact World Chain and maintained Optimism commits recorded i
 the release manifest. For a source ZIP, extract its `world-chain/` and `optimism/`
 directories as siblings. For Git checkouts, use the fork in `optimism-worldchain`,
 not the upstream reference checkout; initialize the required pinned submodules.
+Schema-2 component `build_commit` values select that component's exact source
+tree; do not build every executable from the common fork commit when those
+values differ. Source ZIPs include those additional trees under
+`component-sources/<component>/`. Check their identities and select each tree
+explicitly before using its component build recipe.
 Do not replace those pins with latest branches.
 
 Build natively for `linux/amd64` or `linux/arm64` where possible. A local `--load`
@@ -83,6 +88,12 @@ aggregate OP-only image. Challenger historical image imports and Kona build
 inputs need their own provenance; setting one version argument does not qualify
 all embedded helper versions. Preserve Forge's selected pin and verify its trust
 behavior against the World Chain baseline.
+
+For an untagged current Cannon baseline, use schema 2's null `upstream_tag` and
+explicit build commit, set `CANNON_VERSION` to the recorded
+`v0.0.0-worldchain[.N]`, and check its reported version. Historical Cannon VM
+versions and import digests remain separate build materials; they do not assign
+the current executable's version.
 
 ## Coordinated release builds
 
@@ -181,6 +192,10 @@ as arm64. The targets check ELF class, endianness and CPU before their version
 probes. The empty fallback context makes a missing `qualified-payload` fail
 without pulling an image of that name. The final/default `runtime` target
 continues to build the existing World Chain image from source.
+
+Set the target with `--platform`; no manual `TARGETARCH` override is needed.
+`runtime-tools` declares that automatic argument, and the distribution targets
+inherit it through their parent stages, following [Docker's ARG scoping rules](https://docs.docker.com/build/building/variables/#scoping).
 
 The three distribution targets default to UID/GID `10001:10001`, with
 `HOME=/home/worldchain` and a writable `/app` working directory. Match mounted

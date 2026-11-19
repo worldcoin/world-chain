@@ -68,8 +68,9 @@ def load_inputs(path):
 
 def release_plan(inputs):
     object_fields(inputs, ("schema_version", "bundle_version", "sources", "components", "platforms"), "inputs")
-    if type(inputs["schema_version"]) is not int or inputs["schema_version"] != 1:
-        raise ValueError("schema_version must be 1")
+    schema = inputs["schema_version"]
+    if type(schema) is not int or schema not in (1, 2):
+        raise ValueError("schema_version must be 1 or 2")
     version = inputs["bundle_version"]
     if not matches(version, BUNDLE_VERSION):
         raise ValueError("bundle_version must be a canonical World Chain release version starting with vX.Y.Z")
@@ -83,14 +84,22 @@ def release_plan(inputs):
     object_fields(components, COMPONENTS, "components")
     for name in COMPONENTS:
         component = components[name]
-        object_fields(component, ("version", "upstream_tag", "upstream_commit"), f"components.{name}")
+        fields = ("version", "upstream_tag", "upstream_commit")
+        if schema == 2:
+            fields += ("build_commit",)
+        object_fields(component, fields, f"components.{name}")
         version_value = component["version"]
         match = re.fullmatch(WORLDCHAIN_VERSION, version_value) if isinstance(version_value, str) else None
         if match is None or len(version_value) > 128:
             raise ValueError(f"components.{name}.version must be vX.Y.Z-worldchain with an optional positive .N revision")
-        if component["upstream_tag"] != f"{name}/{match[1]}":
+        if schema == 2 and name == "cannon" and component["upstream_tag"] is None:
+            if match[1] != "v0.0.0":
+                raise ValueError("untagged cannon must use v0.0.0-worldchain with an optional positive .N revision")
+        elif component["upstream_tag"] != f"{name}/{match[1]}":
             raise ValueError(f"components.{name}.upstream_tag must match its component and base version")
         commit(component["upstream_commit"], f"components.{name}.upstream_commit")
+        if schema == 2:
+            commit(component["build_commit"], f"components.{name}.build_commit")
     platforms = inputs["platforms"]
     if (not isinstance(platforms, list) or len(platforms) != len(TARGETS)
             or any(not isinstance(p, str) for p in platforms)

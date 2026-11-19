@@ -333,6 +333,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rpc_concurrency_limits_require_positive_values() {
+        for flag in [
+            "--rpc.max-tracing-requests",
+            "--rpc.max-blocking-io-requests",
+            "--rpc.proof-permits",
+        ] {
+            assert!(
+                Cli::<WorldChainSpecParser, WorldChainArgs>::try_parse_args_from([
+                    "world-chain",
+                    "node",
+                    flag,
+                    "0"
+                ])
+                .is_err(),
+                "{flag} must reject zero"
+            );
+            Cli::<WorldChainSpecParser, WorldChainArgs>::try_parse_args_from([
+                "world-chain",
+                "node",
+                flag,
+                "1",
+            ])
+            .expect("positive RPC limit");
+        }
+    }
+
+    #[test]
     fn state_masking_is_disabled() {
         for explicit_zero in [false, true] {
             let mut args = vec!["world-chain", "node", "--engine.persistence-threshold", "7"];

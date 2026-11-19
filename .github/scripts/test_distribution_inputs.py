@@ -27,6 +27,17 @@ def inputs():
     }
 
 
+def component_source_inputs():
+    value = inputs()
+    value["schema_version"] = 2
+    for component in value["components"].values():
+        component["build_commit"] = value["sources"]["optimism"]
+    value["components"]["op-deployer"]["build_commit"] = "4" * 40
+    value["components"]["kona-host"]["build_commit"] = "5" * 40
+    value["components"]["cannon"].update(version="v0.0.0-worldchain.1", upstream_tag=None)
+    return value
+
+
 class DistributionInputsTest(unittest.TestCase):
     def test_asset_identity_and_required_helpers(self):
         value = inputs()
@@ -67,6 +78,44 @@ class DistributionInputsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             distribution.release_plan(value)
 
+    def test_component_sources_and_untagged_cannon(self):
+        value = component_source_inputs()
+        original = deepcopy(value)
+        plan = distribution.release_plan(value)
+        self.assertEqual(value, original)
+        self.assertEqual(plan["inputs"], original)
+        self.assertNotEqual(value["components"]["op-deployer"]["build_commit"], value["sources"]["optimism"])
+        self.assertIsNone(plan["inputs"]["components"]["cannon"]["upstream_tag"])
+        self.assertEqual(plan["assets"], distribution.release_plan(inputs())["assets"])
+
+    def test_reject_incomplete_or_misleading_component_sources(self):
+        for name in distribution.COMPONENTS:
+            for invalid in (None, "main", "0" * 40, "A" * 40):
+                with self.subTest(name=name, invalid=invalid):
+                    value = component_source_inputs()
+                    value["components"][name]["build_commit"] = invalid
+                    with self.assertRaises(ValueError):
+                        distribution.release_plan(value)
+            value = component_source_inputs()
+            del value["components"][name]["build_commit"]
+            with self.subTest(missing=name), self.assertRaises(ValueError):
+                distribution.release_plan(value)
+        for name in distribution.COMPONENTS:
+            if name == "cannon":
+                continue
+            value = component_source_inputs()
+            value["components"][name]["upstream_tag"] = None
+            with self.subTest(untagged=name), self.assertRaises(ValueError):
+                distribution.release_plan(value)
+        value = component_source_inputs()
+        value["components"]["cannon"]["version"] = "v1.6.0-worldchain"
+        with self.assertRaises(ValueError):
+            distribution.release_plan(value)
+        value = component_source_inputs()
+        value["schema_version"] = 1
+        with self.assertRaises(ValueError):
+            distribution.release_plan(value)
+
     def test_variant_tags_do_not_collide_with_prereleases(self):
         references = []
         for version in ("v2.8.3", "v2.8.3-op", "v2.8.3-combined", "v2.8.3-rc.1"):
@@ -80,7 +129,7 @@ class DistributionInputsTest(unittest.TestCase):
 
     def test_reject_invalid_contract(self):
         cases = [
-            ("schema_version", True), ("schema_version", 2),
+            ("schema_version", True), ("schema_version", 3),
             ("bundle_version", "v02.8.3"), ("bundle_version", "v2.8.3;echo bad"),
             ("bundle_version", "v2.8.3\n"), ("bundle_version", "v2.8.3/extra"),
             ("platforms", ["linux/amd64", "linux/amd64"]),

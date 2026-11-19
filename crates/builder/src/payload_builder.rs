@@ -57,7 +57,9 @@ use reth_optimism_primitives::{
     OpPrimitives, OpReceipt, OpTransactionSigned, transaction::OpTransaction,
 };
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_provider::{BlockExecutionOutput, ChainSpecProvider, ProviderError, StateProviderFactory};
+use reth_provider::{
+    BlockExecutionOutput, ChainSpecProvider, ProviderError, StateProvider, StateProviderFactory,
+};
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{context::BlockEnv, inspector::NoOpInspector};
@@ -139,7 +141,7 @@ where
         );
 
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
-        let db = StateProviderDatabase::new(state_provider);
+        let db = StateProviderDatabase::new(state_provider.into_evm_state_provider());
         let db = cached_reads.as_db_mut(db);
 
         let result = build(

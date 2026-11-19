@@ -5,7 +5,7 @@ use reth_evm::ConfigureEvm;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_primitives_traits::HeaderTy;
-use reth_revm::cancelled::CancelOnDrop;
+use reth_tasks::CancelOnDrop;
 
 /// Builder trait for creating [`PayloadBuilderCtx`] instances with specific configurations.
 ///
