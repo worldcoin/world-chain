@@ -13,6 +13,7 @@ pkg/contracts/sepolia_load_test.json
 .DS_Store
 **/.DS_Store
 **/proptest-regressions/
+__pycache__/
 
 # Measured shared libs resolve inside each artifact's lockfile; their own locks pin nothing.
 /proofs/measured/core/Cargo.lock
