@@ -104,6 +104,30 @@ test('CODEX only accepts current SHA reviews or its own fresh thumbs-up', () => 
   assert.equal(p.codexGate([], [{ ...reaction, content: 'eyes' }], sha, at).state, 'pending');
 });
 
+test('Codex completion summary binds review to the current SHA before observation', () => {
+  const state = { code_review: { commit_sha: sha, status: 'completed', has_any_findings: false, has_unresolved_findings: false } };
+  const summary = (value = state) => ({ user: bot('chatgpt-codex-connector[bot]'),
+    body: `<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 ${JSON.stringify(value)} -->`,
+    created_at: '2026-10-19T09:59:54Z' });
+  assert.equal(p.codexGate([], [], sha, at, [summary()]).state, 'success');
+  assert.equal(p.codexGate([], [], sha, at, [summary({ code_review: { ...state.code_review,
+    has_any_findings: true, has_unresolved_findings: true } })]).state, 'success');
+  for (const extra of [{ commit_sha: 'old' }, { status: 'pending' }, { status: 'error' },
+    { has_any_findings: null }, { has_unresolved_findings: undefined }]) {
+    assert.equal(p.codexGate([], [], sha, at, [summary({ code_review: { ...state.code_review, ...extra } })]).state, 'pending');
+  }
+  for (const value of [null, {}, { security_review: state.code_review }]) {
+    assert.equal(p.codexGate([], [], sha, at, [summary(value)]).state, 'pending');
+  }
+  for (const user of [bot('cursor[bot]'), { login: 'chatgpt-codex-connector[bot]', type: 'User' }]) {
+    assert.equal(p.codexGate([], [], sha, at, [{ ...summary(), user }]).state, 'pending');
+  }
+  for (const body of [summary().body.replace(':v1 ', ':v2 '), `quoted\n${summary().body}`,
+    '<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 broken -->']) {
+    assert.equal(p.codexGate([], [], sha, at, [{ ...summary(), body }]).state, 'pending');
+  }
+});
+
 test('Bugbot neutral requires a matching completed review, errors and cancellations block', () => {
   const check = { id: 1, name: 'Cursor Bugbot', app: { slug: 'cursor' }, head_sha: sha, status: 'completed', conclusion: 'success', started_at: at };
   const findings = review('cursor[bot]', 'COMMENTED', { body: '<!-- BUGBOT_REVIEW -->\nCursor Bugbot has reviewed your changes using default effort and found 1 potential issue.' });

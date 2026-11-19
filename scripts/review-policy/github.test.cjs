@@ -112,6 +112,18 @@ async function run(options = {}) {
   return fixture;
 }
 
+test('Codex completion summary reaches the controller when thumbs-up precedes observation', async () => {
+  const state = { code_review: { commit_sha: head, status: 'completed', has_any_findings: false, has_unresolved_findings: false } };
+  const summary = { id: 1, user: codexReview.user,
+    body: `<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 ${JSON.stringify(state)} -->` };
+  let sleeps = 0;
+  const result = await run({ noCodex: true, comments: [summary], reactions: [{ user: codexReview.user,
+    content: '+1', created_at: new Date(now - 6000).toISOString() }], afterSleep: () => sleeps++ });
+  assert.deepEqual(result.failures, []);
+  assert.equal(sleeps, 0);
+  assert.equal(result.checks.find((check) => check.name === 'codex-review-gate').conclusion, 'success');
+});
+
 test('PR events dispatch the controller on trusted main without attaching its cancellable evaluator to the PR', async () => {
   const workflow = fs.readFileSync('.github/workflows/review-policy.yml', 'utf8');
   const request = workflow.match(/^  request:\n([\s\S]*?)^  targets:/m)?.[1];
