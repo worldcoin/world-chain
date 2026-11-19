@@ -42,8 +42,8 @@ local key or remote configuration. Nodes without either hold no PBH signer and
 fail explicitly if asked to sign a nullifier transaction. There is no embedded
 default PBH private key or fallback after a remote failure.
 
-Protected mode is enabled by `--builder.signer-config`. To publish Flashblocks,
-also supply `--flashblocks.signer-config`:
+Either remote signer option enables protected mode. For PBH and publication,
+supply both signer configurations:
 
 ```sh
 world-chain node --builder.enabled \
@@ -56,7 +56,23 @@ For a custom chain, additionally configure its explicit authorizer verifying key
 Protected mode rejects local PBH/publisher keys, authorizer overrides and
 force-publish, including conflicting environment variables. Remote PBH can run
 with Flashblocks disabled or receiving only. A remote publisher requires remote
-PBH signing. Receive-only nodes need no publisher signing credentials.
+PBH signing when `--builder.enabled` is set. Receive-only nodes need no publisher
+signing credentials.
+
+For publication on a network with PBH disabled, omit the PBH builder and its
+credentials and set zero reserved capacity explicitly:
+
+```sh
+world-chain node --flashblocks.enabled \
+  --flashblocks.signer-config /run/secrets/publisher-signer.json \
+  --flashblocks.authorizer-vk "$REVIEWED_AUTHORIZER_PUBLIC_KEY" \
+  --pbh.verified-blockspace-capacity 0
+```
+
+This mode creates no PBH wallet. It still requires grants from an authorized
+external producer; the node does not issue remote grants. Alphanet's in-process
+grant topology needs separate leadership-bound remote grant integration before
+activation. Zero capacity does not permit local keys or force-publish.
 
 PBH JSON:
 

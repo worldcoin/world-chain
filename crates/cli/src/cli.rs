@@ -1,5 +1,5 @@
 use crate::config::{FlashblocksPayloadBuilderConfig, FlashblocksStoreConfig};
-use ::eyre::eyre::{WrapErr, bail, eyre};
+use ::eyre::eyre::{WrapErr, bail};
 use alloy_chains::NamedChain;
 use alloy_primitives::{Address, address};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, ForkCondition};
@@ -124,10 +124,13 @@ impl WorldChainArgs {
                 .is_some_and(|fb| fb.signer_config.is_some());
         if protected {
             eyre::eyre::ensure!(
-                self.builder.enabled
-                    && self.builder.signer_config.is_some()
-                    && self.builder.private_key.is_none(),
-                "protected signing requires a remote PBH signer and excludes local/default PBH keys"
+                self.builder.private_key.is_none()
+                    && (!self.builder.enabled || self.builder.signer_config.is_some()),
+                "protected signing requires remote PBH signing when the builder is enabled and excludes local PBH keys"
+            );
+            eyre::eyre::ensure!(
+                self.builder.enabled || self.pbh.verified_blockspace_capacity == 0,
+                "protected publication without a PBH signer requires zero verified blockspace capacity"
             );
             if let Some(fb) = &self.flashblocks {
                 eyre::eyre::ensure!(
@@ -155,10 +158,7 @@ impl WorldChainArgs {
             .transpose()
             .wrap_err("Flashblock publisher signer configuration")?;
         if protected {
-            let wallet = pbh_wallet
-                .as_ref()
-                .ok_or_else(|| eyre!("protected signing requires a remote PBH signer"))?;
-            info!(target:"world_chain::signer",pbh_address=%wallet.address(),flashblocks_publisher=publication_signer.is_some(),"protected remote signing configured");
+            info!(target:"world_chain::signer",pbh_address=?pbh_wallet.as_ref().map(|wallet| wallet.address()),flashblocks_publisher=publication_signer.is_some(),"protected remote signing configured");
         }
         if self.preconfirmed_logs && self.flashblocks.as_ref().is_none_or(|args| !args.enabled) {
             bail!("--rpc.preconfirmed-logs requires --flashblocks.enabled");
@@ -595,6 +595,30 @@ mod tests {
             .health(signer_runtime::deadline())
             .await
             .expect("authenticated protocol endpoint");
+        let publication_only = into_world_config(
+            CommandParserWithRpc::try_parse_from([
+                "bin",
+                "--flashblocks.enabled",
+                "--flashblocks.signer-config",
+                publisher_path.to_str().expect("test path"),
+                "--flashblocks.authorizer-vk",
+                &authorizer,
+                "--pbh.verified-blockspace-capacity",
+                "0",
+            ])
+            .expect("publication-only CLI"),
+        );
+        assert!(!publication_only.args.builder.enabled);
+        assert!(publication_only.pbh_wallet.is_none());
+        assert!(publication_only.args.builder.private_key.is_none());
+        assert_eq!(publication_only.args.pbh.verified_blockspace_capacity, 0);
+        publication_only
+            .publication_signer
+            .as_ref()
+            .expect("publication-only remote publisher")
+            .health(signer_runtime::deadline())
+            .await
+            .expect("authenticated publication-only endpoint");
         std::fs::remove_file(pbh_path).expect("remove caller configuration");
         assert!(
             config.args.builder.wallet().is_err(),
@@ -685,6 +709,51 @@ mod tests {
         ]);
         assert!(remote.world.builder.private_key.is_none());
         assert!(remote.world.builder.wallet().is_err());
+    }
+
+    #[test]
+    fn protected_publication_requires_zero_pbh_capacity_or_a_remote_pbh_builder() {
+        for capacity in [None, Some("1"), Some("70"), Some("100")] {
+            let mut argv = vec![
+                "bin",
+                "--flashblocks.enabled",
+                "--flashblocks.signer-config",
+                "missing.json",
+            ];
+            if let Some(capacity) = capacity {
+                argv.extend(["--pbh.verified-blockspace-capacity", capacity]);
+            }
+            let parsed = CommandParser::try_parse_from(argv).expect("publication CLI");
+            let mut node =
+                NodeConfig::new(Arc::new(WorldChainSpec::from_genesis(Genesis::default())));
+            let error = parsed
+                .world
+                .into_config(&mut node)
+                .expect_err("publication-only startup must explicitly disable PBH");
+            assert!(
+                error
+                    .to_string()
+                    .contains("zero verified blockspace capacity")
+            );
+        }
+        let parsed = CommandParser::try_parse_from([
+            "bin",
+            "--flashblocks.enabled",
+            "--flashblocks.signer-config",
+            "missing.json",
+            "--pbh.verified-blockspace-capacity",
+            "0",
+            "--builder.enabled",
+            "--builder.private-key",
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        ])
+        .expect("mixed PBH/publication CLI");
+        let mut node = NodeConfig::new(Arc::new(WorldChainSpec::from_genesis(Genesis::default())));
+        let error = parsed
+            .world
+            .into_config(&mut node)
+            .expect_err("zero capacity cannot authorize a local PBH key");
+        assert!(error.to_string().contains("excludes local PBH keys"));
     }
 
     #[test]
