@@ -16,14 +16,14 @@ use reth_rpc_eth_api::{
         EthTransactions, LoadPendingBlock, LoadTransaction, SpawnBlocking, spec::SignersForRpc,
     },
 };
-use reth_rpc_eth_types::block::BlockAndReceipts;
+use reth_rpc_eth_types::{EthApiError, block::BlockAndReceipts};
 use reth_transaction_pool::{PoolPooledTx, PoolTx, TransactionOrigin};
 
 use std::{future::Future, sync::Arc, time::Duration};
 
 use crate::eth::FlashblocksEthApi;
 
-impl<N, Rpc> EthTransactions for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> EthTransactions for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
@@ -121,7 +121,29 @@ where
         }
 
         self.spawn_blocking_io_fut(async move |this| {
-            let pending_block = this.local_pending_block().await?;
+            // Canonical receipts do not depend on the availability of a pending view.
+            let provider = this.provider();
+            if let Some((tx, meta)) = provider
+                .transaction_by_hash_with_meta(hash)
+                .map_err(Self::Error::from_eth_err)?
+            {
+                let tx = tx
+                    .try_into_recovered_unchecked()
+                    .map_err(Self::Error::from_eth_err)?;
+                let receipt = provider
+                    .receipt_by_hash(hash)
+                    .map_err(Self::Error::from_eth_err)?;
+                return Ok(receipt.map(|receipt| (tx, meta, receipt, None, None)));
+            }
+
+            let pending_block = match this.local_pending_block().await {
+                Ok(pending) => pending,
+                // An unavailable pending view is a miss for hash-only receipt requests.
+                Err(OpEthApiError::Eth(EthApiError::HeaderNotFound(at))) if at.is_pending() => {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
             if let Some(BlockAndReceipts { block, receipts }) = pending_block.clone()
                 && let Some(pos) = block
                     .body()
@@ -159,34 +181,13 @@ where
                 )));
             }
 
-            let provider = this.provider();
-
-            let (tx, meta) = match provider
-                .transaction_by_hash_with_meta(hash)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some((tx, meta)) => (tx, meta),
-                None => return Ok(None),
-            };
-            let tx = tx
-                .try_into_recovered_unchecked()
-                .map_err(Self::Error::from_eth_err)?;
-
-            let receipt = match provider
-                .receipt_by_hash(hash)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
-
-            Ok(Some((tx, meta, receipt, None, None)))
+            Ok(None)
         })
         .await
     }
 }
 
-impl<N, Rpc> LoadTransaction for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> LoadTransaction for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert + Clone,

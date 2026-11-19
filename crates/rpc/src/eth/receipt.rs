@@ -10,7 +10,7 @@ use reth_rpc_eth_api::{
 
 use crate::eth::FlashblocksEthApi;
 
-impl<N, Rpc> LoadReceipt for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> LoadReceipt for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives, Provider: ChainSpecProvider<ChainSpec: OpHardforks>>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = Self::Error> + Clone,
