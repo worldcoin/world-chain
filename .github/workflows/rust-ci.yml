@@ -124,7 +124,7 @@ jobs:
             --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 \
             --memory 1g --tmpfs /tmp:rw,nosuid,nodev,size=64m \
             --tmpfs /data:rw,nosuid,nodev,uid=10001,gid=10001,size=256m \
-            "$image" init --chain worldchain-sepolia --datadir /data/reth \
+            "$image" init --log.file.max-files 0 --chain worldchain-sepolia --datadir /data/reth \
             --db.max-size 512MB --db.growth-step 16MB > "$QUALIFICATION_OUTPUT/genesis-init.txt" 2>&1; then
             cat "$QUALIFICATION_OUTPUT/genesis-init.txt" >&2
             exit 1

@@ -197,6 +197,7 @@ test('native qualification dispatch is isolated without skipping ordinary Rust C
   assert.match(native, /          persist-credentials: false/);
   assert.match(native, /--target runtime[\s\S]+--build-arg PROFILE=maxperf --build-arg FEATURES=jemalloc/);
   assert(!native.includes('--push') && !native.includes('configure-aws-credentials'));
+  assert(native.includes('init --log.file.max-files 0'), 'read-only init must explicitly disable file logs');
   const cases = [
     ...['push', 'pull_request', 'merge_group'].map((event_name) => ({ event_name, commit: '', qualification: false })),
     { event_name: 'workflow_dispatch', commit: '', qualification: false },
