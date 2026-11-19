@@ -108,6 +108,7 @@ fn job(handle: FlashblocksHandle) -> FlashblocksPayloadJob<Builder> {
         id,
     );
     FlashblocksPayloadJob {
+        pending_grant: None,
         pending_publication: None,
         publishing_clearance: None,
         _publishing_lease: Some(lease),
@@ -174,6 +175,57 @@ fn hold_signature(job: &mut FlashblocksPayloadJob<Builder>) -> Arc<AtomicBool> {
         access_list: None,
     });
     cancelled
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pending_grants_preserve_execution_and_cancel_with_the_job() {
+    for action in ["resolve", "deadline", "drop"] {
+        let handle = FlashblocksHandle::new(
+            SigningKey::from_bytes(&[7; 32]).verifying_key(),
+            Some(SigningKey::from_bytes(&[8; 32])),
+        );
+        let mut job = job(handle);
+        job.authorization = None;
+        job._publishing_lease.take();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let guard = HeldSignature(cancelled.clone());
+        job.pending_grant = Some(Box::pin(async move {
+            let _guard = guard;
+            futures::future::pending().await
+        }));
+        assert!(futures::poll!(&mut job).is_pending());
+        assert!(job.best_payload.0.payload().is_some());
+        assert!(job.committed_payload.is_empty());
+        assert_eq!(
+            job.block_index, 0,
+            "waiting for a grant must not skip Flashblock zero"
+        );
+        match action {
+            "resolve" => {
+                let (result, _) = job.resolve_kind(PayloadKind::Earliest);
+                assert_eq!(
+                    result
+                        .await
+                        .expect("execution remains available")
+                        .block()
+                        .hash(),
+                    job.builder.payload.block().hash()
+                );
+            }
+            "deadline" => {
+                job.deadline
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() - Duration::from_secs(1));
+                assert!(matches!(futures::poll!(&mut job), Poll::Ready(Ok(()))));
+            }
+            "drop" => drop(job),
+            _ => unreachable!(),
+        }
+        assert!(
+            cancelled.load(Ordering::SeqCst),
+            "{action} must cancel the grant future"
+        );
+    }
 }
 
 async fn clearance(job: &FlashblocksPayloadJob<Builder>) -> Result<(), FlashblocksP2PError> {

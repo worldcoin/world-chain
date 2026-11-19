@@ -45,6 +45,17 @@ struct PendingControlMessage {
     payload_timestamp: u64,
 }
 
+struct PreparedPublishing {
+    message: Option<PendingControlMessage>,
+    scope: CancellationToken,
+}
+
+/// Dropping this future revokes its reserved publishing generation.
+pub type PendingGrant = futures::future::BoxFuture<
+    'static,
+    Result<(Authorization, PublishingLease), FlashblocksP2PError>,
+>;
+
 /// Dropping a protected payload job fences only its own publishing generation.
 pub struct PublishingLease {
     handle: FlashblocksHandle,
@@ -122,6 +133,83 @@ impl FlashblocksP2PState {
 }
 
 impl FlashblocksHandle {
+    /// Reserves the job's generation before starting any remote grant I/O.
+    pub fn request_grant_until(
+        &self,
+        signer: world_chain_signer::GrantSigner,
+        payload_id: PayloadId,
+        timestamp: u64,
+        deadline: tokio::time::Instant,
+    ) -> Result<PendingGrant, FlashblocksP2PError> {
+        if !self.is_remote_publisher() || signer.public_key() != self.ctx.authorizer_vk {
+            return Err(FlashblocksP2PError::InvalidControlMessage);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(world_chain_signer::Error::Deadline.into());
+        }
+        let publisher = self.publisher_key()?;
+        let scope = {
+            let mut state = self.state.lock();
+            let current_timestamp = match &*state.publishing_status.borrow() {
+                PublishingStatus::Publishing { authorization }
+                | PublishingStatus::WaitingToPublish { authorization, .. } => {
+                    authorization.timestamp
+                }
+                PublishingStatus::NotPublishing { .. } => 0,
+            };
+            if timestamp
+                < current_timestamp
+                    .max(state.payload_timestamp)
+                    .max(state.pending_start_timestamp.unwrap_or_default())
+            {
+                return Err(FlashblocksP2PError::StaleControlMessage);
+            }
+            state.new_publishing_request();
+            state.pending_start_timestamp = Some(timestamp);
+            state.pending_start.clone()
+        };
+        let reservation = PublishingLease {
+            handle: self.clone(),
+            scope,
+            deadline,
+        };
+        let handle = self.clone();
+        Ok(Box::pin(async move {
+            let sign = async {
+                signer.wait_until_idle(deadline).await?;
+                signer
+                    .sign(
+                        payload_id.0,
+                        timestamp,
+                        publisher.to_bytes().into(),
+                        deadline,
+                    )
+                    .await
+            };
+            let signature = tokio::select! {
+                biased;
+                () = reservation.scope.cancelled() => return Err(FlashblocksP2PError::StaleControlMessage),
+                result = sign => result?,
+            };
+            let authorization = Authorization {
+                payload_id,
+                timestamp,
+                builder_vk: publisher,
+                authorizer_sig: signature,
+            };
+            let scope =
+                handle.begin_publishing_for(authorization, deadline, Some(&reservation.scope))?;
+            Ok((
+                authorization,
+                PublishingLease {
+                    handle,
+                    scope,
+                    deadline,
+                },
+            ))
+        }))
+    }
+
     fn dispatch_control(
         &self,
         mut pending: PendingControlMessage,
@@ -297,26 +385,43 @@ impl FlashblocksHandle {
         authorization: Authorization,
         deadline: tokio::time::Instant,
     ) -> Result<CancellationToken, FlashblocksP2PError> {
+        self.begin_publishing_for(authorization, deadline, None)
+    }
+
+    fn begin_publishing_for(
+        &self,
+        authorization: Authorization,
+        deadline: tokio::time::Instant,
+        expected: Option<&CancellationToken>,
+    ) -> Result<CancellationToken, FlashblocksP2PError> {
         if tokio::time::Instant::now() >= deadline {
             return Err(world_chain_signer::Error::Deadline.into());
         }
-        if let Some(pending) = self.prepare_start_publishing(authorization)? {
-            let scope = pending.cancelled.clone();
+        let prepared = self
+            .prepare_start_for(authorization, expected)?
+            .ok_or(FlashblocksP2PError::StaleControlMessage)?;
+        if let Some(pending) = prepared.message {
             self.dispatch_control(pending, deadline)?;
-            return Ok(scope);
         }
-        let state = self.state.lock();
-        if !matches!(*state.publishing_status.borrow(),PublishingStatus::Publishing {authorization:current}|PublishingStatus::WaitingToPublish {authorization:current,..} if current==authorization)
-        {
+        if prepared.scope.is_cancelled() {
             return Err(FlashblocksP2PError::StaleControlMessage);
         }
-        Ok(state.pending_start.clone())
+        Ok(prepared.scope)
     }
 
     fn prepare_start_publishing(
         &self,
         new_authorization: Authorization,
     ) -> Result<Option<PendingControlMessage>, FlashblocksP2PError> {
+        self.prepare_start_for(new_authorization, None)
+            .map(|prepared| prepared.and_then(|prepared| prepared.message))
+    }
+
+    fn prepare_start_for(
+        &self,
+        new_authorization: Authorization,
+        expected: Option<&CancellationToken>,
+    ) -> Result<Option<PreparedPublishing>, FlashblocksP2PError> {
         let key = self.publisher_key()?;
         if new_authorization.builder_vk != key
             || new_authorization.verify(self.ctx.authorizer_vk).is_err()
@@ -326,6 +431,9 @@ impl FlashblocksHandle {
         }
 
         let mut state = self.state.lock();
+        if expected.is_some_and(|scope| *scope != state.pending_start || scope.is_cancelled()) {
+            return Err(FlashblocksP2PError::StaleControlMessage);
+        }
         if state
             .pending_start_timestamp
             .is_some_and(|timestamp| new_authorization.timestamp < timestamp)
@@ -377,8 +485,12 @@ impl FlashblocksHandle {
         if send_start {
             state.pending_start_timestamp = Some(new_authorization.timestamp);
         }
-        Ok(send_start
-            .then(|| PendingControlMessage::new(&state, new_authorization, ControlMessage::Start)))
+        Ok(Some(PreparedPublishing {
+            message: send_start.then(|| {
+                PendingControlMessage::new(&state, new_authorization, ControlMessage::Start)
+            }),
+            scope: state.pending_start.clone(),
+        }))
     }
 
     /// Revokes local clearance before signing the stop notification outside the state lock.
