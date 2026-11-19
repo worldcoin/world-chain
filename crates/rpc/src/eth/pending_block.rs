@@ -201,7 +201,7 @@ where
         Ok(None)
     }
 
-    fn pending_extends_tip(
+    pub(super) fn pending_extends_tip(
         &self,
         pending: &ExecutedBlock<OpPrimitives>,
     ) -> Result<bool, OpEthApiError> {
@@ -626,6 +626,7 @@ mod tests {
         use reth_chainspec::EthChainSpec;
         use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SignerRecoverable};
         use reth_provider::{BlockNumReader, DatabaseProviderFactory};
+        use reth_rpc_eth_api::helpers::EthBlocks;
         use world_chain_chainspec::WorldChainSpecBuilder;
         use world_chain_node::context::WorldChainDefaultContext;
         use world_chain_test_utils::e2e_harness::setup::{
@@ -752,6 +753,23 @@ mod tests {
         let (_sender, receiver) = tokio::sync::watch::channel(Some(child));
         let api = FlashblocksEthApi::new(inner, Some(receiver));
         let pinned = api.pin_pending(BlockId::pending())?;
+        let (_, selected) = pinned.evm_env_at(BlockId::pending()).await?;
+        let hash_request = api.pin_pending(selected)?;
+        let canonical_hash: BlockId = serde_json::from_value(serde_json::json!({
+            "blockHash": selected.as_block_hash().expect("selected hash"),
+            "requireCanonical": true,
+        }))?;
+        for selector in [BlockId::pending(), selected] {
+            assert_eq!(
+                api.load_block_and_receipts(selector)
+                    .await?
+                    .expect("live Flashblock receipts")
+                    .0
+                    .hash(),
+                selected.as_block_hash().expect("selected hash")
+            );
+        }
+        assert!(api.load_block_and_receipts(canonical_hash).await?.is_none());
         let state = pinned.state_at_block_id(BlockId::pending()).await?;
         let unread_state = pinned.state_at_block_id(BlockId::pending()).await?;
         assert_eq!(state.account_nonce(&sender)?, parent_nonce);
@@ -791,6 +809,16 @@ mod tests {
         })
         .await??;
         assert_pending_header_not_found(pinned.state_at_block_id(BlockId::pending()).await);
+        assert_pending_header_not_found(api.load_block_and_receipts(BlockId::pending()).await);
+        assert!(api.load_block_and_receipts(selected).await?.is_none());
+        assert!(
+            hash_request
+                .load_block_and_receipts(selected)
+                .await?
+                .is_none()
+        );
+        assert!(api.load_block_and_receipts(canonical_hash).await?.is_none());
+        assert!(api.state_at_block_id(selected).await.is_err());
         assert_eq!(state.account_nonce(&sender)?, parent_nonce);
         assert_eq!(state.account_nonce(&child_address)?, Some(11));
         assert_eq!(unread_state.account_nonce(&sender)?, parent_nonce);
