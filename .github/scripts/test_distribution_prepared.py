@@ -9,7 +9,9 @@ import re
 import subprocess
 import sys
 import tarfile
+import tempfile
 import textwrap
+import time
 import unittest
 from unittest.mock import patch
 
@@ -176,10 +178,22 @@ class RemoteBoundsTest(unittest.TestCase):
         self.assertEqual(output.getvalue(), b"ok")
         with self.assertRaisesRegex(ValueError, "byte budget"):
             prepared.bounded_command([sys.executable, "-c", "print('long output')"], io.BytesIO(), 2, 5)
+        with self.assertRaisesRegex(ValueError, "stderr exceeded"):
+            prepared.bounded_command([sys.executable, "-c", "import sys; print('x' * 70000, file=sys.stderr)"], io.BytesIO(), 100, 5)
         with self.assertRaises(TimeoutError):
             prepared.bounded_command([sys.executable, "-c", "import time; time.sleep(5)"], io.BytesIO(), 100, 0.05)
         with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
             prepared.bounded_command([sys.executable, "-c", "import sys; print('HTTP 403', file=sys.stderr); sys.exit(7)"], io.BytesIO(), 100, 5)
+
+    def test_deadline_cancels_children_after_the_launcher_exits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "orphaned"
+            child = f"import time,pathlib; time.sleep(0.4); pathlib.Path({str(marker)!r}).write_text('still running')"
+            launcher = f"import subprocess,sys; subprocess.Popen([sys.executable, '-c', {child!r}])"
+            with self.assertRaises(TimeoutError):
+                prepared.bounded_command([sys.executable, "-c", launcher], io.BytesIO(), 100, 0.1)
+            time.sleep(0.5)
+            self.assertFalse(marker.exists(), "timed-out subprocess descendants must not keep running")
 
 
 class WorkflowModeTest(unittest.TestCase):

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import selectors
+import signal
 import stat
 import subprocess
 import sys
@@ -27,34 +28,46 @@ MANIFEST_TYPES = {"application/vnd.oci.image.manifest.v1+json", "application/vnd
 
 
 def bounded_command(command, output, limit, timeout):
-    with tempfile.TemporaryFile() as errors:
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors)
-        deadline, size = time.monotonic() + timeout, 0
-        try:
-            with selectors.DefaultSelector() as selector:
-                selector.register(process.stdout, selectors.EVENT_READ)
-                while True:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0 or not selector.select(min(30, remaining)):
-                        raise TimeoutError(f"{command[0]} exceeded its request deadline or 30-second idle limit")
-                    chunk = os.read(process.stdout.fileno(), 64 * 1024)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    deadline, size, errors = time.monotonic() + timeout, 0, bytearray()
+    completed = False
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            selector.register(process.stderr, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                ready = selector.select(min(30, max(0, remaining)))
+                if remaining <= 0 or not ready:
+                    raise TimeoutError(f"{command[0]} exceeded its request deadline or 30-second idle limit")
+                for key, _ in ready:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
                     if not chunk:
-                        break
-                    size += len(chunk)
-                    if size > limit:
-                        raise ValueError(f"{command[0]} response exceeded its byte budget")
-                    output.write(chunk)
-            code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
-            if code:
-                errors.seek(0)
-                status = re.search(rb"HTTP (\d{3})", errors.read(4096))
-                detail = f"; HTTP {status[1].decode()}" if status else ""
-                raise RuntimeError(f"{command[0]} failed with exit {code}{detail}")
-        finally:
-            process.stdout.close()
-            if process.poll() is None:
-                process.kill()
-                process.wait(timeout=5)
+                        selector.unregister(key.fileobj)
+                    elif key.fileobj is process.stderr:
+                        if len(errors) + len(chunk) > 64 * 1024:
+                            raise ValueError(f"{command[0]} stderr exceeded its byte budget")
+                        errors.extend(chunk)
+                    else:
+                        size += len(chunk)
+                        if size > limit:
+                            raise ValueError(f"{command[0]} response exceeded its byte budget")
+                        output.write(chunk)
+        code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
+        completed = True
+        if code:
+            status = re.search(rb"HTTP (\d{3})", errors)
+            detail = f"; HTTP {status[1].decode()}" if status else ""
+            raise RuntimeError(f"{command[0]} failed with exit {code}{detail}")
+    finally:
+        process.stdout.close()
+        process.stderr.close()
+        if not completed:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # The group may already have exited during timeout cleanup.
+            process.wait(timeout=5)
 
 
 def command_record(command):
