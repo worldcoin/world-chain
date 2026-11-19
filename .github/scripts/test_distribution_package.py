@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from test_distribution_inputs import inputs
+from test_distribution_inputs import component_source_inputs, inputs
 
 
 SCRIPT = Path(__file__).with_name("distribution-package.py")
@@ -103,6 +103,18 @@ class BinaryPackagingTest(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             packaging.package(inputs(), self.source, output, EPOCH)
         self.assertEqual(sentinel.read_text(), "existing release")
+
+    def test_component_sources_survive_packaging(self):
+        value = component_source_inputs()
+        output = self.root / "component-sources"
+        receipt = packaging.package(value, self.source, output, EPOCH)
+        for name in receipt["archives"]:
+            with tarfile.open(output / name) as archive:
+                self.assertEqual(json.load(archive.extractfile("distribution-inputs.json")), value)
+        value["components"]["op-deployer"]["build_commit"] = "6" * 40
+        changed = packaging.package(value, self.source, self.root / "changed-source", EPOCH)
+        for name, digest in receipt["archives"].items():
+            self.assertNotEqual(digest, changed["archives"][name])
 
     def test_invalid_layout_and_epoch_fail_before_output(self):
         for epoch in (-1, 2**32, True):
