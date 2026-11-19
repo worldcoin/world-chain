@@ -123,6 +123,10 @@ def verify_archive(path, receipt, plan, platform, variant):
                 raise ValueError(f"unexpected binary archive metadata: {name}")
             content = archive.extractfile(member)
             actual = hashlib.sha256()
+            header = content.read(64)
+            if name in plan["binaries"]:
+                packaging.check_elf(header, platform)
+            actual.update(header)
             while chunk := content.read(packaging.CHUNK):
                 actual.update(chunk)
             if actual.hexdigest() != expected[name]:
