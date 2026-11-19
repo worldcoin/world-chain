@@ -32,8 +32,8 @@ docker run --rm --entrypoint /usr/local/bin/world-chain world-chain:local --vers
 
 The runtime selects the AWS CLI installer for `linux/amd64` or `linux/arm64`;
 other architectures fail explicitly. Its reusable `runtime-tools` stage retains
-the system utilities, Debian CA version check and `AWS_CA_BUNDLE` setting. Both
-image workflows exclude `runtime-tools` and `runtime` from caching so these
+the system utilities, Debian CA version check and `AWS_CA_BUNDLE` setting. The
+nightly, release and alphanet workflows exclude `runtime-tools` and `runtime` from caching so these
 checks run on each build. The separate `cast` version remains in the final image.
 
 To check runtime tools without compiling the node, build the selected platform:
