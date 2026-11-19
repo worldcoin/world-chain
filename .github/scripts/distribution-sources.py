@@ -1,6 +1,7 @@
 """Export pinned Git sources, submodules and deployment examples without changing checkouts."""
 
 import argparse
+from collections import deque
 from datetime import datetime, timezone
 import hashlib
 import importlib.util
@@ -174,6 +175,30 @@ def zip_entry(archive, name, data, mode, timestamp):
     archive.writestr(info, data, compresslevel=6)
 
 
+def validate_symlinks(archive):
+    links = {info.filename: archive.read(info).decode("utf-8") for info in archive.infolist()
+             if info.external_attr >> 16 == 0o120000}
+    for name in links:
+        pending, resolved, followed = deque(name.split("/")), [], 0
+        while pending:
+            part = pending.popleft()
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if not resolved:
+                    raise ValueError("source symlink escapes the archive")
+                resolved.pop()
+                continue
+            resolved.append(part)
+            target = links.get("/".join(resolved))
+            if target is not None:
+                followed += 1
+                if followed > 40:
+                    raise ValueError("source symlink chain exceeds 40 links or contains a cycle")
+                resolved.pop()
+                pending.extendleft(reversed(target.split("/")))
+
+
 def guide_paths(world_chain, files):
     entries = {name: (mode, oid) for name, mode, oid in files}
     pending = [name for name in entries if name.startswith("examples/distribution/") and name.endswith(".md")]
@@ -250,6 +275,7 @@ def package(inputs, world_chain, optimism, repositories, build_record, output):
         if not indexes["examples"]:
             raise ValueError("source has no committed deployment examples")
         for kind, archive in (("sources", sources), ("examples", examples)):
+            validate_symlinks(archive)
             zip_entry(archive, "release-metadata/sources.json", packaging.json_bytes(metadata), "100644", timestamp)
             zip_entry(archive, "release-metadata/files.json", packaging.json_bytes(indexes[kind]), "100644", timestamp)
     receipt = {"schema_version": 1, "inputs": inputs, "source_date_epoch": epoch, "assets": {}}

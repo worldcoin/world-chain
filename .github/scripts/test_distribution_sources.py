@@ -132,6 +132,31 @@ class SourceExportTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     sources.zip_entry(archive, "world-chain/link", target, "120000", (2026, 1, 1, 0, 0, 0))
 
+    def test_export_rejects_chained_symlink_escape_and_cycles(self):
+        entries, data = list(self.nodes[0]["entries"]), dict(self.data)
+        for links in ({"sub/up": b"..", "sub/escape": b"up/../../outside"},
+                      {"a": b"b", "b": b"a"},
+                      {"examples/distribution/sub/up": b"..",
+                       "examples/distribution/sub/escape": b"up/../../../outside"}):
+            with self.subTest(links=links), tempfile.TemporaryDirectory(dir=self.root) as output:
+                self.output = Path(output) / "export"
+                self.data = {**data, **links}
+                self.nodes[0]["entries"] = entries + [(name, "120000", oid(target)) for name, target in links.items()]
+                with self.assertRaisesRegex(ValueError, "symlink"):
+                    self.package()
+                self.assertTrue((self.output / "INCOMPLETE").exists())
+                self.assertFalse((self.output / "source-manifest.json").exists())
+
+    def test_export_preserves_safe_chained_parent_symlinks(self):
+        links = {"sub/readme": b"up/README.md", "sub/up": b".."}
+        self.data.update(links)
+        self.nodes[0]["entries"].extend((name, "120000", oid(data)) for name, data in links.items())
+        receipt = self.package()
+        name = next(name for name in receipt["assets"] if name.endswith("-sources.zip"))
+        with zipfile.ZipFile(self.output / name) as archive:
+            for path, target in links.items():
+                self.assertEqual(archive.read("world-chain/" + path), target)
+
     def test_object_reader_rejects_corruption_and_lfs_pointers(self):
         for data in (b"corrupt", b"version https://git-lfs.github.com/spec/v1\n"):
             key = oid(data) if data.startswith(b"version ") else "b" * 40
