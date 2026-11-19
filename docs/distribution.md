@@ -115,18 +115,34 @@ The validator accepts a UTF-8 JSON object, limited to 64 KiB, with these fields:
 
 | Field | Required value |
 | --- | --- |
-| `schema_version` | Integer `1` |
+| `schema_version` | Integer `2`; legacy schema `1` remains accepted |
 | `bundle_version` | World Chain release version, including leading `v` |
 | `sources` | Exactly `world_chain` and `optimism`, each a nonzero full lowercase commit ID |
 | `components` | Exactly the nine OP components/helpers in the table above |
 | `platforms` | `linux/amd64` and `linux/arm64`, each exactly once |
 
-Each component entry contains exactly `version`, `upstream_tag` and
-`upstream_commit`. For example, `op-node` can have version
+Each schema-2 component entry contains exactly `version`, `upstream_tag`,
+`upstream_commit` and `build_commit`. For example, `op-node` can have version
 `v1.19.11-worldchain.2`, upstream tag `op-node/v1.19.11`, and the full resolved
 upstream commit. This illustrates the format, not an adopted release baseline.
 `cannon` and `kona-host` also need their own reviewed upstream identities; do not
-assign them the op-node version. Unknown fields, duplicate JSON fields, floating
+assign them the op-node version. `build_commit` is the exact Optimism repository
+commit used to build that component, which can differ from the common fork
+recipe commit in `sources.optimism`. Set it explicitly even when the commits
+match. This permits separately sourced deployer and proof helpers without
+misrepresenting their source as the common fork HEAD. Schema 1 omits
+`build_commit` and retains its original common-source contract; use schema 2 for
+new releases.
+
+For current Cannon without a corresponding upstream release tag, schema 2 permits
+`upstream_tag: null` only for `cannon`, with a `v0.0.0-worldchain[.N]` version.
+`upstream_commit` then records the selected untagged upstream baseline;
+`build_commit` records the actual fork build source. Pass the recorded version
+to the Cannon build and verify the resulting executable reports it. A historical
+VM tag does not name the current multicannon executable. Record each embedded
+historical VM's source and immutable import digest separately in build materials.
+
+Unknown fields, duplicate JSON fields, floating
 source refs, mismatched upstream versions and noncanonical revisions are errors.
 
 ```sh
@@ -134,11 +150,12 @@ python3 .github/scripts/distribution-inputs.py /path/to/distribution-inputs.json
 python3 -m unittest discover -s .github/scripts -p 'test_distribution_inputs.py'
 ```
 
-The two source commits bind the World Chain build recipes and the maintained
-Optimism fork recipes. Inputs are caller-supplied. Before building, the eventual
-publisher must resolve and verify every claimed source/tag binding, compare the
-bundle version to the selected World Chain `Cargo.toml`, and qualify the common
-fork commit against each upstream component base. An ancestor tag alone is not
+The two top-level source commits bind the World Chain build recipes and the
+maintained Optimism fork recipes. Per-component build commits select the source
+trees consumed by those recipes. Inputs are caller-supplied. Before building,
+the eventual publisher must resolve and verify every claimed source/tag binding,
+compare the bundle version to the selected World Chain `Cargo.toml`, and qualify each
+component build commit against its upstream base. An ancestor tag alone is not
 proof of that base. Use clean exported source trees and committed lockfiles.
 
 The build must also resolve and record external materials, including base-image
@@ -174,8 +191,11 @@ that hashed payload; embed the source/version inputs separately if needed.
 
 The explicit source archive contains both `world-chain/` and `optimism/` trees at
 the recorded commits, their pinned submodule contents, and required license and
-build metadata. Include or identify the corresponding sources for imported
-historical Cannon implementations and other redistributed artifacts. GitHub's
+build metadata. For schema-2 components built at another commit, include their
+source trees under `component-sources/<component>/` with their required submodules
+and build metadata; document those paths in the manifest. Include or identify
+the corresponding sources for imported historical Cannon implementations and
+other redistributed artifacts. GitHub's
 automatic World Chain source archive does not include the other repository or
 all submodule contents and cannot replace this asset.
 
