@@ -156,6 +156,52 @@ This is a binary assembly stage, not a complete GitHub release. Complete the
 source/examples exports, image publication and qualification before finalizing
 the external receipt below.
 
+### Export source and deployment examples
+
+Use reviewed local checkouts containing the exact input commits and all pinned
+submodule objects. Additional checkouts can supply objects for older component
+and nested submodule revisions. Prepare them using the approved source-access
+identity before export; the release repository token alone cannot read the
+private maintained OP repository.
+
+```sh
+python3 .github/scripts/distribution-sources.py \
+  --inputs /path/to/distribution-inputs.json \
+  --world-chain-repo /path/to/world-chain \
+  --optimism-repo /path/to/optimism \
+  --repository /path/to/selected-deployer-checkout \
+  --repository /path/to/selected-kona-checkout \
+  --build-record /path/to/reviewed-build-record.json \
+  --output /path/to/new-source-export
+```
+
+The build record uses the same schema and exact inputs as the finalization stage
+below. Its reviewed materials identify the corresponding historical Cannon,
+Foundry and other imported sources, build recipes and notices. The exporter binds
+these records without establishing their authenticity or completeness.
+
+The command reads committed Git objects, preserving dirty and untracked checkout
+data. It resolves each gitlink at its pinned commit and includes separately built
+components under `component-sources/<component>/`. Missing local objects fail
+without fetching. Git replacement objects are disabled. Each blob is checked
+against its Git identity; unresolved LFS pointers, escaping symlinks, unsafe paths
+and excessive source graphs/data are rejected. Limits are 100000 files, ten GiB
+of file contents, 512 MiB per blob and a submodule depth of 16.
+
+The two ZIPs preserve file/executable/symlink modes and deterministic timestamps
+from the World Chain source commit. Each contains `release-metadata/sources.json`
+with the exact inputs, source trees/gitlinks and producer materials, plus a file
+index containing Git IDs, sizes and SHA-256s. The examples ZIP includes committed
+`examples/distribution/` files and their linked local Markdown guides. Source-file
+links use the corresponding source ZIP. Local checkout paths are excluded from
+source metadata.
+
+The intermediate `source-manifest.json` records ZIP checksums. Existing output is
+preserved, and a failed export retains `INCOMPLETE`/partial output. Finalization
+rejects an incomplete source or binary assembly. Independently verify source
+coverage, notice obligations, examples and build reproduction before signing or
+publishing these assets. This step produces local unsigned assets.
+
 ### Image assembly
 
 Use a completed binary assembly's `payloads/linux-amd64` or

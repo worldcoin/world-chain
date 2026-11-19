@@ -147,8 +147,8 @@ def verify_zip_inputs(path, inputs):
 
 
 def finalize(assembly, sources, examples, build_record, image_record, output):
-    if (assembly / "INCOMPLETE").exists():
-        raise ValueError("binary assembly is incomplete")
+    if any((directory / "INCOMPLETE").exists() for directory in (assembly, sources.parent, examples.parent)):
+        raise ValueError("input assembly is incomplete")
     receipt = load_record(assembly / "binary-manifest.json")
     plan = validate_receipt(receipt)
     validate_records(receipt["inputs"], plan, build_record, image_record)

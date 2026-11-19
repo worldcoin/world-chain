@@ -185,6 +185,12 @@ class ReleaseFinalizationTest(unittest.TestCase):
             self.finalize()
         self.assertEqual(sentinel.read_text(), "prior release")
 
+    def test_incomplete_source_export_is_rejected_before_output(self):
+        (self.sources.parent / "INCOMPLETE").write_text("source producer failed")
+        with self.assertRaisesRegex(ValueError, "input assembly is incomplete"):
+            self.finalize()
+        self.assertFalse(self.output.exists())
+
     def test_record_loader_rejects_duplicate_nonfinite_oversized_and_nonobject_json(self):
         path = self.root / "record.json"
         for data in (b'{"x":1,"x":2}', b'{"x":NaN}', b'\xff',
