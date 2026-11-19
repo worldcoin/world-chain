@@ -626,7 +626,7 @@ mod tests {
         use reth_chainspec::EthChainSpec;
         use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SignerRecoverable};
         use reth_provider::{BlockNumReader, DatabaseProviderFactory};
-        use reth_rpc_eth_api::helpers::EthBlocks;
+        use reth_rpc_eth_api::helpers::{EthBlocks, LoadBlock};
         use world_chain_chainspec::WorldChainSpecBuilder;
         use world_chain_node::context::WorldChainDefaultContext;
         use world_chain_test_utils::e2e_harness::setup::{
@@ -760,6 +760,7 @@ mod tests {
             "requireCanonical": true,
         }))?;
         for selector in [BlockId::pending(), selected] {
+            assert!(api.recovered_block(selector).await?.is_some());
             assert_eq!(
                 api.load_block_and_receipts(selector)
                     .await?
@@ -810,6 +811,8 @@ mod tests {
         .await??;
         assert_pending_header_not_found(pinned.state_at_block_id(BlockId::pending()).await);
         assert_pending_header_not_found(api.load_block_and_receipts(BlockId::pending()).await);
+        assert!(api.recovered_block(selected).await?.is_none());
+        assert!(hash_request.recovered_block(selected).await?.is_none());
         assert!(api.load_block_and_receipts(selected).await?.is_none());
         assert!(
             hash_request
