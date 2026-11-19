@@ -35,7 +35,7 @@ use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives_traits::{HeaderTy, Recovered, SealedHeader, TxTy};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
-use reth_revm::cancelled::CancelOnDrop;
+use reth_tasks::CancelOnDrop;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{Database as RevmDatabase, context::BlockEnv};
 use revm_database::State;
