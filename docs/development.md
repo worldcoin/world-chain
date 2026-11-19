@@ -63,6 +63,8 @@ and can exceed the executed Flashblock nonce.
 
 Receipt misses by transaction hash return `null` even while the cached Flashblock
 is stale; provider errors still propagate.
+Block-receipt reads by hash use a Flashblock only while it extends the canonical
+tip; otherwise they fall back to stored receipts and return `null` on a miss.
 
 ## Metrics
 

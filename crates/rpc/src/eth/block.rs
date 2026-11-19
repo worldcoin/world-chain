@@ -64,6 +64,7 @@ where
         if matches!(block_id, BlockId::Hash(hash) if hash.require_canonical != Some(true))
             && let Some(pending_block) = pending_block
             && pending_block.recovered_block.hash() == block_hash
+            && self.pending_extends_tip(&pending_block)?
         {
             return Ok(Some((
                 pending_block.recovered_block,
