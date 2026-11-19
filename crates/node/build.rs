@@ -1,4 +1,6 @@
-use std::{env, error::Error};
+use std::{env, error::Error, path::Path};
+
+mod build_profile;
 
 use vergen::{Build, Cargo, Emitter};
 use vergen_git2::Git2;
@@ -31,7 +33,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .ok_or("VERGEN_GIT_SHA must be at least 7 characters")?;
     let pkg_version = env!("CARGO_PKG_VERSION");
     let target = env::var("VERGEN_CARGO_TARGET_TRIPLE")?;
-    let profile = build_profile()?;
+    let out_dir = env::var("OUT_DIR")?;
+    let profile = build_profile::from_out_dir(Path::new(&out_dir))?;
     let client_version = format!("world-chain/v{pkg_version}-{short_sha}/{target}");
 
     println!("cargo:rustc-env=VERGEN_GIT_SHA={sha}");
@@ -53,13 +56,4 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-env=RETH_P2P_CLIENT_VERSION={client_version}");
 
     Ok(())
-}
-
-fn build_profile() -> Result<String, Box<dyn Error>> {
-    let out_dir = env::var("OUT_DIR")?;
-    Ok(out_dir
-        .rsplit(std::path::MAIN_SEPARATOR)
-        .nth(3)
-        .ok_or("OUT_DIR did not include a Cargo profile")?
-        .to_string())
 }
