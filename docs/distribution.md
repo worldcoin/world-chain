@@ -89,6 +89,26 @@ interpreter versions; an archive of executables alone is not a statically linked
 portable runtime. Include applicable licenses and notices. Test all shipped
 services and helper execution paths on each supported platform before publishing.
 
+### Native amd64 build qualification
+
+The existing `Rust CI` manual dispatch accepts an optional
+`qualification_commit`: a full lowercase commit SHA from this repository. It
+builds that exact source with the production Dockerfile's `maxperf`/`jemalloc`
+settings on the native amd64 runner, then checks the reported commit, shared
+libraries and offline World Chain Sepolia database initialization as UID 10001
+with a read-only root filesystem. This dispatch runs only the qualification job;
+omit the input for the usual CI jobs. PR and push CI keep their usual checks.
+
+This optional job has read-only repository access and uploads seven-day CI
+artifacts containing the executable tarball, SHA-256, version, source/runner
+identity and Buildx material metadata. It does not publish an image or release;
+the existing Docker/release workflows do publish and are unsuitable for this
+prepublication check. The receipt distinguishes the workflow revision from the
+built source. Download and verify the tarball before using its executable in a
+candidate payload. This qualifies the World Chain executable only; both-platform
+OP/helper execution, combined-chain, signer/Nitro, load and rollback acceptance
+remain separate release gates.
+
 ## Input contract
 
 The validator accepts a UTF-8 JSON object, limited to 64 KiB, with these fields:

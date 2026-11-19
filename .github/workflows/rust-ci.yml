@@ -38,6 +38,11 @@ on:
       - "crates/**/res/**"
       - ".github/workflows/rust-ci.yml"
   workflow_dispatch:
+    inputs:
+      qualification_commit:
+        description: Optional full commit SHA for a native amd64 maxperf build and offline smoke test; uploads CI artifacts only.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -58,7 +63,93 @@ env:
   SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
 
 jobs:
+  native-amd64-qualification:
+    if: github.event_name == 'workflow_dispatch' && inputs.qualification_commit != ''
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+    env:
+      QUALIFICATION_COMMIT: ${{ inputs.qualification_commit }}
+      WORLDCHAIN_PROVIDER: ""
+      RUSTC_WRAPPER: ""
+      SCCACHE_BUCKET: ""
+      BUILDX_METADATA_PROVENANCE: max
+    steps:
+      - name: Validate immutable source and native runner
+        run: |
+          [[ "$QUALIFICATION_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$QUALIFICATION_COMMIT" != 0000000000000000000000000000000000000000
+          test "$(uname -m)" = x86_64
+          test "$(docker info --format '{{.Architecture}}')" = x86_64
+          printf 'QUALIFICATION_OUTPUT=%s/native-amd64-qualification\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.qualification_commit }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build the production Dockerfile without publishing
+        run: |
+          test "$(git rev-parse HEAD)" = "$QUALIFICATION_COMMIT"
+          mkdir "$QUALIFICATION_OUTPUT"
+          {
+            printf 'source_commit=%s\nworkflow_commit=%s\n' "$QUALIFICATION_COMMIT" "$GITHUB_WORKFLOW_SHA"
+            git rev-parse 'HEAD^{tree}'
+            uname -m
+            docker info --format '{{.Architecture}}'
+            docker buildx version
+            sha256sum Dockerfile rust-toolchain.toml Cargo.lock
+          } > "$QUALIFICATION_OUTPUT/source-and-runner.txt"
+          docker buildx build --platform linux/amd64 --target runtime \
+            --build-arg "VERGEN_GIT_SHA=$QUALIFICATION_COMMIT" \
+            --build-arg PROFILE=maxperf --build-arg FEATURES=jemalloc \
+            --metadata-file "$QUALIFICATION_OUTPUT/build-metadata.json" \
+            --tag world-chain-native-qualification --load .
+      - name: Check and export the actual image executable
+        run: |
+          image=world-chain-native-qualification
+          docker image inspect "$image" --format '{{.Id}} {{.Os}}/{{.Architecture}}' > "$QUALIFICATION_OUTPUT/local-image.txt"
+          docker run --rm --platform linux/amd64 --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 \
+            "$image" --version | tee "$QUALIFICATION_OUTPUT/version.txt"
+          grep -Fx "Commit SHA: $QUALIFICATION_COMMIT" "$QUALIFICATION_OUTPUT/version.txt"
+          docker run --rm --platform linux/amd64 --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 \
+            --entrypoint sh "$image" -ec 'ldd /usr/local/bin/world-chain' | tee "$QUALIFICATION_OUTPUT/libraries.txt"
+          if grep -q 'not found' "$QUALIFICATION_OUTPUT/libraries.txt"; then exit 1; fi
+          if ! docker run --rm --platform linux/amd64 --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 \
+            --memory 1g --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            --tmpfs /data:rw,nosuid,nodev,uid=10001,gid=10001,size=256m \
+            "$image" init --chain worldchain-sepolia --datadir /data/reth \
+            --db.max-size 512MB --db.growth-step 16MB > "$QUALIFICATION_OUTPUT/genesis-init.txt" 2>&1; then
+            cat "$QUALIFICATION_OUTPUT/genesis-init.txt" >&2
+            exit 1
+          fi
+          container=$(docker create --platform linux/amd64 "$image")
+          trap 'docker rm "$container"' EXIT
+          docker cp "$container:/usr/local/bin/world-chain" "$QUALIFICATION_OUTPUT/world-chain"
+          (
+            cd "$QUALIFICATION_OUTPUT"
+            tar -czf world-chain-linux-amd64.tar.gz world-chain
+            sha256sum world-chain world-chain-linux-amd64.tar.gz > SHA256SUMS
+          )
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: native-amd64-${{ inputs.qualification_commit }}
+          path: |
+            ${{ env.QUALIFICATION_OUTPUT }}/*.txt
+            ${{ env.QUALIFICATION_OUTPUT }}/*.json
+            ${{ env.QUALIFICATION_OUTPUT }}/SHA256SUMS
+            ${{ env.QUALIFICATION_OUTPUT }}/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   cargo-tests:
+    if: github.event_name != 'workflow_dispatch' || inputs.qualification_commit == ''
     runs-on: arc-public-8xlarge-amd64-runner
     environment:
       name: dev
@@ -106,6 +197,7 @@ jobs:
         run: mold -run just test --profile ci --locked
 
   cargo-clippy:
+    if: github.event_name != 'workflow_dispatch' || inputs.qualification_commit == ''
     runs-on: arc-public-8xlarge-amd64-runner
     environment:
       name: dev
@@ -152,6 +244,7 @@ jobs:
         run: cargo +nightly-2026-10-10 clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   cargo-docs:
+    if: github.event_name != 'workflow_dispatch' || inputs.qualification_commit == ''
     runs-on: arc-public-8xlarge-amd64-runner
     environment:
       name: dev
