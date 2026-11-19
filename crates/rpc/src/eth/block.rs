@@ -60,6 +60,17 @@ where
         else {
             return Ok(None);
         };
+
+        if matches!(block_id, BlockId::Hash(hash) if hash.require_canonical != Some(true))
+            && let Some(pending_block) = pending_block
+            && pending_block.recovered_block.hash() == block_hash
+        {
+            return Ok(Some((
+                pending_block.recovered_block,
+                pending_block.execution_output.into(),
+            )));
+        }
+
         self.cache()
             .get_block_and_receipts(block_hash)
             .await

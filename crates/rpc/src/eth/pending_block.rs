@@ -360,6 +360,15 @@ mod tests {
                 .await?,
             Some(7)
         );
+        assert_eq!(
+            pinned
+                .load_block_and_receipts(selected)
+                .await?
+                .expect("retained Flashblock receipts by hash")
+                .0
+                .hash(),
+            selected.as_block_hash().expect("selected hash")
+        );
         assert!(
             api.state_at_block_id(selected).await.is_err(),
             "a replaced view must not resolve to newer state"
@@ -458,6 +467,16 @@ mod tests {
                 .hash(),
             selected.as_block_hash().expect("selected hash")
         );
+        let (_, receipts) = api
+            .load_block_and_receipts(selected)
+            .await?
+            .expect("live Flashblock receipts by hash");
+        assert_eq!(receipts.len(), 1);
+        let canonical_hash: BlockId = serde_json::from_value(serde_json::json!({
+            "blockHash": selected.as_block_hash().expect("selected hash"),
+            "requireCanonical": true,
+        }))?;
+        assert!(api.load_block_and_receipts(canonical_hash).await?.is_none());
         let canonical = node.provider.canonical_in_memory_state();
         canonical.set_pending_block(make_block(2, 9));
         let unknown_transaction = B256::repeat_byte(0xbb);
