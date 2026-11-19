@@ -19,7 +19,7 @@ use revm::{
 use revm_inspectors::tracing::types::CallTraceNode;
 use std::{error::Error, fmt};
 
-/// Cumulative materialized entries, including diff entries later filtered out.
+/// Cumulative projection work, including entries omitted by native filtering.
 /// Variable byte payloads are decoded retained data, not JSON-encoded response bytes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ProjectionCounts {
@@ -270,7 +270,7 @@ pub fn project_call_trace(
 }
 
 /// Project prestate/diff with checks at every account, storage and provider boundary.
-/// Shared counts include materialized pre+post entries even when native diff filtering removes them.
+/// Shared counts include visited accounts and pre+post entries removed by native filtering.
 pub fn project_prestate<DB: DatabaseRef>(
     state: &EvmState,
     config: PreStateConfig,
@@ -284,6 +284,11 @@ pub fn project_prestate<DB: DatabaseRef>(
         checkpoint()?;
         budget.charge(ProjectionResource::Accounts, 1)?;
         let original = provider_read(checkpoint, || db.basic_ref(*address))?.unwrap_or_default();
+        let was_empty =
+            original.balance.is_zero() && original.nonce == 0 && original.code_hash == KECCAK_EMPTY;
+        if !config.is_diff_mode() && was_empty {
+            continue;
+        }
         let code = if config.code_enabled() {
             load_code(db, &original, budget, checkpoint)?
         } else {
@@ -349,8 +354,6 @@ pub fn project_prestate<DB: DatabaseRef>(
             checkpoint()?;
             result.post.insert(*address, post);
         }
-        let was_empty =
-            original.balance.is_zero() && original.nonce == 0 && original.code_hash == KECCAK_EMPTY;
         if !(account.is_created() && was_empty) {
             result.pre.insert(*address, pre);
         }

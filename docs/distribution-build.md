@@ -13,6 +13,11 @@ source trees at the exact World Chain and maintained Optimism commits recorded i
 the release manifest. For a source ZIP, extract its `world-chain/` and `optimism/`
 directories as siblings. For Git checkouts, use the fork in `optimism-worldchain`,
 not the upstream reference checkout; initialize the required pinned submodules.
+Schema-2 component `build_commit` values select that component's exact source
+tree; do not build every executable from the common fork commit when those
+values differ. Source ZIPs include those additional trees under
+`component-sources/<component>/`. Check their identities and select each tree
+explicitly before using its component build recipe.
 Do not replace those pins with latest branches.
 
 Build natively for `linux/amd64` or `linux/arm64` where possible. A local `--load`
@@ -30,9 +35,24 @@ docker buildx build --platform linux/amd64 --load \
 docker run --rm --entrypoint /usr/local/bin/world-chain world-chain:local --version
 ```
 
-The current runtime recipe downloads an x86_64 AWS CLI unconditionally. The
-distribution implementation must fix and test that before documenting an arm64
-build as qualified. Preserve its CA bundle settings and separate cast version.
+The runtime selects the AWS CLI installer for `linux/amd64` or `linux/arm64`;
+other architectures fail explicitly. Its reusable `runtime-tools` stage retains
+the system utilities, Debian CA version check and `AWS_CA_BUNDLE` setting. The
+nightly, release and alphanet workflows exclude `runtime-tools` and `runtime` from caching so these
+checks run on each build. The separate `cast` version remains in the final image.
+
+To check runtime tools without compiling the node, build the selected platform:
+
+```sh
+docker buildx build --platform linux/arm64 --target runtime-tools --load \
+  --no-cache-filter runtime-tools \
+  --file Dockerfile --tag world-chain-runtime-tools:local .
+docker run --rm --platform linux/arm64 world-chain-runtime-tools:local aws --version
+```
+
+Repeat with `linux/amd64`. This checks the tools stage, not the final World Chain
+binary, `cast`, OP helpers or combined-image compatibility. Full runtime and
+native architecture qualification still use the final release artifacts.
 
 ## Existing OP component recipes from our fork
 
@@ -68,6 +88,12 @@ aggregate OP-only image. Challenger historical image imports and Kona build
 inputs need their own provenance; setting one version argument does not qualify
 all embedded helper versions. Preserve Forge's selected pin and verify its trust
 behavior against the World Chain baseline.
+
+For an untagged current Cannon baseline, use schema 2's null `upstream_tag` and
+explicit build commit, set `CANNON_VERSION` to the recorded
+`v0.0.0-worldchain[.N]`, and check its reported version. Historical Cannon VM
+versions and import digests remain separate build materials; they do not assign
+the current executable's version.
 
 ## Coordinated release builds
 

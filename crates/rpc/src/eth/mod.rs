@@ -24,7 +24,7 @@ use reth_rpc_eth_api::{
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
     helpers::{
         EthApiSpec, EthFees, EthState, EthSubscriptions, GetBlockAccessList, LoadFee,
-        LoadPendingBlock, LoadState, SpawnBlocking, Trace, pending_block::BuildPendingEnv,
+        SpawnBlocking, Trace, pending_block::BuildPendingEnv,
     },
 };
 use reth_rpc_eth_types::{EthApiSettings, EthStateCache, FeeHistoryCache, GasPriceOracle};
@@ -44,10 +44,13 @@ use tokio::sync::Semaphore;
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
+/// `PINNED` identifies request-local copies that retain one executed Flashblock.
 #[derive(Clone)]
-pub struct FlashblocksEthApi<N: RpcNodeCore, Rpc: RpcConvert> {
+pub struct FlashblocksEthApi<N: RpcNodeCore, Rpc: RpcConvert, const PINNED: bool = false> {
     inner: OpEthApi<N, Rpc>,
     pending_block: Option<tokio::sync::watch::Receiver<Option<ExecutedBlock<OpPrimitives>>>>,
+    pending_snapshot: Option<ExecutedBlock<OpPrimitives>>,
+    pending_request: bool,
 }
 
 impl<N, Rpc> FlashblocksEthApi<N, Rpc>
@@ -62,11 +65,13 @@ where
         Self {
             inner,
             pending_block,
+            pending_snapshot: None,
+            pending_request: false,
         }
     }
 }
 
-impl<N, Rpc> EthApiTypes for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> EthApiTypes for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert + Clone,
@@ -85,7 +90,7 @@ where
     }
 }
 
-impl<N, Rpc> RpcNodeCore for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> RpcNodeCore for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert + Clone,
@@ -118,7 +123,7 @@ where
     }
 }
 
-impl<N, Rpc> RpcNodeCoreExt for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> RpcNodeCoreExt for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert + Clone,
@@ -130,7 +135,7 @@ where
     }
 }
 
-impl<N, Rpc> EthApiSpec for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> EthApiSpec for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert + Clone,
@@ -142,7 +147,7 @@ where
     }
 }
 
-impl<N, Rpc> SpawnBlocking for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> SpawnBlocking for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert + Clone,
@@ -169,7 +174,7 @@ where
     }
 }
 
-impl<N, Rpc> LoadFee for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> LoadFee for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
@@ -194,20 +199,7 @@ where
     }
 }
 
-impl<N: RpcNodeCore<Primitives = OpPrimitives>, Rpc: RpcConvert + Clone> LoadState
-    for FlashblocksEthApi<N, Rpc>
-where
-    OpEthApiError: FromEvmError<N::Evm>,
-    OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
-        + LoadPendingBlock
-        + EthApiTypes<Error = OpEthApiError>
-        + LoadState
-        + Clone
-        + SpawnBlocking,
-{
-}
-
-impl<N, Rpc> EthState for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> EthState for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
@@ -223,7 +215,7 @@ where
     }
 }
 
-impl<N, Rpc> EthFees for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> EthFees for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
@@ -235,7 +227,7 @@ where
 {
 }
 
-impl<N, Rpc> EthSubscriptions for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> EthSubscriptions for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
@@ -246,7 +238,7 @@ where
 {
 }
 
-impl<N, Rpc> Trace for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> Trace for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
@@ -259,7 +251,7 @@ where
 {
 }
 
-impl<N, Rpc> GetBlockAccessList for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> GetBlockAccessList for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore<Primitives = OpPrimitives>,
     Rpc: RpcConvert + Clone,
@@ -273,7 +265,7 @@ where
 {
 }
 
-impl<N, Rpc> std::fmt::Debug for FlashblocksEthApi<N, Rpc>
+impl<N, Rpc, const PINNED: bool> std::fmt::Debug for FlashblocksEthApi<N, Rpc, PINNED>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert,

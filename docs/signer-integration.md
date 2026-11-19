@@ -1,17 +1,23 @@
 # Protected World Chain signing
 
 [BLO-1335](https://linear.app/worldcoin/issue/BLO-1335) tracks these adapters;
-[BLO-1446](https://linear.app/worldcoin/issue/BLO-1446) tracks released-signer pairing.
-Pin host pairing to [KMS TEE Signer v0.1.0](https://github.com/worldcoin/kms-tee-signer/releases/tag/v0.1.0),
-source `6bdac0e11add999bc75617f488fe0e0ea9a8a740`.
-The [V1 contract](https://github.com/worldcoin/kms-tee-signer/blob/6bdac0e11add999bc75617f488fe0e0ea9a8a740/docs/signer-protocol-v1.md)
-and [client-pairing runbook](https://github.com/worldcoin/kms-tee-signer/blob/6bdac0e11add999bc75617f488fe0e0ea9a8a740/docs/runbooks/host-client-pairing.md)
-are the compatibility baseline. The published Linux/Nitro runtime separately uses
-source `e6c895adabda1c4801dc9256be56effc204a0779`; the intervening changes are
-Markdown only. Record these source identities separately rather than labeling a
-new binary with the previous development pin. Verify distribution checksums and
-the SSH signature using an independently trusted signing-key fingerprint, as
-described in the release's `RELEASE-GUIDE.md` asset.
+[BLO-1446](https://linear.app/worldcoin/issue/BLO-1446) records the v0.1.0 pairing baseline;
+[BLO-1453](https://linear.app/worldcoin/issue/BLO-1453) tracks the extended profile.
+Pin host pairing to [KMS TEE Signer v0.1.1](https://github.com/worldcoin/kms-tee-signer/releases/tag/v0.1.1),
+source `dbd2ca689b832f10bbe0666c9beccc576404d0dc`.
+The [V1 contract](https://github.com/worldcoin/kms-tee-signer/blob/dbd2ca689b832f10bbe0666c9beccc576404d0dc/docs/signer-protocol-v1.md)
+and [client-pairing runbook](https://github.com/worldcoin/kms-tee-signer/blob/dbd2ca689b832f10bbe0666c9beccc576404d0dc/docs/runbooks/host-client-pairing.md)
+are the compatibility baseline. The published Linux/Nitro runtime uses the same
+source; its new EIF SHA256 is
+`ac1d0349493141985ad6acdfbaa1210b03835343afa3e7a30e56a14865bf7d85`.
+Verify distribution checksums and the SSH signature using an independently trusted
+signing-key fingerprint, following the release's `RELEASE-GUIDE.md` asset and
+`release-manifest.json`. Prior artifact measurements do not qualify this EIF.
+
+The v0.1.1 development profile accepts 261,909 complete batcher calldata bytes
+and at most 16,777,216 L1 transaction gas. World Chain's PBH and Flashblock wire
+contracts and limits are unchanged. This profile does not change L2 block gas;
+OP batcher pairing and shared-load qualification are tracked separately.
 
 ## Roles and wire compatibility
 
@@ -79,7 +85,7 @@ availability is not a new process-liveness dependency; failures affect the ownin
 build/publication operation.
 
 For a remote host or Nitro relay, follow the release's
-[remote connection runbook](https://github.com/worldcoin/kms-tee-signer/blob/6bdac0e11add999bc75617f488fe0e0ea9a8a740/docs/runbooks/remote-signing.md).
+[remote connection runbook](https://github.com/worldcoin/kms-tee-signer/blob/dbd2ca689b832f10bbe0666c9beccc576404d0dc/docs/runbooks/remote-signing.md).
 The endpoint hostname is also the verified TLS name; use the documented loopback
 tunnel or a matching certificate, preserving end-to-end mTLS.
 
@@ -187,7 +193,7 @@ rustup run 1.99.1 cargo build --release --locked -p tee-kms-signer \
   --features flashblocks,transactions --example block-runtime-simulation \
   --target-dir "$signer_target"
 export WORLD_CHAIN_SIGNER_HARNESS_BINARY="$signer_target/release/examples/block-runtime-simulation"
-export WORLD_CHAIN_SIGNER_HARNESS_REVISION=6bdac0e11add999bc75617f488fe0e0ea9a8a740
+export WORLD_CHAIN_SIGNER_HARNESS_REVISION=dbd2ca689b832f10bbe0666c9beccc576404d0dc
 ```
 
 From the World Chain checkout, run the actual-client suite:
