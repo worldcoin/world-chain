@@ -3,11 +3,8 @@ name: Distribution input tests
 on:
   pull_request:
     paths:
-      - .github/scripts/distribution-inputs.py
-      - .github/scripts/distribution-package.py
-      - .github/scripts/test_distribution_inputs.py
-      - .github/scripts/test_distribution_package.py
-      - .github/scripts/test_distribution_examples.py
+      - .github/scripts/distribution-*.py
+      - .github/scripts/test_distribution*.py
       - docs/distribution.md
       - docs/distribution-build.md
       - docs/release-page-preview.md
@@ -16,11 +13,8 @@ on:
   push:
     branches: [main]
     paths:
-      - .github/scripts/distribution-inputs.py
-      - .github/scripts/distribution-package.py
-      - .github/scripts/test_distribution_inputs.py
-      - .github/scripts/test_distribution_package.py
-      - .github/scripts/test_distribution_examples.py
+      - .github/scripts/distribution-*.py
+      - .github/scripts/test_distribution*.py
       - docs/distribution.md
       - docs/distribution-build.md
       - docs/release-page-preview.md
