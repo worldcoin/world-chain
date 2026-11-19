@@ -1,13 +1,17 @@
 # Protected World Chain signing
 
-[BLO-1335](https://linear.app/worldcoin/issue/BLO-1335) tracks these adapters.
-Pin the host signer to `97bf2eeaf0750abf8e1cb280c19b384e3ef11478`, which includes
-[publication bounds PR 32](https://github.com/worldcoin/kms-tee-signer/pull/32),
-[batcher cancellation PR 33](https://github.com/worldcoin/kms-tee-signer/pull/33), and
-[shared body admission PR 34](https://github.com/worldcoin/kms-tee-signer/pull/34).
-The [V1 contract](https://github.com/worldcoin/kms-tee-signer/blob/97bf2eeaf0750abf8e1cb280c19b384e3ef11478/docs/signer-protocol-v1.md)
-and [runtime handoff](https://github.com/worldcoin/kms-tee-signer/blob/97bf2eeaf0750abf8e1cb280c19b384e3ef11478/docs/integration-handoff.md)
-are the compatibility baseline.
+[BLO-1335](https://linear.app/worldcoin/issue/BLO-1335) tracks these adapters;
+[BLO-1446](https://linear.app/worldcoin/issue/BLO-1446) tracks released-signer pairing.
+Pin host pairing to [KMS TEE Signer v0.1.0](https://github.com/worldcoin/kms-tee-signer/releases/tag/v0.1.0),
+source `6bdac0e11add999bc75617f488fe0e0ea9a8a740`.
+The [V1 contract](https://github.com/worldcoin/kms-tee-signer/blob/6bdac0e11add999bc75617f488fe0e0ea9a8a740/docs/signer-protocol-v1.md)
+and [client-pairing runbook](https://github.com/worldcoin/kms-tee-signer/blob/6bdac0e11add999bc75617f488fe0e0ea9a8a740/docs/runbooks/host-client-pairing.md)
+are the compatibility baseline. The published Linux/Nitro runtime separately uses
+source `e6c895adabda1c4801dc9256be56effc204a0779`; the intervening changes are
+Markdown only. Record these source identities separately rather than labeling a
+new binary with the previous development pin. Verify distribution checksums and
+the SSH signature using an independently trusted signing-key fingerprint, as
+described in the release's `RELEASE-GUIDE.md` asset.
 
 ## Roles and wire compatibility
 
@@ -73,6 +77,11 @@ retries, downgrade or local fallback. `health_status` means protocol reachabilit
 it does not prove signing authorization, custody or execution correctness. Signer
 availability is not a new process-liveness dependency; failures affect the owning
 build/publication operation.
+
+For a remote host or Nitro relay, follow the release's
+[remote connection runbook](https://github.com/worldcoin/kms-tee-signer/blob/6bdac0e11add999bc75617f488fe0e0ea9a8a740/docs/runbooks/remote-signing.md).
+The endpoint hostname is also the verified TLS name; use the documented loopback
+tunnel or a matching certificate, preserving end-to-end mTLS.
 
 ## Bounds and lifecycle
 
@@ -169,8 +178,19 @@ including finalization/cancellation, denial, rapid handovers, a held signed resp
 cancelled by stop, same-grant generation changes and complete 16 MiB frames.
 Job regressions cover build-only handover/denial, resolving a built block while
 clearance or signing is pending, and deadline cancellation without cache publication.
-Build the pinned signer example with `flashblocks,transactions`, then set its binary
-path and exact revision before running:
+Set `signer_target` to an absolute, disposable build directory. From a clean signer
+checkout at the full source revision above, build its release profile with the
+published toolchain and both role features:
+
+```sh
+rustup run 1.99.1 cargo build --release --locked -p tee-kms-signer \
+  --features flashblocks,transactions --example block-runtime-simulation \
+  --target-dir "$signer_target"
+export WORLD_CHAIN_SIGNER_HARNESS_BINARY="$signer_target/release/examples/block-runtime-simulation"
+export WORLD_CHAIN_SIGNER_HARNESS_REVISION=6bdac0e11add999bc75617f488fe0e0ea9a8a740
+```
+
+From the World Chain checkout, run the actual-client suite:
 
 ```sh
 cargo nextest run --locked -p world-chain-signer -p world-chain-builder -p world-chain-cli \
@@ -184,9 +204,13 @@ Tests use public synthetic keys and loopback endpoints, send no chain transactio
 and stop only their own child. Record source/build/fixture hashes and actual test
 results when qualifying a new signer revision.
 
-This host simulation does not qualify a deployed Nitro enclave, custody,
-production time/revocation, approved network policies, maximum-load memory/p99,
-or the 200 ms cadence. Devnet full-stack and mixed-version/outage validation must
+The numbered release supplies a development/test runtime; it does not authorize
+production activation. This host simulation does not qualify a deployed Nitro
+enclave, custody, production time/revocation, approved network policies, maximum-load memory/p99,
+or the configured publishing cadence. Qualify representative 5/s and 6/s traffic
+with per-role and aggregate accounting under [BLO-1447](https://linear.app/worldcoin/issue/BLO-1447);
+the release's 200/s stress results do not establish that acceptance or the 2 ms
+production p99 target. Devnet full-stack and mixed-version/outage validation must
 precede Sepolia, then mainnet. Use an independently enrolled devnet policy: the
 supplied harness is deliberately restricted to public keys, L2 480 and a synthetic
 PBH entry point. Keep proof-result signing within measured execution. No measured
