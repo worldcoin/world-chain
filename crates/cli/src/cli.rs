@@ -118,10 +118,9 @@ impl WorldChainArgs {
     ) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
         let protected = self.builder.signer_config.is_some()
-            || self
-                .flashblocks
-                .as_ref()
-                .is_some_and(|fb| fb.signer_config.is_some());
+            || self.flashblocks.as_ref().is_some_and(|fb| {
+                fb.signer_config.is_some() || fb.authorizer_signer_config.is_some()
+            });
         if protected {
             eyre::eyre::ensure!(
                 self.builder.private_key.is_none()
@@ -133,6 +132,11 @@ impl WorldChainArgs {
                 "protected publication without a PBH signer requires zero verified blockspace capacity"
             );
             if let Some(fb) = &self.flashblocks {
+                eyre::eyre::ensure!(
+                    fb.authorizer_signer_config.is_none()
+                        || (fb.enabled && fb.signer_config.is_some() && fb.authorizer_vk.is_some()),
+                    "remote grants require a remote publisher and an explicit authorizer verifying key"
+                );
                 eyre::eyre::ensure!(
                     fb.builder_sk.is_none()
                         && fb.override_authorizer_sk.is_none()
@@ -157,8 +161,29 @@ impl WorldChainArgs {
             })
             .transpose()
             .wrap_err("Flashblock publisher signer configuration")?;
+        let grant_signer = self
+            .flashblocks
+            .as_ref()
+            .and_then(|fb| fb.authorizer_signer_config.as_ref())
+            .map(|path| {
+                world_chain_signer::GrantSigner::new(
+                    world_chain_signer::config::Ed25519Config::load(path)?,
+                )
+            })
+            .transpose()
+            .wrap_err("Flashblock grant signer configuration")?;
+        if let Some(signer) = &grant_signer {
+            eyre::eyre::ensure!(
+                self.flashblocks
+                    .as_ref()
+                    .and_then(|fb| fb.authorizer_vk)
+                    .as_ref()
+                    == Some(&signer.public_key()),
+                "remote grant signer does not match the pinned authorizer verifying key"
+            );
+        }
         if protected {
-            info!(target:"world_chain::signer",pbh_address=?pbh_wallet.as_ref().map(|wallet| wallet.address()),flashblocks_publisher=publication_signer.is_some(),"protected remote signing configured");
+            info!(target:"world_chain::signer",pbh_address=?pbh_wallet.as_ref().map(|wallet| wallet.address()),flashblocks_publisher=publication_signer.is_some(),flashblocks_authorizer=grant_signer.is_some(),"protected remote signing configured");
         }
         if self.preconfirmed_logs && self.flashblocks.as_ref().is_none_or(|args| !args.enabled) {
             bail!("--rpc.preconfirmed-logs requires --flashblocks.enabled");
@@ -379,6 +404,7 @@ impl WorldChainArgs {
         Ok(WorldChainNodeConfig {
             pbh_wallet,
             publication_signer,
+            grant_signer,
             args: self,
             builder_config: FlashblocksPayloadBuilderConfig {
                 inner: inner_builder_config,
@@ -544,8 +570,10 @@ mod tests {
         };
         let pbh = harness.pbh("pbh");
         let publisher = harness.ed25519(false, "publisher");
+        let grant = harness.ed25519(true, "authorizer");
         let pbh_path = files.path().join("pbh.json");
         let publisher_path = files.path().join("publisher.json");
+        let grant_path = files.path().join("grant.json");
         let pbh_json = serde_json::json!({
             "connection": connection(pbh.connection),
             "expectedAddress": pbh.expected_address
@@ -562,6 +590,16 @@ mod tests {
             serde_json::to_vec(&publisher_json).expect("publisher JSON"),
         )
         .expect("write publisher configuration");
+        std::fs::write(
+            &grant_path,
+            serde_json::to_vec(&serde_json::json!({
+                "connection": connection(grant.connection),
+                "keyId": grant.key_id,
+                "expectedPublicKey": grant.expected_public_key
+            }))
+            .expect("grant JSON"),
+        )
+        .expect("write grant configuration");
         let authorizer = hex::encode(
             ed25519_dalek::SigningKey::from_bytes(&[7; 32])
                 .verifying_key()
@@ -601,6 +639,8 @@ mod tests {
                 "--flashblocks.enabled",
                 "--flashblocks.signer-config",
                 publisher_path.to_str().expect("test path"),
+                "--flashblocks.authorizer-signer-config",
+                grant_path.to_str().expect("test path"),
                 "--flashblocks.authorizer-vk",
                 &authorizer,
                 "--pbh.verified-blockspace-capacity",
@@ -619,6 +659,27 @@ mod tests {
             .health(signer_runtime::deadline())
             .await
             .expect("authenticated publication-only endpoint");
+        publication_only
+            .grant_signer
+            .as_ref()
+            .expect("remote grant signer")
+            .health(signer_runtime::deadline())
+            .await
+            .expect("authenticated grant endpoint");
+        let mut mismatched = publication_only.args.clone();
+        mismatched
+            .flashblocks
+            .as_mut()
+            .expect("Flashblocks")
+            .authorizer_vk = Some(ed25519_dalek::SigningKey::from_bytes(&[8; 32]).verifying_key());
+        let mut node = NodeConfig::new(Arc::new(WorldChainSpec::from_genesis(Genesis::default())));
+        assert!(
+            mismatched
+                .into_config(&mut node)
+                .expect_err("mismatched authorizer pin")
+                .to_string()
+                .contains("does not match the pinned authorizer")
+        );
         std::fs::remove_file(pbh_path).expect("remove caller configuration");
         assert!(
             config.args.builder.wallet().is_err(),
@@ -709,6 +770,25 @@ mod tests {
         ]);
         assert!(remote.world.builder.private_key.is_none());
         assert!(remote.world.builder.wallet().is_err());
+    }
+
+    #[test]
+    fn remote_grants_require_a_remote_publisher_and_explicit_authorizer_pin() {
+        let public_key = "0000000000000000000000000000000000000000000000000000000000000000";
+        for extra in [
+            vec![],
+            vec!["--flashblocks.signer-config", "publisher.json"],
+            vec!["--flashblocks.authorizer-vk", public_key],
+        ] {
+            let mut argv = vec![
+                "bin",
+                "--flashblocks.enabled",
+                "--flashblocks.authorizer-signer-config",
+                "grant.json",
+            ];
+            argv.extend(extra);
+            assert!(CommandParser::try_parse_from(argv).is_err());
+        }
     }
 
     #[test]

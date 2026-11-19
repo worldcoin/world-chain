@@ -62,6 +62,7 @@ pub struct FlashblocksPayloadJobGenerator<Client, Builder> {
     /// The current flashblocks state
     flashblocks_state: FlashblocksExecutionCoordinator,
     signing_deadlines: Option<SigningDeadlines>,
+    grant_signer: Option<world_chain_signer::GrantSigner>,
 }
 
 impl<Client, Builder> FlashblocksPayloadJobGenerator<Client, Builder> {
@@ -89,6 +90,7 @@ impl<Client, Builder> FlashblocksPayloadJobGenerator<Client, Builder> {
             p2p_handler,
             authorizations: auth_rx,
             signing_deadlines: None,
+            grant_signer: None,
             override_authorizer_sk,
             force_publish,
         }
@@ -96,6 +98,11 @@ impl<Client, Builder> FlashblocksPayloadJobGenerator<Client, Builder> {
 
     pub fn with_signing_deadlines(mut self, deadlines: Option<SigningDeadlines>) -> Self {
         self.signing_deadlines = deadlines;
+        self
+    }
+
+    pub fn with_grant_signer(mut self, signer: Option<world_chain_signer::GrantSigner>) -> Self {
+        self.grant_signer = signer;
         self
     }
 
@@ -241,7 +248,36 @@ where
             )
         };
 
-        let authorization = if self.p2p_handler.can_publish() {
+        let remote_grant = self.grant_signer.is_some();
+        let pending_grant = if let Some(signer) = &self.grant_signer
+            && !config.attributes.no_tx_pool.unwrap_or(false)
+        {
+            match self
+                .p2p_handler
+                .request_grant_until(signer.clone(), payload_id, timestamp, until)
+            {
+                Ok(pending) => Some(pending),
+                Err(error) => {
+                    self.p2p_handler
+                        .ctx
+                        .metrics
+                        .publishing_signing_failed
+                        .increment(1);
+                    self.p2p_handler
+                        .ctx
+                        .metrics
+                        .publishing_disabled
+                        .increment(1);
+                    warn!(target: "flashblocks::payload_builder", %error, "grant unavailable; starting execution-only payload job");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let authorization = if remote_grant {
+            None
+        } else if self.p2p_handler.can_publish() {
             tokio::task::block_in_place(|| {
                 let handle = Handle::current();
                 handle.block_on(tokio::time::timeout_at(until, pending))
@@ -318,6 +354,7 @@ where
 
         let mut job = FlashblocksPayloadJob {
             config,
+            pending_grant,
             _publishing_lease: publishing_lease,
             pending_publication: None,
             publishing_clearance: None,

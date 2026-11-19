@@ -2952,6 +2952,7 @@ fn init_tracing(filter: &str) -> tracing::subscriber::DefaultGuard {
 fn test_flashblocks_args(authorizer_sk: &SigningKey, builder_sk: &SigningKey) -> FlashblocksArgs {
     FlashblocksArgs {
         signer_config: None,
+        authorizer_signer_config: None,
         enabled: true,
         authorizer_vk: Some(authorizer_sk.verifying_key()),
         builder_sk: Some(builder_sk.clone()),

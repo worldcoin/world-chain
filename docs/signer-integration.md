@@ -28,9 +28,9 @@ OP batcher pairing and shared-load qualification are tracked separately.
 | PBH wallet | `eth_signTransaction` | Canonical signed type-2 bytes, every original unsigned field, low-S signature and independently configured recovered address |
 
 These are outbound operations, not new public World Chain RPC methods.
-The node normally receives authorizer grants from rollup-boost. `GrantSigner`
-is available for conformance/integration; protected node mode does not create or
-override grants. Payload/start/stop encodings and existing signature preimages
+The node normally receives authorizer grants from rollup-boost. A sequencer can
+instead request grants through `--flashblocks.authorizer-signer-config` using
+its separately enrolled authorizer credential. Payload/start/stop encodings and existing signature preimages
 are unchanged. Existing Ed25519 preimages contain no chain ID: enroll separate
 network keys, identities and policies. Peer identity keys and proof-result keys
 remain separate; see [proof signing boundaries](proof/signing-boundaries.md).
@@ -69,10 +69,22 @@ world-chain node --flashblocks.enabled \
   --pbh.verified-blockspace-capacity 0
 ```
 
-This mode creates no PBH wallet. It still requires grants from an authorized
-external producer; the node does not issue remote grants. Alphanet's in-process
-grant topology needs separate leadership-bound remote grant integration before
-activation. Zero capacity does not permit local keys or force-publish.
+This mode creates no PBH wallet. To obtain in-process grants, additionally supply
+`--flashblocks.authorizer-signer-config /run/secrets/grant-signer.json`. It uses
+the same JSON schema as the publisher below, with its own authorizer credential
+and key ID. Its expected public key must match the explicit
+`--flashblocks.authorizer-vk` pin. Without that option, grants still come from
+the external producer. Zero capacity does not permit local keys or force-publish.
+
+The signer policy/lease issuer must authorize the elected sequencer and enrolled
+publisher for that network; Engine JWT possession and health checks do not prove
+leadership. The job reserves its publishing generation before grant I/O. Resolve,
+drop, deadline, a newer local intent or an accepted peer handover cancels that
+generation, so a late grant cannot reactivate it. Grant failures disable optional
+publication for the job while execution continues, with no local/external grant
+fallback. A pending grant does not delay execution or advance the Flashblock
+index. Derived `noTxPool` jobs do not request grants. Network-specific policy,
+leadership transfer, actual peers, Nitro and recovery still require qualification.
 
 PBH JSON:
 

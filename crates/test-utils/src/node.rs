@@ -98,6 +98,7 @@ pub fn test_config_with_peers_and_gossip(
     let flashblocks = if flashblocks_enabled {
         Some(FlashblocksArgs {
             signer_config: None,
+            authorizer_signer_config: None,
             enabled: true,
             override_authorizer_sk: None,
             authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
@@ -124,6 +125,7 @@ pub fn test_config_with_peers_and_gossip(
     WorldChainNodeConfig {
         pbh_wallet: builder.wallet().expect("test wallet"),
         publication_signer: None,
+        grant_signer: None,
         args: WorldChainArgs {
             rollup,
             builder,

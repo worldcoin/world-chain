@@ -73,6 +73,9 @@ impl GrantSigner {
     pub async fn health(&self, deadline: Instant) -> Result<()> {
         self.transport.health(deadline).await
     }
+    pub async fn wait_until_idle(&self, deadline: Instant) -> Result<()> {
+        self.transport.wait_until_idle(deadline).await
+    }
     pub async fn sign(
         &self,
         payload_id: FixedBytes<8>,

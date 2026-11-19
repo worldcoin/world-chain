@@ -125,6 +125,10 @@ pub struct FlashblocksArgs {
     #[arg(long = "flashblocks.signer-config", id = "flashblocks.signer-config", env = "FLASHBLOCKS_SIGNER_CONFIG", requires = "flashblocks.enabled", conflicts_with_all = ["builder_sk", "override_authorizer_sk", "force_publish"])]
     pub signer_config: Option<PathBuf>,
 
+    /// Remote in-process grant signer JSON, with an independently pinned authorizer key.
+    #[arg(long = "flashblocks.authorizer-signer-config", id = "flashblocks.authorizer-signer-config", env = "FLASHBLOCKS_AUTHORIZER_SIGNER_CONFIG", requires_all = ["flashblocks.signer-config", "authorizer_vk"], conflicts_with_all = ["override_authorizer_sk", "force_publish"])]
+    pub authorizer_signer_config: Option<PathBuf>,
+
     /// Override incoming authorizations from rollup boost.
     #[arg(
         long = "flashblocks.override-authorizer-sk",
@@ -337,6 +341,7 @@ mod tests {
     fn flashblocks_override_authorizer() {
         let flashblocks = FlashblocksArgs {
             signer_config: None,
+            authorizer_signer_config: None,
             enabled: true,
             override_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
             authorizer_vk: None,
@@ -373,6 +378,7 @@ mod tests {
     fn flashblocks_authorizer() {
         let flashblocks = FlashblocksArgs {
             signer_config: None,
+            authorizer_signer_config: None,
             enabled: true,
             override_authorizer_sk: None,
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),
