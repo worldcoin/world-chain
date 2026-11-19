@@ -111,6 +111,18 @@ class SourceExportTest(unittest.TestCase):
             self.package()
         self.assertEqual(sentinel.read_text(), "existing export")
 
+    def test_export_ignores_configured_commit_signature_display(self):
+        real_git = sources.git
+        def git(repo, *args, **kwargs):
+            if args[0] == "show":
+                return real_git(SCRIPT.resolve().parents[2], *args[:-1], "HEAD", **kwargs)
+            return self.fake_git(repo, *args, **kwargs)
+        settings = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "log.showSignature", "GIT_CONFIG_VALUE_0": "true"}
+        with patch.dict(sources.os.environ, settings), patch.object(sources, "source_nodes", return_value=self.nodes), \
+                patch.object(sources, "git", side_effect=git):
+            receipt = sources.package(self.inputs, self.root, self.root, [], self.build, self.output)
+        self.assertGreater(receipt["source_date_epoch"], 0)
+
     def test_bad_symlinks_and_git_metadata_paths_fail(self):
         for path in ("../outside", "/absolute", "x/.git/config", "x/.GiT/config", "a\\b", "a/../b"):
             with self.subTest(path=path), self.assertRaises(ValueError):
@@ -157,6 +169,9 @@ class SourceExportTest(unittest.TestCase):
             expected.update("component-sources/" + name for name, c in self.inputs["components"].items()
                             if c["build_commit"] != op_commit)
             self.assertEqual({n["prefix"] for n in nodes}, expected)
+            reordered = copy.deepcopy(self.inputs)
+            reordered["components"] = dict(reversed(list(reordered["components"].items())))
+            self.assertEqual(nodes, sources.source_nodes(reordered, wc, op, []))
             available[module] = set()
             with self.assertRaisesRegex(ValueError, "missing local commit"):
                 sources.source_nodes(self.inputs, wc, op, [])

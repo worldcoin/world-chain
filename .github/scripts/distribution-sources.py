@@ -97,7 +97,7 @@ def source_nodes(inputs, world_chain, optimism, repositories):
     roots = {"world-chain": (world_chain.resolve(), inputs["sources"]["world_chain"]),
              "optimism": (optimism.resolve(), inputs["sources"]["optimism"])}
     if inputs["schema_version"] == 2:
-        for name, component in inputs["components"].items():
+        for name, component in sorted(inputs["components"].items()):
             if component["build_commit"] != inputs["sources"]["optimism"]:
                 roots[f"component-sources/{name}"] = (optimism.resolve(), component["build_commit"])
     nodes = []
@@ -217,7 +217,7 @@ def package(inputs, world_chain, optimism, repositories, build_record, output):
     if sum(len(files) for files, _ in inventories) > MAX_FILES or sum(sum(sizes) for _, sizes in inventories) > MAX_BYTES:
         raise ValueError("source export exceeds 100000 files or ten GiB")
     wc = next(node for node in nodes if node["prefix"] == "world-chain")
-    epoch = int(git(wc["repository"], "show", "-s", "--format=%ct", wc["commit"]).strip())
+    epoch = int(git(wc["repository"], "show", "--no-show-signature", "-s", "--format=%ct", wc["commit"]).strip())
     if not 0 <= epoch <= 0xFFFFFFFF:
         raise ValueError("source epoch must be an unsigned 32-bit timestamp")
     guides = guide_paths(wc["repository"], next(files for node, (files, _) in zip(nodes, inventories) if node["prefix"] == "world-chain"))
