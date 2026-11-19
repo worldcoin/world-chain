@@ -10,7 +10,7 @@ use std::{
 use tokio::time::Instant;
 use world_chain_signer::config::{ConnectionConfig, Ed25519Config, PbhConfig, TlsFiles};
 
-pub const SIGNER_REVISION: &str = "97bf2eeaf0750abf8e1cb280c19b384e3ef11478";
+pub const SIGNER_REVISION: &str = "6bdac0e11add999bc75617f488fe0e0ea9a8a740";
 
 pub struct Harness {
     child: Child,
