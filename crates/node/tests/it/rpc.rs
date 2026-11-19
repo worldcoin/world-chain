@@ -801,49 +801,94 @@ async fn pending_rpc_uses_executed_state_on_follower() -> eyre::Result<()> {
             "{tag} must not include the pending deployment"
         );
     }
+    let pending: Value = http
+        .request("eth_getBlockByNumber", rpc_params!["pending", false])
+        .await?;
+    let pending_hash: B256 = serde_json::from_value(pending["hash"].clone())?;
+    let selectors = [
+        json!("pending"),
+        json!(pending_hash),
+        json!({"blockHash": pending_hash, "requireCanonical": false}),
+    ];
     let call = json!({"to": contract, "gas": "0x186a0"});
-    let output: Bytes = http
-        .request("eth_call", rpc_params![call.clone(), "pending"])
-        .await?;
-    assert_eq!(output.len(), 96);
-    assert_eq!(U256::from_be_slice(&output[..32]), U256::from(1));
-    assert_eq!(U256::from_be_slice(&output[32..64]), U256::from(1));
-    assert_eq!(U256::from_be_slice(&output[64..]), U256::from(timestamp));
-    let gas: U256 = http
-        .request("eth_estimateGas", rpc_params![call.clone(), "pending"])
-        .await?;
-    assert!(gas > U256::from(21_000));
-    let access_list: Value = http
-        .request("eth_createAccessList", rpc_params![call.clone(), "pending"])
-        .await?;
-    assert!(
-        access_list["accessList"]
-            .as_array()
-            .expect("access list")
-            .iter()
-            .any(|entry| entry["address"] == json!(contract)
-                && entry["storageKeys"]
-                    .as_array()
-                    .is_some_and(|keys| keys.contains(&json!(B256::ZERO))))
+    let simulation = json!({"blockStateCalls": [{"calls": [call.clone()]}], "validation": false});
+    for selector in &selectors {
+        let simulated: Value = http
+            .request("eth_simulateV1", rpc_params![simulation.clone(), selector])
+            .await?;
+        let output: Bytes = serde_json::from_value(simulated[0]["calls"][0]["returnData"].clone())?;
+        assert_eq!(output.len(), 96);
+        assert_eq!(U256::from_be_slice(&output[..32]), U256::from(1));
+        assert_eq!(U256::from_be_slice(&output[32..64]), U256::from(2));
+        assert!(U256::from_be_slice(&output[64..]) > U256::from(timestamp));
+    }
+    for selector in &selectors {
+        let (output, gas, access_list, bundled) = tokio::join!(
+            http.request::<Bytes, _>("eth_call", rpc_params![call.clone(), selector]),
+            http.request::<U256, _>("eth_estimateGas", rpc_params![call.clone(), selector]),
+            http.request::<Value, _>("eth_createAccessList", rpc_params![call.clone(), selector]),
+            http.request::<Value, _>(
+                "eth_callMany",
+                rpc_params![
+                    json!([{"transactions": [call.clone()]}]),
+                    json!({"blockNumber": selector})
+                ]
+            ),
+        );
+        assert!(
+            output.is_ok() && gas.is_ok() && access_list.is_ok() && bundled.is_ok(),
+            "selector {selector}: call={output:?}, estimate={gas:?}, access_list={access_list:?}, bundled={bundled:?}"
+        );
+        let output = output?;
+        assert_eq!(output.len(), 96);
+        assert_eq!(U256::from_be_slice(&output[..32]), U256::from(1));
+        assert_eq!(U256::from_be_slice(&output[32..64]), U256::from(1));
+        assert_eq!(U256::from_be_slice(&output[64..]), U256::from(timestamp));
+        let bundled_output: Bytes = serde_json::from_value(bundled?[0][0]["value"].clone())?;
+        assert_eq!(bundled_output, output);
+        assert!(gas? > U256::from(21_000));
+        assert!(
+            access_list?["accessList"]
+                .as_array()
+                .expect("access list")
+                .iter()
+                .any(|entry| entry["address"] == json!(contract)
+                    && entry["storageKeys"]
+                        .as_array()
+                        .is_some_and(|keys| keys.contains(&json!(B256::ZERO))))
+        );
+    }
+    let canonical_hash = json!({"blockHash": pending_hash, "requireCanonical": true});
+    for method in ["eth_call", "eth_estimateGas", "eth_createAccessList"] {
+        assert_rpc_error(
+            http.request::<Value, _>(method, rpc_params![call.clone(), canonical_hash.clone()])
+                .await
+                .expect_err("preconfirmed hash is not canonical"),
+            -32001,
+        );
+    }
+    assert_rpc_error(
+        http.request::<Value, _>("eth_simulateV1", rpc_params![simulation, canonical_hash])
+            .await
+            .expect_err("simulation requires canonical hash"),
+        -32000,
     );
-    let simulated: Value = http
-        .request(
-            "eth_simulateV1",
+    assert_rpc_error(
+        http.request::<Value, _>(
+            "eth_callMany",
             rpc_params![
-                json!({"blockStateCalls": [{"calls": [call]}], "validation": false}),
-                "pending"
+                json!([{"transactions": [call.clone()]}]),
+                json!({"blockNumber": {"blockHash": pending_hash, "requireCanonical": true}})
             ],
         )
-        .await?;
-    let simulated_output: Bytes =
-        serde_json::from_value(simulated[0]["calls"][0]["returnData"].clone())?;
-    assert_eq!(simulated_output.len(), 96);
-    assert_eq!(U256::from_be_slice(&simulated_output[..32]), U256::from(1));
-    assert_eq!(
-        U256::from_be_slice(&simulated_output[32..64]),
-        U256::from(2)
+        .await
+        .expect_err("bundled call requires canonical hash"),
+        -32001,
     );
-    assert!(U256::from_be_slice(&simulated_output[64..]) > U256::from(timestamp));
+    let canonical_output: Bytes = http
+        .request("eth_call", rpc_params![call, "latest"])
+        .await?;
+    assert!(canonical_output.is_empty());
     let latest: U256 = http.request("eth_blockNumber", rpc_params![]).await?;
     assert_eq!(
         latest,
