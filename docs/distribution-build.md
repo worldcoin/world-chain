@@ -30,9 +30,24 @@ docker buildx build --platform linux/amd64 --load \
 docker run --rm --entrypoint /usr/local/bin/world-chain world-chain:local --version
 ```
 
-The current runtime recipe downloads an x86_64 AWS CLI unconditionally. The
-distribution implementation must fix and test that before documenting an arm64
-build as qualified. Preserve its CA bundle settings and separate cast version.
+The runtime selects the AWS CLI installer for `linux/amd64` or `linux/arm64`;
+other architectures fail explicitly. Its reusable `runtime-tools` stage retains
+the system utilities, Debian CA version check and `AWS_CA_BUNDLE` setting. Both
+image workflows exclude `runtime-tools` and `runtime` from caching so these
+checks run on each build. The separate `cast` version remains in the final image.
+
+To check runtime tools without compiling the node, build the selected platform:
+
+```sh
+docker buildx build --platform linux/arm64 --target runtime-tools --load \
+  --no-cache-filter runtime-tools \
+  --file Dockerfile --tag world-chain-runtime-tools:local .
+docker run --rm --platform linux/arm64 world-chain-runtime-tools:local aws --version
+```
+
+Repeat with `linux/amd64`. This checks the tools stage, not the final World Chain
+binary, `cast`, OP helpers or combined-image compatibility. Full runtime and
+native architecture qualification still use the final release artifacts.
 
 ## Existing OP component recipes from our fork
 

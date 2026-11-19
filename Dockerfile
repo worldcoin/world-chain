@@ -68,7 +68,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --locked --profile ${PROFILE} --features ${FEATURES} --bin ${WORLD_CHAIN_BUILDER_BIN}
 
 # Deployments depend on sh wget and awscli v2
-FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime
+FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime-tools
 WORKDIR /app
 
 # Install runtime tools and require Debian's eMudhra distrust update.
@@ -87,13 +87,23 @@ RUN apt-get update && \
   rm -rf /var/lib/apt/lists/*
 
 # Install AWS CLI v2
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" && \
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+    amd64) aws_cli_arch=x86_64 ;; \
+    arm64) aws_cli_arch=aarch64 ;; \
+    *) echo "Unsupported AWS CLI target architecture: $TARGETARCH" >&2; exit 1 ;; \
+  esac && \
+  curl --fail --show-error --location --connect-timeout 10 --max-time 300 \
+    "https://awscli.amazonaws.com/awscli-exe-linux-${aws_cli_arch}.zip" -o "/tmp/awscliv2.zip" && \
   unzip /tmp/awscliv2.zip -d /tmp && \
   /tmp/aws/install && \
-  rm -rf /tmp/aws /tmp/awscliv2.zip
+  rm -rf /tmp/aws /tmp/awscliv2.zip && \
+  aws --version
 
 # The AWS CLI bundles its own CA store; use Debian's, which distrusts the eMudhra roots.
 ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
+FROM runtime-tools AS runtime
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 ARG PROFILE="maxperf"
