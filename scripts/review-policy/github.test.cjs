@@ -186,6 +186,34 @@ test('Rust CI runs forks and Dependabot without AWS or a compiler wrapper', asyn
   assert(!workflow.includes('pull_request_target:'), 'fork builds must retain the unprivileged PR trigger');
 });
 
+test('native qualification dispatch is isolated without skipping ordinary Rust CI', async (t) => {
+  const workflow = fs.readFileSync('.github/workflows/rust-ci.yml', 'utf8');
+  const job = (id) => workflow.split('  ' + id + ':\n')[1]?.split(/(?=^  [a-zA-Z0-9_-]+:\n)/m)[0];
+  const native = job('native-amd64-qualification');
+  assert(native);
+  assert.match(native, /    permissions:\n      contents: read\n    env:/);
+  assert(!native.includes('id-token:') && !native.includes('secrets.') && !native.includes('environment:'));
+  assert.match(native, /      WORLDCHAIN_PROVIDER: ""/);
+  assert.match(native, /          persist-credentials: false/);
+  assert.match(native, /--target runtime[\s\S]+--build-arg PROFILE=maxperf --build-arg FEATURES=jemalloc/);
+  assert(!native.includes('--push') && !native.includes('configure-aws-credentials'));
+  assert(native.includes('init --log.file.max-files 0'), 'read-only init must explicitly disable file logs');
+  const cases = [
+    ...['push', 'pull_request', 'merge_group'].map((event_name) => ({ event_name, commit: '', qualification: false })),
+    { event_name: 'workflow_dispatch', commit: '', qualification: false },
+    { event_name: 'workflow_dispatch', commit: head, qualification: true },
+  ];
+  for (const item of cases) await t.test(item.event_name + (item.commit ? ' with candidate' : ''), () => {
+    const scope = { github: { event_name: item.event_name }, inputs: { qualification_commit: item.commit } };
+    for (const id of ['native-amd64-qualification', 'cargo-tests', 'cargo-clippy', 'cargo-docs']) {
+      const condition = job(id)?.match(/^    if: (.+)$/m)?.[1];
+      assert(condition, id);
+      assert.equal(vm.runInNewContext(condition, scope),
+        id === 'native-amd64-qualification' ? item.qualification : !item.qualification, id);
+    }
+  });
+});
+
 test('trusted controller publishes four successful checks on PR head, never on main', async () => {
   const result = await run();
   assert.deepEqual(result.failures, []);

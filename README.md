@@ -66,6 +66,8 @@ World Chain's major and minor version numbers are aligned with the underlying re
 
 The planned World Chain, OP-only and combined distributions for builders and RPC operators follow the [distribution input and asset contract](docs/distribution.md). OP components retain their own upstream-based versions.
 
+See the [v2.9.0 upgrade notes](docs/upgrading-v2.9.0.md) for RPC compatibility, resource defaults and rollout checks.
+
 ## Development
 
 See the [Development Guide](docs/development.md) for building and running World Chain locally.

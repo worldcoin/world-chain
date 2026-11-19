@@ -599,6 +599,54 @@ fn native_state(state: EvmState) -> ResultAndState {
 }
 
 #[test]
+fn prestate_omits_originally_empty_accounts_before_code_filtering() {
+    let empty = Address::repeat_byte(1);
+    let code_only = Address::repeat_byte(2);
+    let code = Bytecode::new_raw(Bytes::from_static(&[0x00]));
+    let info = AccountInfo {
+        code_hash: code.hash_slow(),
+        code: Some(code),
+        ..Default::default()
+    };
+    let mut provider = Provider::default();
+    provider.accounts.insert(code_only, info.clone());
+    let state = EvmState::from_iter([
+        (
+            empty,
+            Account::from(AccountInfo {
+                balance: U256::from(1),
+                ..Default::default()
+            }),
+        ),
+        (code_only, Account::from(info)),
+    ]);
+
+    for disable_code in [false, true] {
+        let config = PreStateConfig {
+            disable_code: Some(disable_code),
+            ..Default::default()
+        };
+        let mut budget = budget();
+        let actual =
+            project_prestate(&state, config, &provider, &mut budget, &mut || Ok(())).unwrap();
+        let expected = GethTraceBuilder::new(vec![])
+            .geth_prestate_traces(&native_state(state.clone()), &config, &provider)
+            .unwrap();
+        assert_eq!(actual, expected);
+        let PreStateFrame::Default(frame) = actual else {
+            panic!("expected prestate frame")
+        };
+        assert!(!frame.0.contains_key(&empty));
+        assert!(frame.0.contains_key(&code_only));
+        assert_eq!(
+            budget.used().accounts,
+            2,
+            "omitted accounts still consume traversal budget"
+        );
+    }
+}
+
+#[test]
 fn prestate_projection_matches_native_diff_code_storage_and_lifecycle() {
     for diff in [false, true] {
         for code in [false, true] {
