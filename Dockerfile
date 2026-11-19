@@ -110,7 +110,13 @@ RUN apk --no-network info --installed 'musl>=1.2.6-r3'
 # Supply --build-context qualified-payload=<assembled platform payload>.
 FROM scratch AS qualified-payload
 
-FROM runtime-tools AS distribution-world-chain
+FROM runtime-tools AS distribution-tools
+RUN groupadd --gid 10001 worldchain && \
+  useradd --uid 10001 --gid 10001 --create-home worldchain && \
+  chown 10001:10001 /app
+ENV HOME=/home/worldchain
+
+FROM distribution-tools AS distribution-world-chain
 COPY --from=qualified-payload --chmod=0755 /bin/world-chain /bin/cast /usr/local/bin/
 COPY --from=qualified-payload /licenses/ /usr/share/licenses/world-chain/
 COPY --from=qualified-payload /distribution-inputs.json /usr/share/world-chain/distribution-inputs.json
@@ -122,9 +128,10 @@ RUN case "$TARGETARCH" in amd64) machine=62 ;; arm64) machine=183 ;; *) exit 1 ;
     { echo "Invalid ELF for $TARGETARCH: $name" >&2; exit 1; }; \
   done && chmod +x /usr/local/bin/*.sh && world-chain --version && cast --version
 EXPOSE 30303 30303/udp 9001 8545 8546
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/world-chain"]
 
-FROM runtime-tools AS distribution-op
+FROM distribution-tools AS distribution-op
 RUN apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && \
   apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
   install -y --no-install-recommends libstdc++6 libudev1 && \
@@ -143,9 +150,11 @@ RUN case "$TARGETARCH" in amd64) machine=62 ;; arm64) machine=183 ;; *) exit 1 ;
     test "$(od -An -tu2 -j18 -N2 /usr/local/bin/$name)" -eq "$machine" || \
     { echo "Invalid ELF for $TARGETARCH: $name" >&2; exit 1; }; \
   done && op-node --version && op-deployer --version && forge --version && cast --version
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/op-node"]
 
 FROM distribution-op AS distribution-combined
+USER 0
 COPY --from=qualified-payload --chmod=0755 /bin/world-chain /usr/local/bin/
 COPY scripts/* /usr/local/bin/
 RUN case "$TARGETARCH" in amd64) machine=62 ;; arm64) machine=183 ;; *) exit 1 ;; esac && \
@@ -153,6 +162,7 @@ RUN case "$TARGETARCH" in amd64) machine=62 ;; arm64) machine=183 ;; *) exit 1 ;
   test "$(od -An -tu2 -j18 -N2 /usr/local/bin/world-chain)" -eq "$machine" && \
   chmod +x /usr/local/bin/*.sh && world-chain --version
 EXPOSE 30303 30303/udp 9001 8545 8546
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/world-chain"]
 
 FROM runtime-tools AS runtime

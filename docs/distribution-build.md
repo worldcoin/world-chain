@@ -182,6 +182,14 @@ probes. The empty fallback context makes a missing `qualified-payload` fail
 without pulling an image of that name. The final/default `runtime` target
 continues to build the existing World Chain image from source.
 
+The three distribution targets default to UID/GID `10001:10001`, with
+`HOME=/home/worldchain` and a writable `/app` working directory. Match mounted
+data/config ownership to that identity; Kubernetes deployments can use the
+existing `runAsUser`, `runAsGroup` and `fsGroup` settings. A read-only root also
+requires writable mounts for the selected data directory and temporary storage.
+The existing source-built `runtime` target retains its deployment contract;
+operators should continue setting its non-root user in the runtime configuration.
+
 The OP and combined variants copy a pinned, patched Alpine musl loader for
 historical Cannon embeds; Bookworm's musl package lacks current security fixes.
 They install the C++ and udev libraries required by Kona/Foundry from Debian.
