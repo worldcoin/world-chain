@@ -31,7 +31,7 @@ use crate::{
     PayloadBuildStage,
 };
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
-use alloy_eip7928::BlockAccessIndex;
+use alloy_eip7928::{BlockAccessIndex, bal::DecodedBal};
 use alloy_primitives::{B256, FixedBytes, U256};
 use reth_evm::{
     block::CommitChanges,
@@ -378,28 +378,15 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        let block_access_list = db
-            .take_built_alloy_bal()
-            .ok_or_else(|| InternalBlockExecutionError::msg("missing BAL builder state"))?;
+        let block_access_list = take_built_decoded_bal(db)?;
         let access_list = FlashblockAccessList::from_block_access_list(
-            block_access_list.clone(),
+            block_access_list.as_bal().as_slice().to_vec(),
             self.counter.finish(),
         );
 
         self.access_list_sender
             .send(access_list)
             .map_err(BlockExecutionError::other)?;
-
-        let mut encoded_bal = Vec::new();
-        let bal_hash = alloy_eip7928::compute_block_access_list_hash_with_buf(
-            &block_access_list,
-            &mut encoded_bal,
-        );
-        let block_access_list = alloy_eip7928::bal::DecodedBal::new_unchecked(
-            block_access_list.into(),
-            encoded_bal.into(),
-            bal_hash,
-        );
 
         Ok((
             BlockBuilderOutcome {
@@ -412,6 +399,24 @@ where
             bundle,
         ))
     }
+}
+
+fn take_built_decoded_bal<DB: Database>(
+    db: &mut State<DB>,
+) -> Result<DecodedBal, BlockExecutionError> {
+    let block_access_list = db
+        .take_built_alloy_bal()
+        .ok_or_else(|| InternalBlockExecutionError::msg("missing BAL builder state"))?;
+    let mut encoded_bal = Vec::new();
+    let bal_hash = alloy_eip7928::compute_block_access_list_hash_with_buf(
+        &block_access_list,
+        &mut encoded_bal,
+    );
+    Ok(DecodedBal::new_unchecked(
+        block_access_list.into(),
+        encoded_bal.into(),
+        bal_hash,
+    ))
 }
 
 /// Simple counter to track sub pre-confirmation block access index bounds.

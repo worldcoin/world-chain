@@ -87,12 +87,15 @@ fn finish_next_flashblock(
     let (outcome, _) =
         builder.finish_with_bundle(state_provider, PayloadBuildAttemptMetrics::default())?;
     let access_list = access_list_rx.recv()?;
+    let built_bal = outcome.block_access_list.as_ref().expect("built BAL");
+    let decoded_bal = alloy_eip7928::bal::DecodedBal::from_rlp_bytes(built_bal.as_raw().clone())?;
     assert_eq!(
-        outcome
-            .block_access_list
-            .as_ref()
-            .expect("built BAL")
-            .hash(),
+        decoded_bal.as_bal().as_slice(),
+        access_list.changes.as_slice()
+    );
+    assert_eq!(decoded_bal.hash(), built_bal.hash());
+    assert_eq!(
+        built_bal.hash(),
         alloy_eip7928::compute_block_access_list_hash(&access_list.changes),
         "the prepared upstream BAL must commit to the emitted Flashblock changes"
     );
