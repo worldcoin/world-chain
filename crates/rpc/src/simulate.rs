@@ -11,7 +11,7 @@ use op_revm::OpTransaction;
 use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory, block::BlockExecutorFactory};
 use reth_optimism_primitives::OpReceipt;
 use reth_primitives_traits::{FullSignedTx, NodePrimitives};
-use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProvider, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
 use reth_rpc_eth_api::helpers::SpawnBlocking;
 use reth_tasks::pool::{BlockingTaskGuard, BlockingTaskPool};
@@ -900,7 +900,7 @@ where
 
         // 4. Build a revm State backed by the provider — no bundle tracking
         //    needed since we discard post-execution state (same as eth_call).
-        let db = StateProviderDatabase::new(state_provider.as_ref());
+        let db = StateProviderDatabase::new(state_provider.as_ref().into_evm_state_provider());
         let mut state = State::builder().with_database(db).build();
 
         // 5. Create the Optimism-aware EVM with our simulation inspector.

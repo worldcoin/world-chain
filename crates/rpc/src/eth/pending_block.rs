@@ -46,16 +46,9 @@ where
 
             if let Some(pending_block) = pending_block {
                 let block = pending_block.recovered_block;
-                let receipts = pending_block
-                    .execution_output
-                    .receipts
-                    .clone()
-                    .into_iter()
-                    .collect::<Vec<_>>(); // always a single block executed through the state executor
-
                 let block_and_receipts = BlockAndReceipts {
                     block,
-                    receipts: receipts.into(),
+                    receipts: pending_block.execution_output.into(),
                 };
                 return Ok(Some(block_and_receipts));
             }
@@ -77,10 +70,7 @@ where
             .receipts_by_block(block_id)?
             .ok_or(EthApiError::ReceiptsNotFound(block_id.into()))?;
 
-        let block_and_receipts = BlockAndReceipts {
-            block: block.into(),
-            receipts: receipts.into(),
-        };
+        let block_and_receipts = BlockAndReceipts::new(block.into(), receipts.into());
 
         Ok(Some(block_and_receipts))
     }

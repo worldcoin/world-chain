@@ -30,8 +30,8 @@ use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives_traits::{Account, Bytecode, Recovered, SealedHeader, SignedTransaction};
 use reth_provider::{
     BlockIdReader, BlockNumReader, BytecodeReader, CanonStateSubscriptions, ChainSpecProvider,
-    HeaderProvider, NodePrimitivesProvider, ProviderResult, StateProvider, StateProviderBox,
-    StateProviderFactory,
+    HeaderProvider, NodePrimitivesProvider, ProviderError, ProviderResult, StateProvider,
+    StateProviderBox, StateProviderFactory,
 };
 use reth_revm::{State, database::StateProviderDatabase};
 use reth_trie_common::{ExecutionWitnessMode, HashedPostState};
@@ -751,7 +751,7 @@ pub fn execute_serial_with_provider<P>(
 where
     P: StateProvider + ?Sized,
 {
-    let db = StateProviderDatabase::new(state_provider);
+    let db = StateProviderDatabase::new(state_provider.into_evm_state_provider());
 
     let bundle = if let Some((_, bundle_state)) = &prev_outcome {
         bundle_state.clone()
@@ -1284,6 +1284,16 @@ impl BlockIdReader for TestStateProvider {
 }
 
 impl StateProviderFactory for TestStateProvider {
+    type Primitives = OpPrimitives;
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: B256,
+        _block: reth_chain_state::ExecutedBlock<OpPrimitives>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
     fn latest(&self) -> reth_provider::ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
@@ -1527,6 +1537,16 @@ impl BlockIdReader for BenchProvider {
 }
 
 impl StateProviderFactory for BenchProvider {
+    type Primitives = OpPrimitives;
+
+    fn state_with_block_appended(
+        &self,
+        parent_hash: B256,
+        block: reth_chain_state::ExecutedBlock<OpPrimitives>,
+    ) -> ProviderResult<StateProviderBox> {
+        self.inner.state_with_block_appended(parent_hash, block)
+    }
+
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         self.inner.latest()
     }
@@ -1646,9 +1666,11 @@ impl NodePrimitivesProvider for BenchProvider {
 
 // CanonStateSubscriptions — noop: benchmarks never receive canon state notifications
 impl CanonStateSubscriptions for BenchProvider {
+    type Primitives = OpPrimitives;
+
     fn subscribe_to_canonical_state(
         &self,
-    ) -> reth_chain_state::CanonStateNotifications<Self::Primitives> {
+    ) -> reth_chain_state::CanonStateNotifications<OpPrimitives> {
         tokio::sync::broadcast::channel(1).1
     }
 }

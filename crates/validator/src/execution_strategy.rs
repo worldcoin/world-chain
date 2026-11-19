@@ -19,7 +19,7 @@ use reth_optimism_evm::{OpBlockAssembler, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProviderFactory};
+use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
 use revm::{database::states::bundle_state::BundleRetention, state::bal::Bal};
@@ -204,7 +204,9 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
                     })?;
 
                     let mut worker_state = State::builder()
-                        .with_database(StateProviderDatabase::new(state_provider.as_ref()))
+                        .with_database(StateProviderDatabase::new(
+                            state_provider.as_ref().into_evm_state_provider(),
+                        ))
                         .with_cached_prestate(cache_prestate_from_bundle(&fallback_bundle_state))
                         .with_bundle_update()
                         .with_bal(received_bal.clone())
@@ -309,7 +311,9 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
         )?;
 
         let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(finish_state_provider.as_ref()))
+            .with_database(StateProviderDatabase::new(
+                finish_state_provider.as_ref().into_evm_state_provider(),
+            ))
             .with_cached_prestate(cache_prestate_from_bundle(&committed_state.bundle))
             .with_bundle_update()
             .with_bal_builder()
@@ -592,7 +596,9 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             .map_err(BalExecutorError::other)?;
 
         let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(state_provider.as_ref()))
+            .with_database(StateProviderDatabase::new(
+                state_provider.as_ref().into_evm_state_provider(),
+            ))
             .with_cached_prestate(cache_prestate_from_bundle(&bundle_state))
             .with_bundle_update()
             .build();

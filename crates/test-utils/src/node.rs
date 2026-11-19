@@ -297,13 +297,15 @@ impl BlockReader for WorldChainNoopProvider {
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<
+        Option<reth_provider::RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>,
+    > {
         Ok(None)
     }
 
@@ -657,6 +659,16 @@ impl HashedPostStateProvider for WorldChainNoopProvider {
 }
 
 impl StateProviderFactory for WorldChainNoopProvider {
+    type Primitives = EthPrimitives;
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: B256,
+        _block: reth_chain_state::ExecutedBlock<EthPrimitives>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         Ok(None)
     }
@@ -746,6 +758,8 @@ impl StaticFileProviderFactory for WorldChainNoopProvider {
 }
 
 impl CanonStateSubscriptions for WorldChainNoopProvider {
+    type Primitives = EthPrimitives;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         broadcast::channel(1).1
     }

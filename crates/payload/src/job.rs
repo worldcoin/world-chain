@@ -18,8 +18,8 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadBuilderLease, PayloadJob};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderError, PayloadKind};
 use reth_primitives_traits::BlockBody;
-use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
-use reth_tasks::Runtime;
+use reth_revm::cached::CachedReads;
+use reth_tasks::{CancelOnDrop, Runtime};
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use tokio::{
     sync::oneshot,

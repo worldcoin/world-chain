@@ -25,6 +25,7 @@ reth-evm.workspace = true
 reth-node-api.workspace = true
 reth-revm.workspace = true
 reth-primitives-traits.workspace = true
+reth-tasks.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
@@ -59,6 +60,7 @@ metrics.workspace = true
 metrics-derive.workspace = true
 
 [dev-dependencies]
+alloy-eip7928.workspace = true
 tempfile.workspace = true
 ed25519-dalek.workspace = true
 url.workspace = true
