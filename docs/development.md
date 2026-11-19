@@ -39,6 +39,29 @@ and WebSocket log feed, its operating limits, and client recovery requirements.
 See [Flashblock signing evidence](flashblock-evidence.md) for optional signed
 envelope lookups and independent origin verification.
 
+### Pending state RPCs
+
+With Flashblocks enabled, standard `pending` state reads use the latest executed
+Flashblock over its parent state. Calls, gas estimates, access lists, and
+`eth_simulateV1` retain one snapshot per request across asynchronous work.
+Internal lookups carry the selected block hash; unavailable views fail instead
+of switching to newer state. Separate requests can observe different snapshots.
+Canonical block tags, explicit hash requests, and `requireCanonical` retain
+their existing selector semantics. Canonicalization does not turn an in-flight
+pending request into a canonical-hash request. Preconfirmation does not establish
+finality.
+
+When no Flashblock is available, state and execution RPCs use the existing
+OP-Reth fallback. Errors loading a selected Flashblock propagate; a view that no
+longer extends the local canonical tip returns a pending-block-not-found error
+and can be retried. Pending block, transaction-by-block, and block-receipt reads
+apply the same freshness check before using the selected Flashblock. Pending
+transaction counts retain Reth's consecutive transaction-pool nonce adjustment
+and can exceed the executed Flashblock nonce.
+
+Receipt misses by transaction hash return `null` even while the cached Flashblock
+is stale; provider errors still propagate.
+
 ## Metrics
 
 Custom metrics are exposed via the standard reth metrics endpoint (`/metrics`). Key namespaces:
