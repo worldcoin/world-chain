@@ -152,9 +152,9 @@ Success requires exit zero, no marker, and the completed intermediate manifest.
 Existing output is never overwritten. Inspect/remove a failed output explicitly
 before retrying with that path.
 
-This is a binary assembly stage, not a complete GitHub release. Source/examples
-ZIPs, signed checksums, published image digests and the final external
-`release-manifest.json` are finalized by the subsequent release pipeline.
+This is a binary assembly stage, not a complete GitHub release. Complete the
+source/examples exports, image publication and qualification before finalizing
+the external receipt below.
 
 ### Image assembly
 
@@ -222,5 +222,65 @@ assembler's ELF checks and Docker version probes do not prove correct chain
 execution, source provenance or complete license coverage. Complete source/example
 ZIP creation, Compose/systemd and builder/signer qualification under BLO-1253,
 then finalize the external receipt with resolved materials and image digests.
-Release-page layout approval and the release environment approval remain
-separate prerequisites for publication.
+The table-based release-page layout is approved under BLO-1252. The existing
+release environment approval remains required for publication.
+
+### Finalize the unsigned release assets
+
+After qualifying the payloads and corresponding source/examples ZIPs, record
+their exact inputs and resolved build materials. The build record is a JSON
+object with exactly `schema_version: 1`, `inputs` (the complete assembly inputs)
+and a nonempty `materials` object. Preserve the reviewed compiler/toolchain
+versions, lockfile and recipe identities, immutable external image/artifact
+digests, historical Cannon sources and imports, Foundry source/version, runtime
+libraries and notice/source inventory in `materials`. This field preserves the
+producer's records; the finalizer cannot establish their authenticity or coverage.
+
+The image record has exactly `schema_version: 1`, the same `inputs`, and `images`.
+`images` maps each of `world-chain`, `op` and `combined` to these fields:
+
+| Field | Required value |
+| --- | --- |
+| `reference` | The exact planned GHCR variant tag from `distribution-inputs.py` |
+| `index_digest` | The published multi-platform image index's `sha256:` digest |
+| `platforms` | Exactly `linux/amd64` and `linux/arm64`, each with `manifest_digest` and `config_digest` |
+
+Resolve the tag/index/platform/configuration bindings against the registry and
+verify their actual bytes and media types before preparing this record. Do not
+copy Docker image-inspect `Id` into a configuration field: it may identify an OCI
+index. The finalizer checks record structure, planned tags and distinct variant
+indexes; it performs no registry access and cannot prove those bindings itself.
+
+Each source/examples ZIP must contain one `release-metadata/sources.json` with an
+`inputs` field equal to the assembly inputs. The finalizer checks this binding
+and hashes the complete ZIP bytes. The source producer must independently verify
+the committed trees, submodules, component sources, licenses and example contents;
+matching metadata alone does not establish corresponding-source completeness.
+
+```sh
+python3 .github/scripts/distribution-release.py \
+  --assembly /path/to/binary-assembly \
+  --sources /path/to/world-chain-v2.9.0-sources.zip \
+  --examples /path/to/world-chain-v2.9.0-examples.zip \
+  --build-record /path/to/reviewed-build-record.json \
+  --image-record /path/to/verified-registry-record.json \
+  --output /path/to/new-release-assets
+```
+
+The command creates a new private directory, preserving the six archive bytes
+and copying the source/examples ZIPs under their planned names. It recomputes
+archive hashes and verifies every tar member, mode and payload hash against the
+assembly receipt; unexpected, duplicated or missing members fail. The external
+`release-manifest.json` binds the eight assets, payload files, inputs, materials,
+image descriptors and finalizer script hashes. `SHA256SUMS` covers those eight
+assets and the manifest. The manifest excludes its own digest; `SHA256SUMS`
+excludes itself. Existing output is never overwritten; failures retain
+`INCOMPLETE` and must not be signed/uploaded.
+
+The output is unsigned. Preserve the existing per-archive release signatures;
+also sign `SHA256SUMS` and `release-manifest.json` with the established release
+GPG identity, and verify the detached signatures with its independently trusted
+public key. Before signing, require a zero exit, no `INCOMPLETE`, independent
+artifact/runtime qualification, reviewed materials and existing release approval.
+Do not substitute an SSH commit-signing key for the release identity. This offline
+command does not activate the publishing workflow or authorize publication.

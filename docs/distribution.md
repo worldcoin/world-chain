@@ -212,9 +212,10 @@ standard configuration, systemd units, Docker build instructions, and the source
 ZIP and checksum links. Use the same configuration conventions across deployment
 modes; keep network and role configuration explicit.
 
-The [release-page preview](release-page-preview.md) is a draft for user approval.
-Do not activate a release-page renderer or publish this format until the user
-approves it. The existing release environment approval remains required too.
+The table-based [release-page preview](release-page-preview.md) is approved for
+implementation under [BLO-1252](https://linear.app/worldcoin/issue/BLO-1252).
+Its example versions and links remain illustrative. The existing release
+environment approval remains required for publication.
 See [deployment examples](../examples/distribution/README.md) and
 [Docker build instructions](distribution-build.md). The examples archive must
 include those guides and corresponding Compose, configuration and systemd files.
