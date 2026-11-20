@@ -330,3 +330,61 @@ public key. Before signing, require a zero exit, no `INCOMPLETE`, independent
 artifact/runtime qualification, reviewed materials and existing release approval.
 Do not substitute an SSH commit-signing key for the release identity. This offline
 command does not activate the publishing workflow or authorize publication.
+
+### Sign an approved prepared draft
+
+From v2.9.0, the existing `release` workflow consumes a qualified prepared draft.
+It downloads and verifies the eight unchanged assets, `release-manifest.json`
+and `SHA256SUMS`, checks every archive member and source/examples input binding,
+then resolves the three public image tags and verifies their index, platform
+manifest and configuration descriptor digests. No binaries or images are rebuilt
+by this path. The legacy builder remains available for versions before v2.9.0.
+
+Before staging, complete the independent source/material, notice, native-runtime,
+signer and rollback qualification and obtain publication approval. Promote the
+qualified image graphs to the exact public tags in the manifest using the
+approved registry identity; verify their actual digests and finalize the receipt.
+Private dev image observations and planned public references are insufficient.
+Approve disclosure of the maintained OP sources to the draft's audience before
+uploading them. [GitHub draft releases](https://docs.github.com/en/rest/releases/releases)
+are visible to users with repository push access; they are not a separate private
+artifact service for the OP repository.
+
+Create an unpublished draft targeting the exact full World Chain build commit,
+and upload only the ten finalized files. An existing version tag must point to
+that same commit. Record the numeric release ID and independently review the
+SHA-256 of `release-manifest.json`. Existing detached signatures may be present;
+other assets, mismatched inputs, incomplete downloads and modified files fail
+verification. Do not publish or edit the draft while the job runs: GitHub has no
+atomic draft lock across asset uploads and publication.
+
+Dispatch `.github/workflows/release.yml` from `main`, setting `ref` to the full
+source commit, `version` to the bundle version, `prepared_release_id` to the staged
+draft ID and `prepared_manifest_sha256` to its reviewed manifest hash. Approve the
+existing `release` environment only after reviewing those concrete inputs and
+the independent qualification evidence. The workflow runs verifier code from its
+own immutable workflow revision, rather than executing files from the staged ZIPs.
+
+After verification, it signs all ten files with the established GPG release
+identity, verifies every signature locally, uploads the detached signatures and
+downloads every resulting asset to check its bytes again. It also rechecks the
+published image bindings and draft identity. Failed or partial uploads leave an
+unpublished draft for inspection; a rerun replaces only the known signature
+assets. It fills the approved release-page layout using the actual version,
+asset links, workflow-revision guide links and source changelog. The documentation
+revision is separate from the executable's build commit. No release or tag is
+created, no image is pushed, and the draft is not published by this path.
+
+Review the finished draft and its signatures before the separately authorized
+publication. Consumers must independently trust the established public signing
+key, whose primary fingerprint is
+`C75F BC64 E9D4 8E89 FB60 418B 8949 B352 D042 2E74`, before verification:
+
+```sh
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+gpg --verify release-manifest.json.asc release-manifest.json
+```
+
+Confirm the fingerprint of the verified signature, not merely that some imported
+key produced a valid signature. Each archive and ZIP also has its own `.asc` file.
