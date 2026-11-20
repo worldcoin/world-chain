@@ -233,7 +233,7 @@ def guide_paths(world_chain, files):
     return result
 
 
-def package(inputs, world_chain, optimism, repositories, build_record, output):
+def package(inputs, world_chain, optimism, repositories, build_record, output, *, private_review=False):
     plan = distribution.release_plan(inputs)
     distribution.object_fields(build_record, ("schema_version", "inputs", "materials"), "build record")
     if (type(build_record["schema_version"]) is not int or build_record["schema_version"] != 1
@@ -264,6 +264,8 @@ def package(inputs, world_chain, optimism, repositories, build_record, output):
                              **({"commit_timestamp": timestamps[n["prefix"]]} if n["prefix"] in timestamps else {}),
                              "gitlinks": [{"path": name, "commit": oid} for name, mode, oid in n["entries"] if mode == "160000"]}
                             for n in nodes]}
+    if private_review:
+        metadata["export_selection"] = {"requires_publication_review": True}
     output.parent.mkdir(parents=True, exist_ok=True)
     output.mkdir(mode=0o700)
     marker = output / "INCOMPLETE"
@@ -303,10 +305,11 @@ def main():
     for name in ("inputs", "world-chain-repo", "optimism-repo", "build-record", "output"):
         parser.add_argument(f"--{name}", required=True, type=Path)
     parser.add_argument("--repository", action="append", type=Path, default=[], help="additional checkout containing pinned submodule objects")
+    parser.add_argument("--private-review", action="store_true", help="mark both ZIPs as ineligible for release finalization")
     args = parser.parse_args()
     try:
         package(distribution.load_inputs(args.inputs), args.world_chain_repo, args.optimism_repo,
-                args.repository, release.load_record(args.build_record), args.output)
+                args.repository, release.load_record(args.build_record), args.output, private_review=args.private_review)
         print(f"Exported source/examples assets to {args.output}; independent qualification remains required")
     except (OSError, ValueError, subprocess.SubprocessError, UnicodeError) as error:
         print(f"source export failed: {error}", file=sys.stderr)

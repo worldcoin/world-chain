@@ -308,7 +308,10 @@ source metadata.
 
 The intermediate `source-manifest.json` records ZIP checksums. Existing output is
 preserved, and a failed export retains `INCOMPLETE`/partial output. Finalization
-rejects an incomplete source or binary assembly. Independently verify source
+rejects an incomplete source or binary assembly. Add `--private-review` when
+exporting for private review. Both ZIPs carry a hold that finalization rejects
+even after the files are copied. Export again from the approved inputs after
+publication review. Independently verify source
 coverage, notice obligations, examples and build reproduction before signing or
 publishing these assets. This step produces local unsigned assets.
 
