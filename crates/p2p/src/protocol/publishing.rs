@@ -682,6 +682,10 @@ impl FlashblocksHandle {
         if matches!(pending.message, ControlMessage::Start) {
             state.publishing_status.send_modify(|status| {
                 if let PublishingStatus::NotPublishing { active_publishers } = status {
+                    active_publishers.retain(|(_, timestamp)| {
+                        pending.authorization.timestamp.saturating_sub(*timestamp)
+                            < MAX_PUBLISH_WAIT_SEC
+                    });
                     if active_publishers.is_empty() {
                         tracing::info!(
                             target: "flashblocks::p2p",

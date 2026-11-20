@@ -1277,6 +1277,33 @@ async fn waiting_retains_the_existing_two_second_failover() {
 }
 
 #[tokio::test]
+async fn new_payload_job_publishes_after_previous_publisher_expires() {
+    let handle = handle();
+    handle
+        .peer_start_publishing(PeerId::random(), peer_authorization(10, 9))
+        .expect("previous publisher");
+    handle
+        .start_publishing(authorization(11))
+        .expect("first local payload job");
+    assert!(matches!(
+        handle.publishing_status(),
+        PublishingStatus::WaitingToPublish { .. }
+    ));
+    handle.stop_publishing().expect("first payload job stopped");
+    assert!(matches!(
+        handle.publishing_status(),
+        PublishingStatus::NotPublishing { active_publishers }
+            if active_publishers.len() == 1
+    ));
+
+    let next = authorization(12);
+    handle
+        .start_publishing(next)
+        .expect("next local payload job");
+    assert_publishing(&handle, next);
+}
+
+#[tokio::test]
 async fn handover_timeout_does_not_overflow_at_maximum_timestamp() {
     let handle = handle();
     handle
