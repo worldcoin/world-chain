@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-b1cb3d97.js";
+            window.path_to_searchindex_js = "searchindex-18447205.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-87388434.js"></script>
@@ -1224,6 +1224,11 @@ Flashblocks:
           Retain bounded signed Flashblock evidence and expose its read-only RPC lookup
           
           [env: WORLD_CHAIN_FLASHBLOCK_EVIDENCE=]
+
+      --rpc.flashblock-receipt-proofs
+          Expose bounded receipt and transaction proofs for signed, execution-validated Flashblocks
+          
+          [env: WORLD_CHAIN_FLASHBLOCK_RECEIPT_PROOFS=]
 
       --rpc.unsafe-block-evidence-url &lt;UNSAFE_BLOCK_EVIDENCE_URL&gt;
           Forward only unsafe-block evidence RPCs to this replica's paired op-node
