@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 world-chain-pbh.workspace = true
+world-chain-signer.workspace = true
 world-chain-pool.workspace = true
 world-chain-node.workspace = true
 world-chain-p2p = { workspace = true, features = ["test-utils"] }

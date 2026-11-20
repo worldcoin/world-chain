@@ -141,7 +141,7 @@ Block Builder:
       --builder.private-key <PRIVATE_KEY>
           Private key for the builder used to update PBH nullifiers
           
-          [env: BUILDER_PRIVATE_KEY=]
+          [env: BUILDER_PRIVATE_KEY]
 
       --builder.signer-config <builder.signer-config>
           PBH remote signer JSON configuration, including mTLS and expected address

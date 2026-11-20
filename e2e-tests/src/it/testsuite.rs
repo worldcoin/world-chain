@@ -2640,7 +2640,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         let builder = BuilderArgs {
             signer_config: None,
             enabled: false,
-            private_key: Some(world_chain_test_utils::utils::signer(6)),
+            private_key: Some(world_chain_test_utils::utils::pbh_test_signer()),
             block_uncompressed_size_limit: None,
         };
 
