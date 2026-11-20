@@ -10,6 +10,7 @@ import os
 from pathlib import Path, PurePosixPath
 import posixpath
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -171,13 +172,15 @@ def zip_entry(archive, name, data, mode, timestamp):
         safe_path(posixpath.normpath(str(PurePosixPath(name).parent / target)))
     info = zipfile.ZipInfo(name, timestamp)
     info.create_system, info.compress_type = 3, zipfile.ZIP_DEFLATED
-    info.external_attr = int(mode, 8) << 16
+    # Git tree modes omit symlink permissions; ZIP extractors restore them.
+    permissions = 0o777 if mode == "120000" else 0
+    info.external_attr = (int(mode, 8) | permissions) << 16
     archive.writestr(info, data, compresslevel=6)
 
 
 def validate_symlinks(archive):
     links = {info.filename: archive.read(info).decode("utf-8") for info in archive.infolist()
-             if info.external_attr >> 16 == 0o120000}
+             if stat.S_ISLNK(info.external_attr >> 16)}
     for name in links:
         pending, resolved, followed = deque(name.split("/")), [], 0
         while pending:
@@ -241,8 +244,14 @@ def package(inputs, world_chain, optimism, repositories, build_record, output):
     inventories = [object_sizes(node) for node in nodes]
     if sum(len(files) for files, _ in inventories) > MAX_FILES or sum(sum(sizes) for _, sizes in inventories) > MAX_BYTES:
         raise ValueError("source export exceeds 100000 files or ten GiB")
+    roots = {"world-chain", "optimism"}
+    roots.update(f"component-sources/{name}" for name in inputs["components"])
+    timestamps = {
+        n["prefix"]: int(git(n["repository"], "show", "--no-show-signature", "-s", "--format=%ct", n["commit"]).strip())
+        for n in nodes if n["prefix"] in roots
+    }
     wc = next(node for node in nodes if node["prefix"] == "world-chain")
-    epoch = int(git(wc["repository"], "show", "--no-show-signature", "-s", "--format=%ct", wc["commit"]).strip())
+    epoch = timestamps["world-chain"]
     if not 0 <= epoch <= 0xFFFFFFFF:
         raise ValueError("source epoch must be an unsigned 32-bit timestamp")
     guides = guide_paths(wc["repository"], next(files for node, (files, _) in zip(nodes, inventories) if node["prefix"] == "world-chain"))
@@ -252,6 +261,7 @@ def package(inputs, world_chain, optimism, repositories, build_record, output):
                 "build_materials": build_record["materials"], "guides": sorted(guides),
                 "toolchain": {"python": sys.version.split()[0], "zlib": zlib.ZLIB_RUNTIME_VERSION},
                 "sources": [{"prefix": n["prefix"], "commit": n["commit"], "tree": n["tree"],
+                             **({"commit_timestamp": timestamps[n["prefix"]]} if n["prefix"] in timestamps else {}),
                              "gitlinks": [{"path": name, "commit": oid} for name, mode, oid in n["entries"] if mode == "160000"]}
                             for n in nodes]}
     output.parent.mkdir(parents=True, exist_ok=True)
