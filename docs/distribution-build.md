@@ -60,7 +60,7 @@ native architecture qualification still use the final release artifacts.
 
 Use the selected source root for each service. The qualified v2.9.0 Go
 programs use Go 1.26.11. The older pinned OP component Dockerfiles select
-different Go versions, so use the component's Just recipe with the qualified
+different Go versions, so use the existing source recipes with the qualified
 compiler for source ZIP builds of `op-node`, `op-batcher`, `op-proposer`,
 `op-conductor`, `op-challenger` and `op-dispute-mon`.
 
@@ -87,23 +87,33 @@ commit_date=$(jq -er --arg p "$source_root" --arg c "$commit" \
 (
   cd "$source_root"
   export GOTOOLCHAIN=go1.26.11 GOFLAGS="-mod=readonly -p=4" TZ=UTC
-  if [ "$component" != op-node ]; then
-    GOFLAGS="$GOFLAGS -trimpath"
-  fi
   mise x yq@4.53.6 -- bash op-core/superchain/bundle/sync-superchain.sh
-  GOOS=linux GOARCH="$arch" TARGETOS=linux TARGETARCH="$arch" \
-    GITCOMMIT="$commit" GITDATE="$commit_date" VERSION="$version" \
-    mise x just@1.46.0 go@1.26.11 -- just --justfile "$component/justfile" "$component"
-  mise x go@1.26.11 -- go version -m "$component/bin/$component"
+  export GOOS=linux GOARCH="$arch" CGO_ENABLED=0
+  output="$component/bin/$component"
+  if [ "$component" = op-node ]; then
+    TARGETOS=linux TARGETARCH="$arch" \
+      GITCOMMIT="$commit" GITDATE="$commit_date" VERSION="$version" \
+      mise x just@1.46.0 go@1.26.11 -- just --justfile "$component/justfile" "$component"
+  else
+    package="github.com/ethereum-optimism/optimism/$component/version"
+    case "$component" in
+      op-batcher|op-proposer|op-conductor) version_symbol=main.Version ;;
+      op-challenger|op-dispute-mon) version_symbol="$package.Version" ;;
+      *) echo "Unsupported direct Go service: $component" >&2; exit 1 ;;
+    esac
+    mise x go@1.26.11 -- go build -buildvcs=true -trimpath \
+      -ldflags "-X main.GitCommit=$commit -X main.GitDate=$commit_date -X $version_symbol=$version -X $package.Meta=" \
+      -o "$output" "./$component/cmd"
+  fi
+  mise x go@1.26.11 -- go version -m "$output"
 )
 ```
 
 Check the embedded Go version, target architecture and linker identity. The
-qualified op-node build retained build paths, and the five other qualified Go
-service builds recorded automatic VCS metadata from Git checkouts. A rebuild
-from this source ZIP can differ in those fields. Compare the SHA-256 before
-treating the bytes as interchangeable. Assemble release images from the frozen
-qualified payload.
+qualified op-node build retained build paths, so a rebuild in a different
+directory can produce a different hash. Compare each SHA-256 before treating
+the bytes as interchangeable. Assemble release images from the frozen qualified
+payload.
 
 For `op-deployer`, use the separately pinned deployer source with the
 matching Foundry and solc versions. Compile the embedded contracts with
