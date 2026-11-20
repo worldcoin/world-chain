@@ -90,7 +90,8 @@ class SourceExportTest(unittest.TestCase):
                     data = archive.read(relative)
                     self.assertEqual(oid(data), expected["git_blob"])
                     self.assertEqual(hashlib.sha256(data).hexdigest(), expected["sha256"])
-                    self.assertEqual(archive.getinfo(relative).external_attr >> 16, int(expected["mode"], 8))
+                    mode = 0o120777 if expected["mode"] == "120000" else int(expected["mode"], 8)
+                    self.assertEqual(archive.getinfo(relative).external_attr >> 16, mode)
                 if "-examples.zip" in name:
                     self.assertEqual(set(index), {p for p in self.data if p.startswith("examples/") or p.startswith("docs/")})
                 else:

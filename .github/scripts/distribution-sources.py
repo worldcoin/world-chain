@@ -10,6 +10,7 @@ import os
 from pathlib import Path, PurePosixPath
 import posixpath
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -171,13 +172,15 @@ def zip_entry(archive, name, data, mode, timestamp):
         safe_path(posixpath.normpath(str(PurePosixPath(name).parent / target)))
     info = zipfile.ZipInfo(name, timestamp)
     info.create_system, info.compress_type = 3, zipfile.ZIP_DEFLATED
-    info.external_attr = int(mode, 8) << 16
+    # Git tree modes omit symlink permissions; ZIP extractors restore them.
+    permissions = 0o777 if mode == "120000" else 0
+    info.external_attr = (int(mode, 8) | permissions) << 16
     archive.writestr(info, data, compresslevel=6)
 
 
 def validate_symlinks(archive):
     links = {info.filename: archive.read(info).decode("utf-8") for info in archive.infolist()
-             if info.external_attr >> 16 == 0o120000}
+             if stat.S_ISLNK(info.external_attr >> 16)}
     for name in links:
         pending, resolved, followed = deque(name.split("/")), [], 0
         while pending:

@@ -115,16 +115,51 @@ directory can produce a different hash. Compare each SHA-256 before treating
 the bytes as interchangeable. Assemble release images from the frozen qualified
 payload.
 
-For `op-deployer`, use the separately pinned deployer source with the
-matching Foundry and solc versions. Compile the embedded contracts with
-`op-deployer/scripts/build-embedded-contracts.sh` and create the embedded
-`artifacts.tzst` with the recipe in that tree's Dockerfile. Verify the
-embedded archive against the reviewed build materials and regenerate the
-superchain registry bundle in that source root before running the
-`op-deployer/justfile` `build-go` recipe with the matching source identity
-and toolchain. For multicannon, use the reviewed platform-specific historical
-imports and verify their digests before building the current Cannon embed
-and wrapper. Kona-host has a separate pinned Rust/Cargo build recipe.
+### OP Deployer from a source ZIP
+
+For v2.9.0, use `component-sources/op-deployer/` and the contract build in
+that tree's `ops/docker/op-stack-go/Dockerfile`. Verify the Foundry release
+archive against `op-deployer/pkg/deployer/forge/version.json`, put its
+`forge` on your PATH, and install the four solc versions from that Dockerfile
+(0.8.15, 0.8.19, 0.8.25 and 0.8.28) for your build platform. Start outside a
+Git checkout in the directory where you extracted the source ZIP.
+
+```sh
+set -eu
+arch=arm64 # or amd64
+metadata=release-metadata/sources.json
+source_root=component-sources/op-deployer
+commit=$(jq -er '.inputs.components["op-deployer"].build_commit' "$metadata")
+version=$(jq -er '.inputs.components["op-deployer"].version' "$metadata")
+commit_date=$(jq -er --arg p "$source_root" --arg c "$commit" \
+  '.sources[] | select(.prefix == $p and .commit == $c) | .commit_timestamp' "$metadata")
+
+(
+  cd "$source_root"
+  export GOTOOLCHAIN=go1.26.11 GOFLAGS="-mod=readonly -p=4" TZ=UTC
+  (cd packages/contracts-bedrock && forge build --offline --skip '/**/test/**')
+  mise x go@1.26.11 -- go run ./op-deployer/pkg/deployer/artifacts/cmd/mktar \
+    -base ./packages/contracts-bedrock \
+    -out ./op-deployer/pkg/deployer/artifacts/forge-artifacts/artifacts.tzst \
+    --exclude='*.t.sol'
+  mise x yq@4.53.6 -- bash op-core/superchain/sync-superchain.sh
+  GOOS=linux GOARCH="$arch" TARGETOS=linux TARGETARCH="$arch" CGO_ENABLED=0 \
+    GITCOMMIT="$commit" GITDATE="$commit_date" VERSION="$version" \
+    mise x just@1.46.0 go@1.26.11 -- just --justfile op-deployer/justfile build-go
+  mise x go@1.26.11 -- go version -m op-deployer/bin/op-deployer
+)
+```
+
+The embedded tarball records filesystem times, and the packer emits a
+`COMMIT` entry only when Git metadata is available. Compare the generated
+contract artifacts with the reviewed inputs to check the rebuild. Use the
+frozen qualified payload for release image assembly.
+
+### Multicannon and Kona-host
+
+For multicannon, use the reviewed platform-specific historical imports
+and verify their digests before building the current Cannon embed and wrapper.
+Kona-host has a separate pinned Rust/Cargo build recipe.
 
 ### Reference Docker targets
 
