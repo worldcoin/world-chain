@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-667645ca.js";
+            window.path_to_searchindex_js = "searchindex-993fcdc8.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-87388434.js"></script>
@@ -1104,6 +1104,11 @@ Flashblocks:
           Remote publisher JSON configuration, including mTLS and expected key
           
           [env: FLASHBLOCKS_SIGNER_CONFIG=]
+
+      --flashblocks.authorizer-signer-config &lt;flashblocks.authorizer-signer-config&gt;
+          Remote in-process grant signer JSON, with an independently pinned authorizer key
+          
+          [env: FLASHBLOCKS_AUTHORIZER_SIGNER_CONFIG=]
 
       --flashblocks.override-authorizer-sk &lt;OVERRIDE_AUTHORIZER_SK&gt;
           Override incoming authorizations from rollup boost
