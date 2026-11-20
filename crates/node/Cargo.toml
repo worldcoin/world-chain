@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+world-chain-signer.workspace = true
 world-chain-pool.workspace = true
 world-chain-p2p.workspace = true
 world-chain-primitives.workspace = true

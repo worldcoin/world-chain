@@ -29,6 +29,8 @@ pub struct WorldChainNodeConfig {
     pub pbh_wallet: Option<world_chain_signer::PbhWallet>,
     /// Remote publisher credentials and expected identity, validated at startup.
     pub publication_signer: Option<world_chain_signer::PublicationSigner>,
+    /// Optional in-process grant client for a policy-authorized sequencer.
+    pub grant_signer: Option<world_chain_signer::GrantSigner>,
     /// World Chain Specific CLI arguments
     pub args: WorldChainArgs,
     /// World Chain Payload Builder Configuration

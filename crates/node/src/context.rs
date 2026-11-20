@@ -479,7 +479,8 @@ where
                     Duration::from_millis(flashblocks_interval),
                     Duration::from_millis(flashblocks_recommit_interval),
                 )
-                .with_signing_deadlines(signing_deadlines),
+                .with_signing_deadlines(signing_deadlines)
+                .with_grant_signer(self.config.grant_signer.clone()),
             )
             .network(wc_network_builder)
             .consensus(OpConsensusBuilder::default())

@@ -228,6 +228,7 @@ pub(crate) struct PendingPublication {
 /// payloads will be built and this future will wait to be resolved: [`PayloadJob::resolve`] or
 /// terminated if the deadline is reached.
 pub struct FlashblocksPayloadJob<Builder: PayloadBuilder> {
+    pub(crate) pending_grant: Option<world_chain_p2p::protocol::PendingGrant>,
     pub(crate) pending_publication: Option<PendingPublication>,
     pub(crate) publishing_clearance:
         Option<futures::future::BoxFuture<'static, Result<(), FlashblocksP2PError>>>,
@@ -308,6 +309,7 @@ where
             }
         }
         self.authorization = None;
+        self.pending_grant.take();
         self.publishing_clearance.take();
         self.pending_publication.take();
         self._publishing_lease.take();
@@ -542,9 +544,28 @@ where
                 this.pending_block.take();
             }
             this.pending_publication.take();
+            this.pending_grant.take();
             this.publishing_clearance.take();
             this._publishing_lease.take();
             return Poll::Ready(Ok(()));
+        }
+
+        if let Some(mut pending) = this.pending_grant.take() {
+            match pending.poll_unpin(cx) {
+                Poll::Pending => this.pending_grant = Some(pending),
+                Poll::Ready(Ok((authorization, lease))) => {
+                    this.authorization = Some(authorization);
+                    this._publishing_lease = Some(lease);
+                }
+                Poll::Ready(Err(error)) => {
+                    this.p2p_handler
+                        .ctx
+                        .metrics
+                        .publishing_signing_failed
+                        .increment(1);
+                    this.disable_publication(error);
+                }
+            }
         }
 
         if let Some(mut pending) = this.pending_publication.take() {
@@ -635,7 +656,8 @@ where
             Poll::Pending => false,
         };
         let interval_ready = this.flashblock_deadline.as_mut().poll(cx).is_ready();
-        if clearance
+        if this.pending_grant.is_none()
+            && clearance
             && interval_ready
             && !this.best_payload.0.is_frozen()
             && let (Some(payload), access_list) = (
@@ -788,6 +810,8 @@ where
         kind: PayloadKind,
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         info!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), ?kind, "resolving payload job");
+
+        self.pending_grant.take();
 
         let remote_execution = if self.p2p_handler.is_remote_publisher() {
             // Sealing needs the executed block, not an optional Flashblock signature.

@@ -172,6 +172,11 @@ Flashblocks:
           
           [env: FLASHBLOCKS_SIGNER_CONFIG=]
 
+      --flashblocks.authorizer-signer-config <flashblocks.authorizer-signer-config>
+          Remote in-process grant signer JSON, with an independently pinned authorizer key
+          
+          [env: FLASHBLOCKS_AUTHORIZER_SIGNER_CONFIG=]
+
       --flashblocks.override-authorizer-sk <OVERRIDE_AUTHORIZER_SK>
           Override incoming authorizations from rollup boost
           

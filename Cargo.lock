@@ -19348,6 +19348,7 @@ dependencies = [
  "world-chain-pool",
  "world-chain-primitives",
  "world-chain-rpc",
+ "world-chain-signer",
  "world-chain-test-utils",
  "world-chain-validator",
 ]
