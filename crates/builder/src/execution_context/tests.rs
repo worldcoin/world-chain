@@ -1,7 +1,6 @@
 use super::*;
 use alloy_op_evm::{OpEvmFactory, OpTx};
 use alloy_primitives::{B256, Bytes, TxKind};
-use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::SolCall;
 use reth_evm::EvmFactory;
 use reth_optimism_primitives::OpPrimitives;
@@ -12,6 +11,7 @@ use revm::{
     state::{AccountInfo, Bytecode},
 };
 use serde::Deserialize;
+use world_chain_signer::LocalPbhSigner;
 use world_chain_test_utils::builder::{CHAIN_SPEC, EVM_CONFIG, EVM_ENV, SEALED_HEADER};
 
 type TestContext = WorldChainPayloadBuilderCtx<NoopProvider<WorldChainSpec, OpPrimitives>>;
@@ -110,7 +110,7 @@ fn context(entry_point: Address) -> (TestContext, CancelOnDrop) {
         pbh_signature_aggregator: Address::ZERO,
         signing_deadlines: None,
         builder_wallet: Some(
-            PrivateKeySigner::from_bytes(&B256::with_last_byte(1))
+            LocalPbhSigner::from_bytes(&B256::with_last_byte(1).0)
                 .expect("public scalar-one test key")
                 .into(),
         ),

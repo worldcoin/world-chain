@@ -5,6 +5,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Errors exclude request bodies, credentials and response-provided free-form text.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum Error {
+    #[error("invalid local PBH private key")]
+    InvalidLocalKey,
     #[error("local PBH transaction signing failed")]
     LocalSigning,
     #[error("invalid remote signer configuration: {0}")]

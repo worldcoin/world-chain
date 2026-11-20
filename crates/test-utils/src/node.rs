@@ -1,6 +1,6 @@
 use crate::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
-    utils::{pbh_bundle, pbh_multicall, signer, user_op},
+    utils::{pbh_bundle, pbh_multicall, pbh_test_signer, signer, user_op},
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -84,7 +84,7 @@ pub fn test_config_with_peers_and_gossip(
     let builder = BuilderArgs {
         signer_config: None,
         enabled: true,
-        private_key: Some(signer(6)),
+        private_key: Some(pbh_test_signer()),
         block_uncompressed_size_limit: None,
     };
 

@@ -13,4 +13,4 @@ pub use ed25519::{GrantSigner, PublicationSigner, validate_publication};
 pub use error::{Error, Result};
 pub use pbh::PbhSigner;
 pub use transport::PROTOCOL;
-pub use wallet::PbhWallet;
+pub use wallet::{LocalPbhSigner, PbhWallet};
