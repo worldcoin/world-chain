@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import struct
 import subprocess
 import sys
@@ -103,6 +104,25 @@ class BinaryPackagingTest(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             packaging.package(inputs(), self.source, output, EPOCH)
         self.assertEqual(sentinel.read_text(), "existing release")
+
+    def test_image_payload_directories_are_readable_under_restrictive_umask(self):
+        for platform in self.source.iterdir():
+            notices = platform / "licenses" / "dependency"
+            notices.mkdir()
+            (notices / "NOTICE.txt").write_text("Dependency notice.\n")
+        output = self.root / "restricted"
+        old_mask = os.umask(0o077)
+        try:
+            receipt = packaging.package(inputs(), self.source, output, EPOCH)
+        finally:
+            os.umask(old_mask)
+        self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
+        for row in receipt["payloads"].values():
+            snapshot = output / row["directory"]
+            for relative in (".", "bin", "licenses", "licenses/dependency"):
+                with self.subTest(path=snapshot / relative):
+                    self.assertEqual(stat.S_IMODE((snapshot / relative).stat().st_mode), 0o755)
+            self.assertEqual(stat.S_IMODE((snapshot / "licenses/dependency/NOTICE.txt").stat().st_mode), 0o644)
 
     def test_component_sources_survive_packaging(self):
         value = component_source_inputs()
