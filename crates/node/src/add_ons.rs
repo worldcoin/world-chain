@@ -58,6 +58,7 @@ use world_chain_rpc::{
         },
         spawn_preconfirmed_log_feed,
     },
+    receipt_proof::{FlashblockReceiptProofApiServer, FlashblockReceiptProofRpc},
     unsafe_evidence::UnsafeBlockEvidenceRpc,
 };
 use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
@@ -130,6 +131,7 @@ pub struct WorldChainAddOns<
     /// Explicit opt-in for the preconfirmed log feed.
     preconfirmed_logs: bool,
     unsafe_block_evidence_url: Option<String>,
+    flashblock_receipt_proofs: bool,
     flashblock_evidence: Option<world_chain_p2p::evidence::FlashblockEvidenceStore>,
     /// Validated Flashblocks source, present only on Flashblocks-enabled nodes.
     flashblocks_coordinator: Option<FlashblocksExecutionCoordinator>,
@@ -160,6 +162,7 @@ where
         simulate_enabled: bool,
         preconfirmed_logs: bool,
         unsafe_block_evidence_url: Option<String>,
+        flashblock_receipt_proofs: bool,
         flashblock_evidence: Option<world_chain_p2p::evidence::FlashblockEvidenceStore>,
         flashblocks_coordinator: Option<FlashblocksExecutionCoordinator>,
         witness: Option<(ExecutionWitnessHandle, Receiver<BlockExecutionWitness>)>,
@@ -176,6 +179,7 @@ where
             simulate_enabled,
             preconfirmed_logs,
             unsafe_block_evidence_url,
+            flashblock_receipt_proofs,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -207,6 +211,7 @@ where
             simulate_enabled,
             preconfirmed_logs,
             unsafe_block_evidence_url,
+            flashblock_receipt_proofs,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -224,6 +229,7 @@ where
             simulate_enabled,
             preconfirmed_logs,
             unsafe_block_evidence_url,
+            flashblock_receipt_proofs,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -247,6 +253,7 @@ where
             simulate_enabled,
             preconfirmed_logs,
             unsafe_block_evidence_url,
+            flashblock_receipt_proofs,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -264,6 +271,7 @@ where
             simulate_enabled,
             preconfirmed_logs,
             unsafe_block_evidence_url,
+            flashblock_receipt_proofs,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -287,6 +295,7 @@ where
             simulate_enabled,
             preconfirmed_logs,
             unsafe_block_evidence_url,
+            flashblock_receipt_proofs,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -304,6 +313,7 @@ where
             simulate_enabled,
             preconfirmed_logs,
             unsafe_block_evidence_url,
+            flashblock_receipt_proofs,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -327,6 +337,7 @@ where
             simulate_enabled,
             preconfirmed_logs,
             unsafe_block_evidence_url,
+            flashblock_receipt_proofs,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -344,6 +355,7 @@ where
             simulate_enabled,
             preconfirmed_logs,
             unsafe_block_evidence_url,
+            flashblock_receipt_proofs,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -421,6 +433,7 @@ where
             simulate_enabled,
             preconfirmed_logs,
             unsafe_block_evidence_url,
+            flashblock_receipt_proofs,
             flashblock_evidence,
             flashblocks_coordinator,
             witness,
@@ -445,6 +458,23 @@ where
             .as_deref()
             .map(UnsafeBlockEvidenceRpc::new)
             .transpose()?;
+        let receipt_proof_api = if flashblock_receipt_proofs {
+            let coordinator = flashblocks_coordinator.clone().ok_or_else(|| {
+                eyre!("--rpc.flashblock-receipt-proofs requires --flashblocks.enabled")
+            })?;
+            let evidence = flashblock_evidence.clone().ok_or_else(|| {
+                eyre!("--rpc.flashblock-receipt-proofs requires --rpc.flashblock-evidence")
+            })?;
+            Some(FlashblockReceiptProofRpc::spawn(
+                ctx.node.provider().clone(),
+                ctx.node.provider().chain_spec(),
+                coordinator,
+                evidence,
+                ctx.node.task_executor(),
+            ))
+        } else {
+            None
+        };
         let flashblock_evidence_api = flashblock_evidence.map(|store| {
             FlashblockEvidenceRpc::new(store, ctx.node.provider().chain_spec().chain_id())
         });
@@ -574,11 +604,17 @@ where
                 modules.replace_http(
                     FlashblocksOpApi::new(preconfirmed_on_http)
                         .with_flashblock_evidence(evidence_on_http)
+                        .with_flashblock_receipt_proofs(
+                            evidence_on_http && receipt_proof_api.is_some(),
+                        )
                         .into_rpc(),
                 )?;
                 modules.replace_ws(
                     FlashblocksOpApi::new(preconfirmed_on_ws)
                         .with_flashblock_evidence(evidence_on_ws)
+                        .with_flashblock_receipt_proofs(
+                            evidence_on_ws && receipt_proof_api.is_some(),
+                        )
                         .into_rpc(),
                 )?;
                 modules.replace_ipc(FlashblocksOpApi::default().into_rpc())?;
@@ -594,6 +630,15 @@ where
                 }
 
                 if let Some(api) = flashblock_evidence_api {
+                    if evidence_on_http {
+                        modules.merge_http(api.clone().into_rpc())?;
+                    }
+                    if evidence_on_ws {
+                        modules.merge_ws(api.into_rpc())?;
+                    }
+                }
+
+                if let Some(api) = receipt_proof_api {
                     if evidence_on_http {
                         modules.merge_http(api.clone().into_rpc())?;
                     }

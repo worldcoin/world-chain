@@ -287,6 +287,11 @@ Flashblocks:
           
           [env: WORLD_CHAIN_FLASHBLOCK_EVIDENCE=]
 
+      --rpc.flashblock-receipt-proofs
+          Expose bounded receipt and transaction proofs for signed, execution-validated Flashblocks
+          
+          [env: WORLD_CHAIN_FLASHBLOCK_RECEIPT_PROOFS=]
+
       --rpc.unsafe-block-evidence-url <UNSAFE_BLOCK_EVIDENCE_URL>
           Forward only unsafe-block evidence RPCs to this replica's paired op-node
           

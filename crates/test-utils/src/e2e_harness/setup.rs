@@ -198,6 +198,8 @@ pub struct WorldChainTestBuilder {
     preconfirmed_logs: bool,
     #[builder(default)]
     flashblock_evidence: bool,
+    #[builder(default)]
+    flashblock_receipt_proofs: bool,
     unsafe_block_evidence_url: Option<String>,
     block_uncompressed_size_limit: Option<u64>,
     #[builder(default = Arc::new(CHAIN_SPEC.clone()))]
@@ -245,24 +247,7 @@ impl WorldChainTestBuilder {
             + Copy
             + 'static,
     {
-        setup_inner::<T, G>(
-            self.nodes,
-            attributes_generator,
-            self.tx_peers,
-            self.disable_gossip,
-            self.flashblocks,
-            self.access_list,
-            self.admin_rpc,
-            self.http_api,
-            self.ws_rpc,
-            self.shared_rpc_port,
-            self.preconfirmed_logs,
-            self.flashblock_evidence,
-            self.unsafe_block_evidence_url,
-            self.block_uncompressed_size_limit,
-            self.chain_spec,
-        )
-        .await
+        setup_inner::<T, G>(self, attributes_generator).await
     }
 }
 
@@ -347,21 +332,8 @@ where
 }
 
 async fn setup_inner<T, G>(
-    num_nodes: u8,
+    config: WorldChainTestBuilder,
     attributes_generator: G,
-    enable_tx_peers: bool,
-    disable_gossip: bool,
-    flashblocks_enabled: bool,
-    access_list: bool,
-    admin_rpc: bool,
-    http_api: Option<RpcModuleSelection>,
-    ws_rpc: bool,
-    shared_rpc_port: bool,
-    preconfirmed_logs: bool,
-    flashblock_evidence: bool,
-    unsafe_block_evidence_url: Option<String>,
-    block_uncompressed_size_limit: Option<u64>,
-    chain_spec: Arc<WorldChainSpec>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -378,6 +350,23 @@ where
         + Copy
         + 'static,
 {
+    let WorldChainTestBuilder {
+        nodes: num_nodes,
+        tx_peers: enable_tx_peers,
+        disable_gossip,
+        flashblocks: flashblocks_enabled,
+        access_list,
+        admin_rpc,
+        http_api,
+        ws_rpc,
+        shared_rpc_port,
+        preconfirmed_logs,
+        flashblock_evidence,
+        flashblock_receipt_proofs,
+        unsafe_block_evidence_url,
+        block_uncompressed_size_limit,
+        chain_spec,
+    } = config;
     unsafe {
         std::env::set_var("PRIVATE_KEY", DEV_WORLD_ID.to_string());
     }
@@ -460,6 +449,7 @@ where
         let mut config = config;
         config.args.preconfirmed_logs = preconfirmed_logs;
         config.args.flashblock_evidence = flashblock_evidence;
+        config.args.flashblock_receipt_proofs = flashblock_receipt_proofs;
         config.args.unsafe_block_evidence_url = unsafe_block_evidence_url.clone();
         config.args.builder.block_uncompressed_size_limit = block_uncompressed_size_limit;
         if ws_rpc && !shared_rpc_port {
