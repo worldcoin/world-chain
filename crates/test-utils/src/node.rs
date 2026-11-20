@@ -1,6 +1,6 @@
 use crate::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
-    utils::{pbh_bundle, pbh_multicall, signer, user_op},
+    utils::{pbh_bundle, pbh_multicall, pbh_test_signer, signer, user_op},
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -84,7 +84,7 @@ pub fn test_config_with_peers_and_gossip(
     let builder = BuilderArgs {
         signer_config: None,
         enabled: true,
-        private_key: Some(signer(6)),
+        private_key: Some(pbh_test_signer()),
         block_uncompressed_size_limit: None,
     };
 
@@ -98,6 +98,7 @@ pub fn test_config_with_peers_and_gossip(
     let flashblocks = if flashblocks_enabled {
         Some(FlashblocksArgs {
             signer_config: None,
+            authorizer_signer_config: None,
             enabled: true,
             override_authorizer_sk: None,
             authorizer_vk: SigningKey::from(&[0; 32]).verifying_key().into(),
@@ -124,6 +125,7 @@ pub fn test_config_with_peers_and_gossip(
     WorldChainNodeConfig {
         pbh_wallet: builder.wallet().expect("test wallet"),
         publication_signer: None,
+        grant_signer: None,
         args: WorldChainArgs {
             rollup,
             builder,
@@ -135,6 +137,7 @@ pub fn test_config_with_peers_and_gossip(
             simulate_enabled: false,
             preconfirmed_logs: false,
             flashblock_evidence: false,
+            flashblock_receipt_proofs: false,
             unsafe_block_evidence_url: None,
         },
         builder_config: FlashblocksPayloadBuilderConfig {

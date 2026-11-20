@@ -309,7 +309,7 @@ jsonrpsee-types = "0.26.0"
 # metrics
 metrics = "0.24.6"
 metrics-derive = "0.1"
-telemetry-batteries = "0.3"
+telemetry-batteries = "0.4.1"
 
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-util = "0.7.15"
@@ -351,6 +351,7 @@ hyper = { version = "1.11", default-features = false, features = ["client", "htt
 hyper-util = { version = "0.1.20", default-features = false, features = ["tokio"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
+k256 = { version = "0.14.0", default-features = false, features = ["ecdsa"] }
 zeroize = "1.9"
 sqlx = { version = "0.9.0", default-features = false, features = [
     "runtime-tokio",

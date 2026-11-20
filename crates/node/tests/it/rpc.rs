@@ -1,6 +1,6 @@
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, B256, Bytes, Sealed, TxKind, U256, keccak256};
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus, PayloadStatusEnum};
 use eyre::eyre::{WrapErr, eyre};
 use jsonrpsee::{
     core::client::{ClientT, Error as RpcError, SubscriptionClientT},
@@ -8,7 +8,7 @@ use jsonrpsee::{
 };
 use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth_optimism_node::OpEngineTypes;
-use reth_rpc_api::Web3ApiClient;
+use reth_rpc_api::{EngineApiClient, Web3ApiClient};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -17,6 +17,10 @@ use world_chain_node::{
     version::{
         WORLD_CHAIN_CLIENT_NAME, WORLD_CHAIN_CLIENT_VERSION, WORLD_CHAIN_CLIENT_VERSION_SHA,
     },
+};
+use world_chain_primitives::{
+    evidence::{FlashblockEvidence, FlashblockEvidenceId},
+    receipt_proof::{FlashblockReceiptProof, FlashblockReceipts, verify_log},
 };
 use world_chain_rpc::engine::FlashblocksEngineApiExtClient;
 use world_chain_test_utils::{
@@ -450,6 +454,7 @@ async fn preconfirmed_registered_logs_stream_and_resume() -> eyre::Result<()> {
         .flashblocks(true)
         .preconfirmed_logs(true)
         .flashblock_evidence(true)
+        .flashblock_receipt_proofs(true)
         .ws_rpc(true)
         .build()
         .setup::<WorldChainDefaultContext>()
@@ -498,7 +503,7 @@ async fn preconfirmed_registered_logs_stream_and_resume() -> eyre::Result<()> {
         fcu.payload_status.status,
         PayloadStatusEnum::Valid
     ));
-    assert!(fcu.payload_id.is_some());
+    let payload_id = fcu.payload_id.ok_or_else(|| eyre!("missing payload ID"))?;
 
     // Poll an actual follower's validated receipt feed rather than injecting RPC-store state.
     let snapshot = tokio::time::timeout(Duration::from_secs(5), async {
@@ -558,6 +563,112 @@ async fn preconfirmed_registered_logs_stream_and_resume() -> eyre::Result<()> {
         .rpc
         .request("eth_sendRawTransaction", rpc_params![event_tx])
         .await?;
+    let notification = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let notification = subscription
+                .next()
+                .await
+                .ok_or_else(|| eyre!("subscription closed before the Registered event"))??;
+            assert_eq!(notification["type"], "update");
+            if !response_logs(&notification["result"]).is_empty() {
+                break Ok::<_, eyre::Report>(notification);
+            }
+        }
+    })
+    .await
+    .wrap_err("timed out waiting for the follower's Registered log notification")??;
+    let view = &notification["result"]["view"];
+    let id = FlashblockEvidenceId {
+        payload_id: serde_json::from_value(view["payloadId"].clone())?,
+        index: serde_json::from_value(view["flashblockIndex"].clone())?,
+        block_hash: serde_json::from_value(view["blockHash"].clone())?,
+    };
+    let local = nodes[0]
+        .node
+        .rpc_client()
+        .ok_or_else(|| eyre!("builder RPC unavailable"))?;
+    let evidence: FlashblockEvidence = http
+        .request("worldchain_getFlashblockEvidence", rpc_params![id])
+        .await?;
+    for original in [
+        ws.request::<FlashblockEvidence, _>("worldchain_getFlashblockEvidence", rpc_params![id])
+            .await?,
+        local
+            .request::<FlashblockEvidence, _>("worldchain_getFlashblockEvidence", rpc_params![id])
+            .await?,
+    ] {
+        assert_eq!(original, evidence);
+    }
+
+    let head: Value = http
+        .request("eth_getBlockByNumber", rpc_params!["latest", false])
+        .await?;
+    assert_eq!(head["hash"], json!(parent_hash));
+    let capabilities: Vec<String> = ws
+        .request("op_supportedCapabilities", rpc_params![])
+        .await?;
+    assert!(
+        capabilities
+            .iter()
+            .any(|item| item == world_chain_primitives::receipt_proof::CAPABILITY)
+    );
+    let proof = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match http
+                .request::<FlashblockReceiptProof, _>(
+                    "worldchain_getFlashblockReceiptProof",
+                    rpc_params![id, tx_hash],
+                )
+                .await
+            {
+                Ok(proof) => return Ok(proof),
+                Err(RpcError::Call(err))
+                    if err.code() == -32082
+                        && err
+                            .data()
+                            .is_some_and(|data| data.get().contains("\"notRetained\"")) => {}
+                Err(err) => return Err(err),
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .wrap_err("waiting for the exact executed receipt proof")??;
+    let receipt = proof.verify_receipt(
+        &evidence,
+        chain_spec.chain.id(),
+        builder.authorizer_vk,
+        id,
+        tx_hash,
+    )?;
+    let registered = alloy_primitives::Log {
+        address: emitter,
+        data: alloy_primitives::LogData::new(topics.to_vec(), Bytes::new())
+            .ok_or_else(|| eyre!("too many event topics"))?,
+    };
+    verify_log(&receipt, 0, &registered)?;
+    verify_log(&receipt, 1, &registered)?;
+    let complete: FlashblockReceipts = ws
+        .request("worldchain_getFlashblockReceipts", rpc_params![id])
+        .await?;
+    let receipts = complete.verify(&evidence, chain_spec.chain.id(), builder.authorizer_vk, id)?;
+    assert!(matches!(
+        receipts.first(),
+        Some(op_alloy_consensus::OpReceiptEnvelope::Deposit(_))
+    ));
+    assert_eq!(receipts[usize::try_from(proof.transaction_index)?], receipt);
+    let streamed_logs = response_logs(&notification["result"]);
+    assert_eq!(streamed_logs.len(), 2);
+    assert_ne!(streamed_logs[0]["eventId"], streamed_logs[1]["eventId"]);
+    for (index, log) in streamed_logs.iter().enumerate() {
+        assert_eq!(log["address"], json!(emitter));
+        assert_eq!(log["topics"], json!(topics));
+        assert_eq!(log["data"], "0x");
+        assert_eq!(log["transactionHash"], json!(tx_hash));
+        assert_eq!(log["logIndex"], json!(format!("0x{index:x}")));
+        assert_eq!(log["removed"], false);
+        assert!(log["eventId"].as_str().is_some());
+    }
     let reverted_tx = raw_tx(
         0,
         eip1559()
@@ -575,62 +686,6 @@ async fn preconfirmed_registered_logs_stream_and_resume() -> eyre::Result<()> {
         .rpc
         .request("eth_sendRawTransaction", rpc_params![reverted_tx])
         .await?;
-    let notification = tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            let notification = subscription
-                .next()
-                .await
-                .ok_or_else(|| eyre!("subscription closed before the Registered event"))??;
-            assert_eq!(notification["type"], "update");
-            if !response_logs(&notification["result"]).is_empty() {
-                break Ok::<_, eyre::Report>(notification);
-            }
-        }
-    })
-    .await
-    .wrap_err("timed out waiting for the follower's Registered log notification")??;
-    let view = &notification["result"]["view"];
-    let id = world_chain_primitives::evidence::FlashblockEvidenceId {
-        payload_id: serde_json::from_value(view["payloadId"].clone())?,
-        index: serde_json::from_value(view["flashblockIndex"].clone())?,
-        block_hash: serde_json::from_value(view["blockHash"].clone())?,
-    };
-    let local = nodes[0]
-        .node
-        .rpc_client()
-        .ok_or_else(|| eyre!("builder RPC unavailable"))?;
-    for evidence in [
-        http.request::<world_chain_primitives::evidence::FlashblockEvidence, _>(
-            "worldchain_getFlashblockEvidence",
-            rpc_params![id],
-        )
-        .await?,
-        ws.request::<world_chain_primitives::evidence::FlashblockEvidence, _>(
-            "worldchain_getFlashblockEvidence",
-            rpc_params![id],
-        )
-        .await?,
-        local
-            .request::<world_chain_primitives::evidence::FlashblockEvidence, _>(
-                "worldchain_getFlashblockEvidence",
-                rpc_params![id],
-            )
-            .await?,
-    ] {
-        evidence.verify(chain_spec.chain.id(), builder.authorizer_vk, id)?;
-    }
-    let streamed_logs = response_logs(&notification["result"]);
-    assert_eq!(streamed_logs.len(), 2);
-    assert_ne!(streamed_logs[0]["eventId"], streamed_logs[1]["eventId"]);
-    for (index, log) in streamed_logs.iter().enumerate() {
-        assert_eq!(log["address"], json!(emitter));
-        assert_eq!(log["topics"], json!(topics));
-        assert_eq!(log["data"], "0x");
-        assert_eq!(log["transactionHash"], json!(tx_hash));
-        assert_eq!(log["logIndex"], json!(format!("0x{index:x}")));
-        assert_eq!(log["removed"], false);
-        assert!(log["eventId"].as_str().is_some());
-    }
     let reverted_receipt = tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let receipt: Option<Value> = http
@@ -690,6 +745,93 @@ async fn preconfirmed_registered_logs_stream_and_resume() -> eyre::Result<()> {
     assert!(
         response_logs(&replay).is_empty(),
         "cumulative Flashblocks must not repeat the event"
+    );
+    let new_id = FlashblockEvidenceId {
+        payload_id: serde_json::from_value(snapshot["view"]["payloadId"].clone())?,
+        index: serde_json::from_value(snapshot["view"]["flashblockIndex"].clone())?,
+        block_hash: serde_json::from_value(snapshot["view"]["blockHash"].clone())?,
+    };
+    assert!(new_id.index > id.index);
+    let (original, newer) = tokio::try_join!(
+        http.request::<FlashblockReceiptProof, _>(
+            "worldchain_getFlashblockReceiptProof",
+            rpc_params![id, tx_hash],
+        ),
+        ws.request::<FlashblockReceiptProof, _>(
+            "worldchain_getFlashblockReceiptProof",
+            rpc_params![new_id, tx_hash],
+        ),
+    )?;
+    assert_eq!(original, proof);
+    assert_eq!(newer.id, new_id);
+
+    let payload = EngineApiClient::<OpEngineTypes>::get_payload_v5(&engine, payload_id).await?;
+    let full_hash = payload
+        .execution_payload
+        .payload_inner
+        .payload_inner
+        .payload_inner
+        .block_hash;
+    let follower_engine = env.node_clients[1].engine.http_client();
+    let status: PayloadStatus = follower_engine
+        .request(
+            "engine_newPayloadV4",
+            rpc_params![
+                payload.execution_payload,
+                Vec::<B256>::new(),
+                payload.parent_beacon_block_root,
+                Vec::<Bytes>::new()
+            ],
+        )
+        .await?;
+    assert!(matches!(status.status, PayloadStatusEnum::Valid));
+    let fcu = EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
+        &follower_engine,
+        ForkchoiceState {
+            head_block_hash: full_hash,
+            safe_block_hash: parent_hash,
+            finalized_block_hash: parent_hash,
+        },
+        None,
+    )
+    .await?;
+    assert!(matches!(
+        fcu.payload_status.status,
+        PayloadStatusEnum::Valid
+    ));
+    let head: Value = http
+        .request("eth_getBlockByNumber", rpc_params!["latest", false])
+        .await?;
+    assert_eq!(head["hash"], json!(full_hash));
+    let canonical_receipt: Value = http
+        .request("eth_getTransactionReceipt", rpc_params![tx_hash])
+        .await?;
+    assert_eq!(canonical_receipt["blockHash"], json!(full_hash));
+    assert_eq!(
+        canonical_receipt["logs"]
+            .as_array()
+            .expect("canonical logs")
+            .len(),
+        receipt.logs().len()
+    );
+    for (canonical, signed) in canonical_receipt["logs"]
+        .as_array()
+        .expect("canonical logs")
+        .iter()
+        .zip(receipt.logs())
+    {
+        assert_eq!(canonical["address"], json!(signed.address));
+        assert_eq!(canonical["topics"], json!(signed.data.topics()));
+        assert_eq!(canonical["data"], json!(signed.data.data));
+    }
+    assert_rpc_error(
+        http.request::<FlashblockReceiptProof, _>(
+            "worldchain_getFlashblockReceiptProof",
+            rpc_params![id, tx_hash],
+        )
+        .await
+        .expect_err("advanced canonical head must fence the old proof view"),
+        -32082,
     );
     tokio::time::timeout(Duration::from_secs(2), subscription.unsubscribe()).await??;
     Ok(())

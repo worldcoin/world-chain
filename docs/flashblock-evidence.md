@@ -89,3 +89,79 @@ requested selector. Monitor `worldchain.evidence.captured`, `capture_rejections`
 `evictions`, `lookups`, `retained_bytes` and `retained_entries` with the
 `worldchain.evidence.` prefix. Configure ordinary RPC concurrency/rate limits
 before broad exposure; response serialization has a cost even for cached data.
+
+## Receipt and transaction proofs
+
+Opt in with `--rpc.flashblock-receipt-proofs` in addition to
+`--rpc.flashblock-evidence`. On each HTTP or WebSocket listener that includes
+`eth`, `op_supportedCapabilities` then includes
+`worldchain_flashblock_receipt_proofs_v1`. The proof methods are unavailable on
+IPC. Enable them on an intended listener or explicitly allowlisted proxy route.
+
+Fetch the signed evidence and the proof using the same immutable selector. For
+example, use the `payloadId`, `flashblockIndex` (as `index`), and `blockHash`
+from the `view` of a preconfirmed-log response.
+
+| Method | Positional parameters | V1 result |
+| --- | --- | --- |
+| `worldchain_getFlashblockReceiptProof` | `[id, transactionHash]` | `version`, `id`, RLP `header`, numeric `transactionIndex`, encoded `transaction` and `receipt`, and the `transactionProof` and `receiptProof` arrays of RLP nodes from root to leaf. |
+| `worldchain_getFlashblockReceipts` | `[id]` | `version`, `id`, RLP `header`, and all encoded `receipts` in transaction order. |
+
+Binary fields are hex strings. Transactions and receipts use their canonical
+EIP-2718 trie bytes. OP deposit receipts reflect the active receipt-root rules,
+including omission of the deposit nonce during Regolith before Canyon. Both trie
+proofs use the same RLP-encoded transaction index. The consumer hashes the
+header to match the signed block hash and checks the header receipt root against
+the signed delta. The transaction hash is derived from the proved transaction
+bytes.
+
+The log commitment covers the address, ordered topics, data, and ordinal within
+the receipt. An RPC cursor, event ID, global log index, and removal status are
+feed metadata. Equal logs at different ordinals remain distinct. A single
+inclusion proof authenticates the selected log. To check completeness, verify all
+ordered receipts against the signed root and apply the filter locally. The
+complete receipt result identifies receipts by index. Use the transaction proof
+for a claimed transaction hash.
+
+Save each JSON-RPC `result` object separately. Supply the expected view and
+the separately trusted network authorizer key that was active when the frame was
+signed. Keep previous public keys with their network and activation intervals to
+verify archived evidence after rotation. The verifier requires an explicit key.
+
+```sh
+cargo run --locked -p world-chain-primitives --example verify-flashblock-receipts -- \
+  log evidence.json proof.json "$TRUSTED_AUTHORIZER_HEX" "$CHAIN_ID" \
+  "$PAYLOAD_ID" "$INDEX" "$BLOCK_HASH" "$TX_HASH" "$RECEIPT_ORDINAL" log.json
+
+cargo run --locked -p world-chain-primitives --example verify-flashblock-receipts -- \
+  complete evidence.json receipts.json "$TRUSTED_AUTHORIZER_HEX" "$CHAIN_ID" \
+  "$PAYLOAD_ID" "$INDEX" "$BLOCK_HASH" "$ADDRESS" "$TOPIC0"
+```
+
+`log.json` contains only `address`, `topics`, and `data`. The
+`complete` command prints every match for the supplied address and first topic
+after verifying the full receipt root. Omission or reordering changes the root.
+
+Proofs require both a retained signed frame and an execution-validated view. A
+node can serve earlier indices of the same payload while it remains current.
+A canonical head change or payload replacement can make an in-flight lookup
+unavailable. Signed proof bundles can be verified offline after cache expiry or
+a reorg. Check the full-chain receipt separately before treating a provisional
+event as canonical or final.
+
+There is a separate cache for proofs with up to 64 retained views, 64 MiB of
+encoded data and index entries, and a 60-second lookup lifetime from validation.
+One capture task encodes views. Each view is limited to 16,384 transactions and
+8 MiB of total encoded header, transaction and receipt bytes. Up to two proof
+requests perform trie work concurrently. Each response is bounded, including a
+maximum of 8 MiB of binary data for complete receipts and a little over 16 MiB
+for an inclusion proof with its transaction and receipt repeated in the nodes.
+Allow 33 MiB of JSON response size to support the full proof and evidence
+budgets. Smaller transport limits can reject otherwise valid large results.
+
+Error `-32082` identifies the proof selector and a bounded reason. The evidence
+availability reasons above also apply to proofs. Additional reasons include
+`replaced` (the view left the current payload or canonical checkpoint),
+`transactionNotFound`, `limitExceeded`, `rootMismatch`,
+`inconsistentExecution`, `busy`, and `unavailable`. A `notRetained`
+proof can also mean the proof worker has yet to capture that validated view.

@@ -479,7 +479,8 @@ where
                     Duration::from_millis(flashblocks_interval),
                     Duration::from_millis(flashblocks_recommit_interval),
                 )
-                .with_signing_deadlines(signing_deadlines),
+                .with_signing_deadlines(signing_deadlines)
+                .with_grant_signer(self.config.grant_signer.clone()),
             )
             .network(wc_network_builder)
             .consensus(OpConsensusBuilder::default())
@@ -544,6 +545,7 @@ where
             self.config.args.simulate_enabled,
             self.config.args.preconfirmed_logs,
             self.config.args.unsafe_block_evidence_url.clone(),
+            self.config.args.flashblock_receipt_proofs,
             self.components_context
                 .as_ref()
                 .and_then(|ctx| ctx.flashblocks_handle.ctx.evidence.clone()),

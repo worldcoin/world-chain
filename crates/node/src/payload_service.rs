@@ -37,6 +37,7 @@ pub struct FlashblocksPayloadServiceBuilder<PB> {
     interval: Duration,
     recommitment_interval: Duration,
     signing_deadlines: Option<SigningDeadlines>,
+    grant_signer: Option<world_chain_signer::GrantSigner>,
 }
 
 impl<PB> FlashblocksPayloadServiceBuilder<PB> {
@@ -61,11 +62,17 @@ impl<PB> FlashblocksPayloadServiceBuilder<PB> {
             interval,
             recommitment_interval,
             signing_deadlines: None,
+            grant_signer: None,
         }
     }
 
     pub fn with_signing_deadlines(mut self, deadlines: Option<SigningDeadlines>) -> Self {
         self.signing_deadlines = deadlines;
+        self
+    }
+
+    pub fn with_grant_signer(mut self, signer: Option<world_chain_signer::GrantSigner>) -> Self {
+        self.grant_signer = signer;
         self
     }
 }
@@ -124,7 +131,8 @@ where
                 self.force_publish,
                 flashblocks_state.clone(),
             )
-            .with_signing_deadlines(self.signing_deadlines);
+            .with_signing_deadlines(self.signing_deadlines)
+            .with_grant_signer(self.grant_signer);
 
             let (payload_service, payload_service_handle) = PayloadBuilderService::new(
                 payload_generator,

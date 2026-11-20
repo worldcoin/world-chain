@@ -12,8 +12,6 @@ workspace = true
 alloy-consensus = { workspace = true, features = ["secp256k1"] }
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-network.workspace = true
-alloy-signer-local.workspace = true
 blake3.workspace = true
 bytes.workspace = true
 ed25519-dalek.workspace = true
@@ -22,6 +20,7 @@ http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
+k256.workspace = true
 metrics.workspace = true
 metrics-derive.workspace = true
 rustls.workspace = true

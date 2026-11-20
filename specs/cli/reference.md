@@ -141,7 +141,7 @@ Block Builder:
       --builder.private-key <PRIVATE_KEY>
           Private key for the builder used to update PBH nullifiers
           
-          [env: BUILDER_PRIVATE_KEY=]
+          [env: BUILDER_PRIVATE_KEY]
 
       --builder.signer-config <builder.signer-config>
           PBH remote signer JSON configuration, including mTLS and expected address
@@ -171,6 +171,11 @@ Flashblocks:
           Remote publisher JSON configuration, including mTLS and expected key
           
           [env: FLASHBLOCKS_SIGNER_CONFIG=]
+
+      --flashblocks.authorizer-signer-config <flashblocks.authorizer-signer-config>
+          Remote in-process grant signer JSON, with an independently pinned authorizer key
+          
+          [env: FLASHBLOCKS_AUTHORIZER_SIGNER_CONFIG=]
 
       --flashblocks.override-authorizer-sk <OVERRIDE_AUTHORIZER_SK>
           Override incoming authorizations from rollup boost
@@ -286,6 +291,11 @@ Flashblocks:
           Retain bounded signed Flashblock evidence and expose its read-only RPC lookup
           
           [env: WORLD_CHAIN_FLASHBLOCK_EVIDENCE=]
+
+      --rpc.flashblock-receipt-proofs
+          Expose bounded receipt and transaction proofs for signed, execution-validated Flashblocks
+          
+          [env: WORLD_CHAIN_FLASHBLOCK_RECEIPT_PROOFS=]
 
       --rpc.unsafe-block-evidence-url <UNSAFE_BLOCK_EVIDENCE_URL>
           Forward only unsafe-block evidence RPCs to this replica's paired op-node

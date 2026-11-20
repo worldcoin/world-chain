@@ -1,9 +1,9 @@
-use alloy_signer_local::PrivateKeySigner;
-use clap::ArgGroup;
+use clap::{Arg, ArgGroup, Command, builder::TypedValueParser, error::ErrorKind};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use hex::FromHex;
 use reth_network_peers::TrustedPeer;
-use std::path::PathBuf;
+use std::{ffi::OsStr, path::PathBuf};
+use world_chain_signer::LocalPbhSigner;
 
 use crate::cli::p2p::FanoutArgs;
 
@@ -31,10 +31,12 @@ pub struct BuilderArgs {
         long = "builder.private-key",
         alias = "builder.private_key",
         env = "BUILDER_PRIVATE_KEY",
+        hide_env_values = true,
+        value_parser = LocalPbhKeyParser,
         requires = "builder.enabled",
         conflicts_with = "builder.signer-config"
     )]
-    pub private_key: Option<PrivateKeySigner>,
+    pub private_key: Option<LocalPbhSigner>,
 
     /// PBH remote signer JSON configuration, including mTLS and expected address.
     #[arg(
@@ -52,6 +54,28 @@ pub struct BuilderArgs {
         env = "BUILDER_BLOCK_UNCOMPRESSED_SIZE_LIMIT"
     )]
     pub block_uncompressed_size_limit: Option<u64>,
+}
+
+#[derive(Clone)]
+struct LocalPbhKeyParser;
+
+impl TypedValueParser for LocalPbhKeyParser {
+    type Value = LocalPbhSigner;
+
+    fn parse_ref(
+        &self,
+        cmd: &Command,
+        _: Option<&Arg>,
+        value: &OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        value
+            .to_str()
+            .and_then(|value| value.parse().ok())
+            .ok_or_else(|| {
+                clap::Error::raw(ErrorKind::ValueValidation, "invalid local PBH private key")
+                    .with_cmd(cmd)
+            })
+    }
 }
 
 impl BuilderArgs {
@@ -124,6 +148,10 @@ pub struct FlashblocksArgs {
     /// Remote publisher JSON configuration, including mTLS and expected key.
     #[arg(long = "flashblocks.signer-config", id = "flashblocks.signer-config", env = "FLASHBLOCKS_SIGNER_CONFIG", requires = "flashblocks.enabled", conflicts_with_all = ["builder_sk", "override_authorizer_sk", "force_publish"])]
     pub signer_config: Option<PathBuf>,
+
+    /// Remote in-process grant signer JSON, with an independently pinned authorizer key.
+    #[arg(long = "flashblocks.authorizer-signer-config", id = "flashblocks.authorizer-signer-config", env = "FLASHBLOCKS_AUTHORIZER_SIGNER_CONFIG", requires_all = ["flashblocks.signer-config", "authorizer_vk"], conflicts_with_all = ["override_authorizer_sk", "force_publish"])]
+    pub authorizer_signer_config: Option<PathBuf>,
 
     /// Override incoming authorizations from rollup boost.
     #[arg(
@@ -315,15 +343,14 @@ mod tests {
             "0x01".to_owned(),
             "not-a-key".to_owned(),
         ] {
-            assert!(
-                BuilderCommandParser::try_parse_from([
-                    "bin",
-                    "--builder.enabled",
-                    "--builder.private-key",
-                    &input,
-                ])
-                .is_err()
-            );
+            let error = BuilderCommandParser::try_parse_from([
+                "bin",
+                "--builder.enabled",
+                "--builder.private-key",
+                &input,
+            ])
+            .expect_err("invalid PBH private key");
+            assert!(!error.to_string().contains(&input));
         }
     }
 
@@ -337,6 +364,7 @@ mod tests {
     fn flashblocks_override_authorizer() {
         let flashblocks = FlashblocksArgs {
             signer_config: None,
+            authorizer_signer_config: None,
             enabled: true,
             override_authorizer_sk: Some(SigningKey::from_bytes(&[0; 32])),
             authorizer_vk: None,
@@ -373,6 +401,7 @@ mod tests {
     fn flashblocks_authorizer() {
         let flashblocks = FlashblocksArgs {
             signer_config: None,
+            authorizer_signer_config: None,
             enabled: true,
             override_authorizer_sk: None,
             authorizer_vk: Some(VerifyingKey::from_bytes(&[0; 32]).unwrap()),

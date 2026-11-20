@@ -16,6 +16,7 @@ use reth_primitives_traits::SignedTransaction;
 use semaphore_rs::{Field, hash_to_field, identity::Identity, poseidon_tree::LazyPoseidonTree};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{str::FromStr, sync::LazyLock};
+use world_chain_signer::LocalPbhSigner;
 
 use world_chain_pbh::{
     external_nullifier::{EncodedExternalNullifier, ExternalNullifier},
@@ -71,6 +72,10 @@ pub fn signer(index: u32) -> PrivateKeySigner {
         .expect("Failed to set index")
         .build()
         .expect("Failed to create signer")
+}
+
+pub fn pbh_test_signer() -> LocalPbhSigner {
+    LocalPbhSigner::from_bytes(&signer(6).to_bytes().0).expect("valid PBH fixture key")
 }
 
 pub fn account(index: u32) -> Address {

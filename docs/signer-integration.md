@@ -28,9 +28,9 @@ OP batcher pairing and shared-load qualification are tracked separately.
 | PBH wallet | `eth_signTransaction` | Canonical signed type-2 bytes, every original unsigned field, low-S signature and independently configured recovered address |
 
 These are outbound operations, not new public World Chain RPC methods.
-The node normally receives authorizer grants from rollup-boost. `GrantSigner`
-is available for conformance/integration; protected node mode does not create or
-override grants. Payload/start/stop encodings and existing signature preimages
+The node normally receives authorizer grants from rollup-boost. A sequencer can
+instead request grants through `--flashblocks.authorizer-signer-config` using
+its separately enrolled authorizer credential. Payload/start/stop encodings and existing signature preimages
 are unchanged. Existing Ed25519 preimages contain no chain ID: enroll separate
 network keys, identities and policies. Peer identity keys and proof-result keys
 remain separate; see [proof signing boundaries](proof/signing-boundaries.md).
@@ -42,8 +42,8 @@ local key or remote configuration. Nodes without either hold no PBH signer and
 fail explicitly if asked to sign a nullifier transaction. There is no embedded
 default PBH private key or fallback after a remote failure.
 
-Protected mode is enabled by `--builder.signer-config`. To publish Flashblocks,
-also supply `--flashblocks.signer-config`:
+Either remote signer option enables protected mode. For PBH and publication,
+supply both signer configurations:
 
 ```sh
 world-chain node --builder.enabled \
@@ -56,7 +56,35 @@ For a custom chain, additionally configure its explicit authorizer verifying key
 Protected mode rejects local PBH/publisher keys, authorizer overrides and
 force-publish, including conflicting environment variables. Remote PBH can run
 with Flashblocks disabled or receiving only. A remote publisher requires remote
-PBH signing. Receive-only nodes need no publisher signing credentials.
+PBH signing when `--builder.enabled` is set. Receive-only nodes need no publisher
+signing credentials.
+
+For publication on a network with PBH disabled, omit the PBH builder and its
+credentials and set zero reserved capacity explicitly:
+
+```sh
+world-chain node --flashblocks.enabled \
+  --flashblocks.signer-config /run/secrets/publisher-signer.json \
+  --flashblocks.authorizer-vk "$REVIEWED_AUTHORIZER_PUBLIC_KEY" \
+  --pbh.verified-blockspace-capacity 0
+```
+
+This mode creates no PBH wallet. To obtain in-process grants, additionally supply
+`--flashblocks.authorizer-signer-config /run/secrets/grant-signer.json`. It uses
+the same JSON schema as the publisher below, with its own authorizer credential
+and key ID. Its expected public key must match the explicit
+`--flashblocks.authorizer-vk` pin. Without that option, grants still come from
+the external producer. Zero capacity does not permit local keys or force-publish.
+
+The signer policy/lease issuer must authorize the elected sequencer and enrolled
+publisher for that network; Engine JWT possession and health checks do not prove
+leadership. The job reserves its publishing generation before grant I/O. Resolve,
+drop, deadline, a newer local intent or an accepted peer handover cancels that
+generation, so a late grant cannot reactivate it. Grant failures disable optional
+publication for the job while execution continues, with no local/external grant
+fallback. A pending grant does not delay execution or advance the Flashblock
+index. Derived `noTxPool` jobs do not request grants. Network-specific policy,
+leadership transfer, actual peers, Nitro and recovery still require qualification.
 
 PBH JSON:
 

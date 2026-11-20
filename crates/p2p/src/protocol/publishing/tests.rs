@@ -119,6 +119,244 @@ async fn expired_results_cannot_grant_clearance_or_commit_a_payload() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires the reviewed disposable mTLS signer harness"]
+async fn remote_grants_fence_superseded_stopped_and_denied_jobs() {
+    let harness = runtime::Harness::start().await;
+    let handle = FlashblocksHandle::with_publisher(
+        SigningKey::from_bytes(&[7; 32]).verifying_key(),
+        Some(Publisher::Remote(
+            world_chain_signer::PublicationSigner::new(harness.ed25519(false, "publisher"))
+                .expect("publisher"),
+        )),
+        Default::default(),
+        None,
+    );
+    let mut frames = peer(&handle);
+    let signer = world_chain_signer::GrantSigner::new(harness.ed25519(true, "authorizer"))
+        .expect("grant signer");
+    assert!(matches!(
+        handle.request_grant_until(
+            signer.clone(),
+            authorization(10).payload_id,
+            10,
+            tokio::time::Instant::now()
+        ),
+        Err(FlashblocksP2PError::Signing(
+            world_chain_signer::Error::Deadline
+        ))
+    ));
+    let wrong_pin = world_chain_signer::GrantSigner::new(harness.ed25519(false, "authorizer"))
+        .expect("different expected identity");
+    assert!(matches!(
+        handle.request_grant_until(
+            wrong_pin,
+            authorization(10).payload_id,
+            10,
+            runtime::deadline()
+        ),
+        Err(FlashblocksP2PError::InvalidControlMessage)
+    ));
+    let first = handle
+        .request_grant_until(
+            signer.clone(),
+            authorization(10).payload_id,
+            10,
+            runtime::deadline(),
+        )
+        .expect("first grant intent");
+    let second = handle
+        .request_grant_until(
+            signer.clone(),
+            authorization(11).payload_id,
+            11,
+            runtime::deadline(),
+        )
+        .expect("newer grant intent");
+    assert!(matches!(
+        first.await,
+        Err(FlashblocksP2PError::StaleControlMessage)
+    ));
+    assert_eq!(handle.state.lock().pending_start_timestamp, Some(11));
+    assert!(matches!(
+        handle.prepare_peer_start(PeerId::random(), authorization(10)),
+        Err(FlashblocksP2PError::ExpiredAuthorization)
+    ));
+    let (auth, lease) = second.await.expect("verified latest grant");
+    assert_eq!(auth, authorization(11));
+    auth.verify(handle.ctx.authorizer_vk)
+        .expect("pinned grant identity");
+    tokio::time::timeout_at(runtime::deadline(), handle.await_authorized_clearance(auth))
+        .await
+        .expect("bounded start")
+        .expect("publication clearance");
+    let frame = tokio::time::timeout_at(runtime::deadline(), frames.recv())
+        .await
+        .expect("bounded frame")
+        .expect("signed start");
+    let FlashblocksP2PMsg::Authorized(start) =
+        FlashblocksP2PMsg::decode(&mut frame.as_ref()).expect("peer frame")
+    else {
+        panic!("authorized start")
+    };
+    assert_eq!(start.authorization, auth);
+    let rejected = handle.request_grant_until(
+        signer.clone(),
+        PayloadId::new([99; 8]),
+        auth.timestamp,
+        runtime::deadline(),
+    );
+    assert!(
+        !lease.scope.is_cancelled(),
+        "a rejected same-slot rebuild must preserve the active publisher"
+    );
+    assert!(matches!(
+        rejected,
+        Err(FlashblocksP2PError::StaleControlMessage)
+    ));
+    assert_publishing(&handle, auth);
+    let (same, renewed) = handle
+        .request_grant_until(
+            signer.clone(),
+            auth.payload_id,
+            auth.timestamp,
+            runtime::deadline(),
+        )
+        .expect("same-grant refresh intent")
+        .await
+        .expect("same grant stays usable");
+    assert_eq!(same, auth);
+    assert!(
+        lease.scope.is_cancelled(),
+        "same-grant refresh still owns a new generation"
+    );
+    drop(lease);
+    assert_publishing(&handle, auth);
+    drop(renewed);
+    assert!(matches!(
+        handle.publishing_status(),
+        PublishingStatus::NotPublishing { .. }
+    ));
+
+    let stopped = handle
+        .request_grant_until(
+            signer.clone(),
+            authorization(12).payload_id,
+            12,
+            runtime::deadline(),
+        )
+        .expect("pending grant");
+    handle
+        .stop_publishing()
+        .expect("fence pending grant before I/O");
+    assert!(matches!(
+        stopped.await,
+        Err(FlashblocksP2PError::StaleControlMessage)
+    ));
+    let abandoned = handle
+        .request_grant_until(
+            signer,
+            authorization(13).payload_id,
+            13,
+            runtime::deadline(),
+        )
+        .expect("abandoned grant");
+    let scope = handle.state.lock().pending_start.clone();
+    drop(abandoned);
+    assert!(scope.is_cancelled(), "unpolled future owns its reservation");
+
+    let denied = world_chain_signer::GrantSigner::new(harness.ed25519(true, "publisher"))
+        .expect("wrong-role credentials");
+    let result = handle
+        .request_grant_until(
+            denied,
+            authorization(14).payload_id,
+            14,
+            runtime::deadline(),
+        )
+        .expect("denied intent")
+        .await;
+    assert!(matches!(result, Err(FlashblocksP2PError::Signing(_))));
+    assert!(matches!(
+        handle.publishing_status(),
+        PublishingStatus::NotPublishing { .. }
+    ));
+    let signer = world_chain_signer::GrantSigner::new(harness.ed25519(true, "authorizer"))
+        .expect("grant signer");
+    let scope = {
+        let mut state = handle.state.lock();
+        state.payload_timestamp = 20;
+        state.payload_id = PayloadId::new([20; 8]);
+        state.pending_start.clone()
+    };
+    assert!(matches!(
+        handle.request_grant_until(signer, PayloadId::new([99; 8]), 20, runtime::deadline()),
+        Err(FlashblocksP2PError::StaleControlMessage)
+    ));
+    assert_eq!(
+        scope,
+        handle.state.lock().pending_start,
+        "a conflicting cached payload cannot reserve a generation"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the reviewed disposable mTLS signer harness"]
+async fn remote_grant_response_is_cancelled_before_it_can_start_publication() {
+    use std::sync::atomic::Ordering;
+    let harness = runtime::Harness::start().await;
+    let (config, paused, held, relay) =
+        hold_signer_responses(harness.ed25519(true, "authorizer")).await;
+    let signer = world_chain_signer::GrantSigner::new(config).expect("proxied grant signer");
+    signer
+        .health(runtime::deadline())
+        .await
+        .expect("authenticated grant transport");
+    paused.store(true, Ordering::Release);
+    let handle = FlashblocksHandle::with_publisher(
+        SigningKey::from_bytes(&[7; 32]).verifying_key(),
+        Some(Publisher::Remote(
+            world_chain_signer::PublicationSigner::new(harness.ed25519(false, "publisher"))
+                .expect("publisher"),
+        )),
+        Default::default(),
+        None,
+    );
+    let mut frames = peer(&handle);
+    let pending = handle
+        .request_grant_until(
+            signer,
+            authorization(10).payload_id,
+            10,
+            runtime::deadline(),
+        )
+        .expect("grant intent");
+    let request = tokio::spawn(pending);
+    tokio::time::timeout_at(runtime::deadline(), held.notified())
+        .await
+        .expect("grant response held");
+    handle.stop_publishing().expect("fence in-flight grant");
+    assert!(matches!(
+        tokio::time::timeout_at(runtime::deadline(), request)
+            .await
+            .expect("bounded cancellation")
+            .expect("grant task"),
+        Err(FlashblocksP2PError::StaleControlMessage)
+    ));
+    tokio::time::timeout_at(runtime::deadline(), relay)
+        .await
+        .expect("caller cancellation closes the TLS relay")
+        .expect("relay task");
+    assert!(
+        frames.try_recv().is_err(),
+        "a stopped grant cannot broadcast StartPublish"
+    );
+    assert!(matches!(
+        handle.publishing_status(),
+        PublishingStatus::NotPublishing { .. }
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the reviewed disposable mTLS signer harness"]
 async fn remote_controls_payload_denial_and_inflight_stop_preserve_publishing_boundaries() {
     use crate::protocol::handler::Publisher;
     use world_chain_signer::PublicationSigner;
@@ -319,13 +557,61 @@ async fn remote_controls_payload_denial_and_inflight_stop_preserve_publishing_bo
 }
 
 async fn in_flight_control_is_cancelled_on_stop(harness: &runtime::Harness, auth: Authorization) {
+    use std::sync::atomic::Ordering;
+    let (config, paused, held, relay) =
+        hold_signer_responses(harness.ed25519(false, "publisher")).await;
+    let client =
+        world_chain_signer::PublicationSigner::new(config).expect("proxied mTLS publisher");
+    client
+        .health(runtime::deadline())
+        .await
+        .expect("authenticate before pausing output");
+    paused.store(true, Ordering::Release);
+    let handle = FlashblocksHandle::with_publisher(
+        SigningKey::from_bytes(&[7; 32]).verifying_key(),
+        Some(Publisher::Remote(client)),
+        Default::default(),
+        None,
+    );
+    let mut rx = peer(&handle);
+    let lease = handle
+        .start_publishing_until(auth, runtime::deadline())
+        .expect("pending start");
+    tokio::time::timeout_at(runtime::deadline(), held.notified())
+        .await
+        .expect("real signed response held before delivery");
+    handle
+        .stop_publishing()
+        .expect("stop does not wait for remote response");
+    assert!(matches!(
+        handle.publishing_status(),
+        PublishingStatus::NotPublishing { .. }
+    ));
+    tokio::time::timeout_at(runtime::deadline(), relay)
+        .await
+        .expect("cancelled remote connection terminates")
+        .expect("relay task");
+    assert!(
+        rx.try_recv().is_err(),
+        "late signed start must not be broadcast"
+    );
+    drop(lease);
+}
+
+async fn hold_signer_responses(
+    mut config: world_chain_signer::config::Ed25519Config,
+) -> (
+    world_chain_signer::config::Ed25519Config,
+    Arc<std::sync::atomic::AtomicBool>,
+    Arc<tokio::sync::Notify>,
+    tokio::task::JoinHandle<()>,
+) {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
         sync::Notify,
     };
-    let mut config = harness.ed25519(false, "publisher");
     let upstream = (
         config
             .connection
@@ -371,42 +657,7 @@ async fn in_flight_control_is_cancelled_on_stop(harness: &runtime::Harness, auth
         };
         tokio::select! { result=forward=>{result.expect("caller cancellation closes relay");}, result=reverse=>{result.expect("TLS relay");} }
     });
-    let client =
-        world_chain_signer::PublicationSigner::new(config).expect("proxied mTLS publisher");
-    client
-        .health(runtime::deadline())
-        .await
-        .expect("authenticate before pausing output");
-    paused.store(true, Ordering::Release);
-    let handle = FlashblocksHandle::with_publisher(
-        SigningKey::from_bytes(&[7; 32]).verifying_key(),
-        Some(Publisher::Remote(client)),
-        Default::default(),
-        None,
-    );
-    let mut rx = peer(&handle);
-    let lease = handle
-        .start_publishing_until(auth, runtime::deadline())
-        .expect("pending start");
-    tokio::time::timeout_at(runtime::deadline(), held.notified())
-        .await
-        .expect("real signed response held before delivery");
-    handle
-        .stop_publishing()
-        .expect("stop does not wait for remote response");
-    assert!(matches!(
-        handle.publishing_status(),
-        PublishingStatus::NotPublishing { .. }
-    ));
-    tokio::time::timeout_at(runtime::deadline(), relay)
-        .await
-        .expect("cancelled remote connection terminates")
-        .expect("relay task");
-    assert!(
-        rx.try_recv().is_err(),
-        "late signed start must not be broadcast"
-    );
-    drop(lease);
+    (config, paused, held, relay)
 }
 
 fn handle() -> FlashblocksHandle {

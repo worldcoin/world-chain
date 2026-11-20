@@ -14,6 +14,12 @@ on:
         description: Release version (for example, 2.4.1 or v2.4.1)
         required: true
         type: string
+      prepared_release_id:
+        description: Existing staged draft release ID (required from v2.9.0)
+        type: string
+      prepared_manifest_sha256:
+        description: Independently reviewed release-manifest.json SHA-256
+        type: string
 
 concurrency:
   group: release
@@ -33,12 +39,129 @@ permissions:
   id-token: write
 
 jobs:
+  validate-mode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Validate release mode
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          PREPARED_RELEASE_ID: ${{ inputs.prepared_release_id }}
+          PREPARED_MANIFEST_SHA256: ${{ inputs.prepared_manifest_sha256 }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          version = os.environ['INPUT_VERSION'].removeprefix('v')
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?', version):
+              raise SystemExit('Invalid release version')
+          identifier, digest = os.environ['PREPARED_RELEASE_ID'], os.environ['PREPARED_MANIFEST_SHA256']
+          if identifier:
+              if os.environ['GITHUB_REF'] != 'refs/heads/main':
+                  raise SystemExit('Dispatch the prepared-assets workflow from main')
+              if not re.fullmatch(r'[1-9][0-9]{0,19}', identifier) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+                  raise SystemExit('Prepared mode requires a numeric draft ID and approved manifest SHA-256')
+              source = os.environ['INPUT_REF']
+              if not re.fullmatch(r'[0-9a-f]{40}', source) or source == '0' * 40:
+                  raise SystemExit('Prepared mode requires a full immutable source commit')
+          elif digest or tuple(map(int, version.split('-')[0].split('.'))) >= (2, 9, 0):
+              raise SystemExit('v2.9.0 and later require the qualified prepared-assets path')
+          PY
+
   approve-release:
+    if: inputs.prepared_release_id == ''
+    needs: validate-mode
     name: approve release
     runs-on: ubuntu-latest
     environment: release
     steps:
       - run: true
+
+  prepared-release:
+    name: sign prepared distribution draft
+    if: inputs.prepared_release_id != ''
+    needs: validate-mode
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PREPARED_RELEASE_ID: ${{ inputs.prepared_release_id }}
+      PREPARED_MANIFEST_SHA256: ${{ inputs.prepared_manifest_sha256 }}
+      INPUT_VERSION: ${{ inputs.version }}
+      INPUT_REF: ${{ inputs.ref }}
+      DOCUMENTATION_COMMIT: ${{ github.workflow_sha }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve the reviewed source and changes
+        run: |
+          source_commit=$(git rev-parse --verify --end-of-options "${INPUT_REF}^{commit}")
+          version="v${INPUT_VERSION#v}"
+          manifest_version=$(git cat-file blob "${source_commit}:Cargo.toml" | sed -n 's/^version = "\([^"]*\)"/\1/p')
+          test "${version#v}" = "$manifest_version"
+          if git show-ref --verify --quiet "refs/tags/$version"; then
+            test "$(git rev-parse "refs/tags/${version}^{commit}")" = "$source_commit"
+          fi
+          echo "SOURCE_COMMIT=$source_commit" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          previous=$(git describe --tags --match 'v*' --abbrev=0 "${source_commit}^" 2>/dev/null || true)
+          range="${previous:+$previous..}$source_commit"
+          git log --no-show-signature --pretty=format:'- %s' "$range" > prepared-changes.md
+      - name: Verify every asset and published OCI binding
+        timeout-minutes: 40
+        run: |
+          python3 .github/scripts/distribution-prepared.py \
+            --release-id "$PREPARED_RELEASE_ID" --manifest-sha256 "$PREPARED_MANIFEST_SHA256" \
+            --version "$VERSION" --source-commit "$SOURCE_COMMIT" \
+            --output prepared --changes prepared-changes.md --documentation-commit "$DOCUMENTATION_COMMIT"
+      - name: Sign verified assets with the established release identity
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          test ! -e prepared/INCOMPLETE
+          umask 077
+          export GNUPGHOME
+          GNUPGHOME=$(mktemp -d)
+          cleanup() {
+            local cleanup_status=$?
+            gpgconf --kill gpg-agent || cleanup_status=1
+            rm -rf -- "$GNUPGHOME" || cleanup_status=1
+            return "$cleanup_status"
+          }
+          trap cleanup EXIT
+          printf '%s' "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
+          fingerprint=C75FBC64E9D48E89FB60418B8949B352D0422E74
+          gpg --batch --list-secret-keys --with-colons "$fingerprint" > "$GNUPGHOME/identity"
+          grep -q "^fpr:::::::::$fingerprint:" "$GNUPGHOME/identity"
+          while IFS= read -r asset; do
+            printf '%s' "$GPG_PASSPHRASE" | gpg --batch --pinentry-mode loopback \
+              --passphrase-fd 0 --local-user "$fingerprint" --armor --detach-sign "prepared/$asset"
+            gpg --batch --verify "prepared/$asset.asc" "prepared/$asset"
+          done < prepared/release-files.txt
+      - name: Attach signatures and approved-format notes to the draft
+        timeout-minutes: 15
+        run: |
+          python3 .github/scripts/distribution-prepared.py --check-draft \
+            --release-id "$PREPARED_RELEASE_ID" --manifest-sha256 "$PREPARED_MANIFEST_SHA256" \
+            --version "$VERSION" --source-commit "$SOURCE_COMMIT" --output prepared
+          signatures=()
+          while IFS= read -r asset; do signatures+=("prepared/$asset.asc"); done < prepared/release-files.txt
+          timeout 10m gh release upload "$VERSION" "${signatures[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          python3 .github/scripts/distribution-prepared.py --verify-uploaded \
+            --release-id "$PREPARED_RELEASE_ID" --manifest-sha256 "$PREPARED_MANIFEST_SHA256" \
+            --version "$VERSION" --source-commit "$SOURCE_COMMIT" --output prepared
+          timeout 2m gh release edit "$VERSION" --notes-file prepared/release-notes.md --repo "$GITHUB_REPOSITORY"
+      - name: Remove local prepared assets
+        if: always()
+        run: rm -rf -- prepared prepared-changes.md
 
   prepare-release:
     name: prepare release

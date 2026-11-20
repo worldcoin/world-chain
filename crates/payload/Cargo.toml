@@ -12,6 +12,7 @@ world-chain-builder.workspace = true
 world-chain-validator.workspace = true
 world-chain-p2p.workspace = true
 world-chain-chainspec.workspace = true
+world-chain-signer.workspace = true
 
 # reth
 reth-basic-payload-builder.workspace = true
@@ -43,6 +44,5 @@ alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 tempfile.workspace = true
 url.workspace = true
-world-chain-signer.workspace = true
 ed25519-dalek.workspace = true
 serde_json.workspace = true
