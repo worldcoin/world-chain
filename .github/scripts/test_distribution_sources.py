@@ -64,9 +64,9 @@ class SourceExportTest(unittest.TestCase):
             return None
         self.fail(f"Unexpected Git fixture command: {args}")
 
-    def package(self):
+    def package(self, *, private_review=False):
         with patch.object(sources, "source_nodes", return_value=self.nodes), patch.object(sources, "git", side_effect=self.fake_git):
-            return sources.package(self.inputs, self.root, self.root, [], self.build, self.output)
+            return sources.package(self.inputs, self.root, self.root, [], self.build, self.output, private_review=private_review)
 
     def test_export_preserves_blobs_modes_inputs_guides_and_reproducibility(self):
         (self.root / "untracked.env").write_text("Synthetic untracked sentinel")
@@ -101,6 +101,14 @@ class SourceExportTest(unittest.TestCase):
         self.assertEqual(receipt, self.package())
         for path in first.iterdir():
             self.assertEqual(path.read_bytes(), (self.output / path.name).read_bytes())
+
+    def test_private_review_exports_carry_the_hold_in_both_archives(self):
+        receipt = self.package(private_review=True)
+        self.assertEqual(len(receipt["assets"]), 2)
+        for name in receipt["assets"]:
+            archive = self.output / name
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "private publication review"):
+                sources.release.verify_zip_inputs(archive, self.inputs)
 
     def test_invalid_materials_and_existing_output_fail_without_overwriting(self):
         original = self.build

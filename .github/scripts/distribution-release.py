@@ -143,6 +143,9 @@ def verify_zip_inputs(path, inputs):
             raise ValueError("ZIP must contain one bounded release-metadata/sources.json")
         with archive.open(matches[0]) as source:
             metadata = parse_record(source.read(MAX_RECORD_BYTES + 1))
+        selection = metadata.get("export_selection")
+        if isinstance(selection, dict) and selection.get("requires_publication_review") is True:
+            raise ValueError("ZIP is marked for private publication review")
         if "inputs" not in metadata:
             raise ValueError("ZIP metadata must bind the exact assembly inputs")
         distribution.release_plan(metadata["inputs"])

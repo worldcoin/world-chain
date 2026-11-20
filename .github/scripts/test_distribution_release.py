@@ -51,9 +51,9 @@ class ReleaseFinalizationTest(unittest.TestCase):
             self.write_zip(path, self.inputs)
         self.output = self.root / "release"
 
-    def write_zip(self, path, inputs):
+    def write_zip(self, path, inputs, **metadata):
         with zipfile.ZipFile(path, "w") as archive:
-            archive.writestr("release-metadata/sources.json", json.dumps({"inputs": inputs}))
+            archive.writestr("release-metadata/sources.json", json.dumps({"inputs": inputs, **metadata}))
             archive.writestr("README.md", "Synthetic test export; no source/runtime qualification.\n")
 
     def finalize(self):
@@ -130,6 +130,16 @@ class ReleaseFinalizationTest(unittest.TestCase):
         with self.assertRaises(zipfile.BadZipFile):
             self.finalize()
         self.assertTrue((self.output / "INCOMPLETE").exists())
+
+    def test_archive_marked_for_private_review_is_rejected_without_directory_marker(self):
+        for path in (self.sources, self.examples):
+            self.write_zip(path, self.inputs, export_selection={"requires_publication_review": True})
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "private publication review"):
+                release.verify_zip_inputs(path, self.inputs)
+        with self.assertRaisesRegex(ValueError, "private publication review"):
+            self.finalize()
+        self.assertTrue((self.output / "INCOMPLETE").exists())
+        self.assertFalse((self.output / "release-manifest.json").exists())
 
     def test_duplicate_and_missing_members_are_rejected(self):
         plan = release.distribution.release_plan(self.inputs)
