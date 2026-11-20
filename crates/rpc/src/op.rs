@@ -10,6 +10,7 @@ const FLASHBLOCKS_CAPABILITY: &str = "flashblocksv1";
 pub struct FlashblocksOpApi {
     preconfirmed_logs: bool,
     flashblock_evidence: bool,
+    flashblock_receipt_proofs: bool,
 }
 
 impl FlashblocksOpApi {
@@ -17,7 +18,13 @@ impl FlashblocksOpApi {
         Self {
             preconfirmed_logs,
             flashblock_evidence: false,
+            flashblock_receipt_proofs: false,
         }
+    }
+
+    pub const fn with_flashblock_receipt_proofs(mut self, enabled: bool) -> Self {
+        self.flashblock_receipt_proofs = enabled;
+        self
     }
 
     pub const fn with_flashblock_evidence(mut self, enabled: bool) -> Self {
@@ -42,6 +49,9 @@ impl OpApiExtServer for FlashblocksOpApi {
         if self.flashblock_evidence {
             capabilities
                 .push(world_chain_primitives::evidence::FLASHBLOCK_EVIDENCE_CAPABILITY.to_string());
+        }
+        if self.flashblock_receipt_proofs {
+            capabilities.push(world_chain_primitives::receipt_proof::CAPABILITY.to_string());
         }
         Ok(capabilities)
     }

@@ -92,6 +92,15 @@ pub struct WorldChainArgs {
     )]
     pub flashblock_evidence: bool,
 
+    /// Expose bounded receipt and transaction proofs for signed, execution-validated Flashblocks.
+    #[arg(
+        long = "rpc.flashblock-receipt-proofs",
+        env = "WORLD_CHAIN_FLASHBLOCK_RECEIPT_PROOFS",
+        requires = "flashblock_evidence",
+        default_value_t = false
+    )]
+    pub flashblock_receipt_proofs: bool,
+
     /// Forward only unsafe-block evidence RPCs to this replica's paired op-node.
     #[arg(
         long = "rpc.unsafe-block-evidence-url",
@@ -190,6 +199,9 @@ impl WorldChainArgs {
         }
         if self.flashblock_evidence && self.flashblocks.as_ref().is_none_or(|args| !args.enabled) {
             bail!("--rpc.flashblock-evidence requires --flashblocks.enabled");
+        }
+        if self.flashblock_receipt_proofs && !self.flashblock_evidence {
+            bail!("--rpc.flashblock-receipt-proofs requires --rpc.flashblock-evidence");
         }
         if self.unsafe_block_evidence_url.is_some() {
             eyre::eyre::ensure!(
@@ -1112,6 +1124,7 @@ mod tests {
             simulate_enabled: false,
             preconfirmed_logs: false,
             flashblock_evidence: false,
+            flashblock_receipt_proofs: false,
             unsafe_block_evidence_url: None,
         };
 
@@ -1156,6 +1169,29 @@ mod tests {
             ])
             .world
             .flashblock_evidence
+        );
+    }
+
+    #[test]
+    fn receipt_proofs_require_explicit_enablement_and_signed_evidence() {
+        let args = ["bin", "--flashblocks.enabled", "--rpc.flashblock-evidence"];
+        assert!(
+            !CommandParser::parse_from(args)
+                .world
+                .flashblock_receipt_proofs
+        );
+        assert!(
+            CommandParser::try_parse_from([
+                "bin",
+                "--flashblocks.enabled",
+                "--rpc.flashblock-receipt-proofs",
+            ])
+            .is_err()
+        );
+        assert!(
+            CommandParser::parse_from(args.into_iter().chain(["--rpc.flashblock-receipt-proofs"]),)
+                .world
+                .flashblock_receipt_proofs
         );
     }
 

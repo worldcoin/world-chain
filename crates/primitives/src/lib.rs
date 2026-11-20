@@ -7,6 +7,7 @@ pub mod flashblocks;
 pub mod p2p;
 pub mod payload_id;
 pub mod primitives;
+pub mod receipt_proof;
 pub mod tracing;
 
 #[cfg(test)]
