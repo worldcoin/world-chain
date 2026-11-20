@@ -165,6 +165,9 @@ def package(inputs, payload_root, output, epoch):
             executable = relative.parts[0] == "bin"
             hashes[relative.as_posix()] = snapshot_file(
                 payload_root / slug / relative, snapshot / relative, executable, platform)
+        # Docker copies directory modes into the image, which runs as a non-root user.
+        for directory in {parent for relative in files for parent in relative.parents}:
+            (snapshot / directory).chmod(0o755)
         metadata = snapshot / "distribution-inputs.json"
         metadata.write_bytes(json_bytes(inputs))
         metadata.chmod(0o644)
