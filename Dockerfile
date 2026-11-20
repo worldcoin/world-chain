@@ -120,13 +120,13 @@ FROM distribution-tools AS distribution-world-chain
 COPY --from=qualified-payload --chmod=0755 /bin/world-chain /bin/cast /usr/local/bin/
 COPY --from=qualified-payload /licenses/ /usr/share/licenses/world-chain/
 COPY --from=qualified-payload /distribution-inputs.json /usr/share/world-chain/distribution-inputs.json
-COPY scripts/* /usr/local/bin/
+COPY --chmod=0755 scripts/build-eif.sh scripts/snapshot.sh /usr/local/bin/
 RUN case "$TARGETARCH" in amd64) machine=62 ;; arm64) machine=183 ;; *) exit 1 ;; esac && \
   for name in world-chain cast; do \
     test "$(od -An -tx1 -N6 /usr/local/bin/$name | tr -d ' \n')" = 7f454c460201 && \
     test "$(od -An -tu2 -j18 -N2 /usr/local/bin/$name)" -eq "$machine" || \
     { echo "Invalid ELF for $TARGETARCH: $name" >&2; exit 1; }; \
-  done && chmod +x /usr/local/bin/*.sh && world-chain --version && cast --version
+  done && world-chain --version && cast --version
 EXPOSE 30303 30303/udp 9001 8545 8546
 USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/world-chain"]
@@ -156,11 +156,11 @@ ENTRYPOINT ["/usr/local/bin/op-node"]
 FROM distribution-op AS distribution-combined
 USER 0
 COPY --from=qualified-payload --chmod=0755 /bin/world-chain /usr/local/bin/
-COPY scripts/* /usr/local/bin/
+COPY --chmod=0755 scripts/build-eif.sh scripts/snapshot.sh /usr/local/bin/
 RUN case "$TARGETARCH" in amd64) machine=62 ;; arm64) machine=183 ;; *) exit 1 ;; esac && \
   test "$(od -An -tx1 -N6 /usr/local/bin/world-chain | tr -d ' \n')" = 7f454c460201 && \
   test "$(od -An -tu2 -j18 -N2 /usr/local/bin/world-chain)" -eq "$machine" && \
-  chmod +x /usr/local/bin/*.sh && world-chain --version
+  world-chain --version
 EXPOSE 30303 30303/udp 9001 8545 8546
 USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/world-chain"]
@@ -173,9 +173,7 @@ COPY --from=builder /app/target/${PROFILE}/${WORLD_CHAIN_BUILDER_BIN} /usr/local
 
 COPY --from=builder /root/.foundry/bin/cast /usr/local/bin/
 
-COPY scripts/* /usr/local/bin
-
-RUN chmod +x /usr/local/bin/*.sh
+COPY --chmod=0755 scripts/build-eif.sh scripts/snapshot.sh /usr/local/bin/
 
 RUN cast --version
 
