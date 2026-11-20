@@ -49,6 +49,8 @@ class SourceExportTest(unittest.TestCase):
 
     def fake_git(self, repo, *args, input=None, stdout=subprocess.PIPE):
         if args[0] == "show":
+            if repo == self.root / "optimism":
+                return b"1700000002\n"
             return b"1700000001\n"
         if args[:2] == ("cat-file", "blob"):
             return next(data for data in self.data.values() if oid(data) == args[2])
@@ -78,6 +80,9 @@ class SourceExportTest(unittest.TestCase):
             with zipfile.ZipFile(self.output / name) as archive:
                 metadata = json.loads(archive.read("release-metadata/sources.json"))
                 self.assertNotIn("repository", metadata["sources"][0])
+                self.assertEqual({node["prefix"]: node["commit_timestamp"] for node in metadata["sources"]},
+                                 {"world-chain": 1700000001, "optimism": 1700000002})
+                self.assertEqual(metadata["source_date_epoch"], 1700000001)
                 self.assertEqual(metadata["build_materials"], self.build["materials"])
                 index = json.loads(archive.read("release-metadata/files.json"))
                 self.assertEqual(set(index) | {"release-metadata/sources.json", "release-metadata/files.json"}, set(archive.namelist()))

@@ -56,22 +56,86 @@ native architecture qualification still use the final release artifacts.
 
 ## Existing OP component recipes from our fork
 
-From the selected maintained Optimism source tree, with the selected op-node
-Worldchain version in `OP_NODE_VERSION`:
+### Go services from a source ZIP
+
+Use the selected source root for each service. The qualified v2.9.0 Go
+programs use Go 1.26.11. The older pinned OP component Dockerfiles select
+different Go versions, so use the component's Just recipe with the qualified
+compiler for source ZIP builds of `op-node`, `op-batcher`, `op-proposer`,
+`op-conductor`, `op-challenger` and `op-dispute-mon`.
+
+Start in the directory where you extracted the source ZIP, outside an existing
+Git checkout. Install Mise, jq, Bash and Info-ZIP. The exported OP source
+includes the pinned superchain registry submodule, and the sync script checks
+the generated registry bundle against its committed SHA-256.
+
+```sh
+set -eu
+component=op-node
+arch=arm64 # or amd64
+metadata=release-metadata/sources.json
+commit=$(jq -er --arg c "$component" '.inputs.components[$c].build_commit // .inputs.sources.optimism' "$metadata")
+version=$(jq -er --arg c "$component" '.inputs.components[$c].version' "$metadata")
+common=$(jq -er '.inputs.sources.optimism' "$metadata")
+source_root=optimism
+if [ "$commit" != "$common" ]; then
+  source_root="component-sources/$component"
+fi
+commit_date=$(jq -er --arg p "$source_root" --arg c "$commit" \
+  '.sources[] | select(.prefix == $p and .commit == $c) | .commit_timestamp' "$metadata")
+
+(
+  cd "$source_root"
+  export GOTOOLCHAIN=go1.26.11 GOFLAGS="-mod=readonly -p=4" TZ=UTC
+  if [ "$component" != op-node ]; then
+    GOFLAGS="$GOFLAGS -trimpath"
+  fi
+  mise x yq@4.53.6 -- bash op-core/superchain/bundle/sync-superchain.sh
+  GOOS=linux GOARCH="$arch" TARGETOS=linux TARGETARCH="$arch" \
+    GITCOMMIT="$commit" GITDATE="$commit_date" VERSION="$version" \
+    mise x just@1.46.0 go@1.26.11 -- just --justfile "$component/justfile" "$component"
+  mise x go@1.26.11 -- go version -m "$component/bin/$component"
+)
+```
+
+Check the embedded Go version, target architecture and linker identity. The
+qualified op-node build retained build paths, and the five other qualified Go
+service builds recorded automatic VCS metadata from Git checkouts. A rebuild
+from this source ZIP can differ in those fields. Compare the SHA-256 before
+treating the bytes as interchangeable. Assemble release images from the frozen
+qualified payload.
+
+For `op-deployer`, use the separately pinned deployer source with the
+matching Foundry and solc versions. Compile the embedded contracts with
+`op-deployer/scripts/build-embedded-contracts.sh` and create the embedded
+`artifacts.tzst` with the recipe in that tree's Dockerfile. Verify the
+embedded archive against the reviewed build materials and regenerate the
+superchain registry bundle in that source root before running the
+`op-deployer/justfile` `build-go` recipe with the matching source identity
+and toolchain. For multicannon, use the reviewed platform-specific historical
+imports and verify their digests before building the current Cannon embed
+and wrapper. Kona-host has a separate pinned Rust/Cargo build recipe.
+
+### Reference Docker targets
+
+For a Git checkout at the selected maintained Optimism source and with
+`OP_NODE_VERSION` set to the selected version:
 
 ```sh
 docker buildx build --platform linux/amd64 --load \
   --file ops/docker/op-stack-go/Dockerfile --target op-node-target \
   --build-arg "OP_NODE_VERSION=${OP_NODE_VERSION:?Set the selected OP component version}" \
   --build-arg "GIT_COMMIT=$(git rev-parse HEAD)" \
-  --build-arg "GIT_DATE=$(git show -s --format=%ct HEAD)" \
+  --build-arg "GIT_DATE=$(git show --no-show-signature -s --format=%ct HEAD)" \
   --tag op-node:local .
 docker run --rm --entrypoint /usr/local/bin/op-node op-node:local --version
 ```
 
-For an exported source ZIP, use the fork commit and commit time from the release
-metadata instead of the two `git` substitutions. Each component's version comes
-from its own upstream base, not the bundle version.
+The Docker targets below document the upstream recipe entry points. Select
+the exact recipe and compiler from the reviewed build materials. A
+`GO_VERSION=1.26.11` build argument only works on a recipe that declares it,
+such as the maintained fork's compiler-selection change in OP #27. Component
+versions follow their individual upstream bases.
 
 | Component | Existing Docker target | Version build argument |
 | --- | --- | --- |
@@ -190,8 +254,9 @@ of file contents, 512 MiB per blob and a submodule depth of 16.
 
 The two ZIPs preserve file/executable/symlink modes and deterministic timestamps
 from the World Chain source commit. Each contains `release-metadata/sources.json`
-with the exact inputs, source trees/gitlinks and producer materials, plus a file
-index containing Git IDs, sizes and SHA-256s. The examples ZIP includes committed
+with the exact inputs, source trees/gitlinks, build-root commit timestamps and
+producer materials, plus a file index containing Git IDs, sizes and SHA-256s.
+The examples ZIP includes committed
 `examples/distribution/` files and their linked local Markdown guides. Source-file
 links use the corresponding source ZIP. Local checkout paths are excluded from
 source metadata.
