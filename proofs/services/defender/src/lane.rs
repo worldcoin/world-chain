@@ -267,6 +267,14 @@ fn proof_request(game: &GameMetadata, backend: ProofBackend) -> ProofRequest {
 }
 
 /// Selects the backend field passed verbatim to the on-chain lane verifier.
+///
+/// The two lanes intentionally submit different fields:
+/// - `Sp1` forwards the opaque zk proof blob consumed verbatim by its verifier.
+/// - `Nitro` forwards only the enclave signature: the on-chain verifier checks it
+///   against `keccak256(abi.encode(TransitionPublicValues))`, and the game
+///   reconstructs those public values from its own state (`_transition()`), so the
+///   defender neither transports nor re-encodes them. See #945 (and the #941 review
+///   thread) for the original question.
 fn verifier_payload(proof: &ProofData) -> Bytes {
     match proof {
         ProofData::Sp1 { proof, .. } => proof.clone(),

@@ -174,5 +174,4 @@ by deploying/activating a new game implementation.
 The devnet repository orchestrates these settings before `just setup <network>`.
 Safe mode pauses with exit status 75 and prints the file to approve. Execute it in
 Safe, then use `just resume-setup <network>`; resume never resets the OP Stack state.
-See [the full reset runbook](../../docs/proof/devnet-reset.md) for both modes.
 Existing proof parameters and mock bond tokens remain development settings.

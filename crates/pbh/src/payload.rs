@@ -79,7 +79,7 @@ pub enum PBHValidationError {
 /// The payload of a PBH transaction
 ///
 /// Contains the semaphore proof and relevant metadata
-/// required to to verify the pbh transaction.
+/// required to verify the pbh transaction.
 #[derive(Default, Clone, Debug, RlpEncodable, RlpDecodable, PartialEq, Eq)]
 pub struct PBHPayload {
     /// A string containing a prefix, the date marker, and the pbh nonce
