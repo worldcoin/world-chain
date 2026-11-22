@@ -1,10 +1,10 @@
 use crate::{
     Error, Result,
-    config::PbhConfig,
+    config::{PbhConfig, SigningTransport},
     ed25519::HexBytes,
-    transport::{Method, TRANSACTION_BODY, Transport, decode_hex},
+    transport::{Method, TRANSACTION_BODY, Transport, encode_binary_request, encode_request},
 };
-use alloy_consensus::{TxEip1559, TxEnvelope, transaction::SignerRecoverable};
+use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope, transaction::SignerRecoverable};
 use alloy_eips::{Decodable2718, Encodable2718, eip2930::AccessList};
 use alloy_primitives::{Address, Signature, TxKind};
 use serde::Serialize;
@@ -47,35 +47,56 @@ impl PbhSigner {
         self.transport.health(deadline).await
     }
     pub async fn sign(&self, transaction: &TxEip1559, deadline: Instant) -> Result<Signature> {
-        if transaction.input.len() > TRANSACTION_BODY / 2 {
-            return Err(Error::TooLarge("transaction calldata"));
-        }
         let TxKind::Call(to) = transaction.to else {
             return Err(Error::Config("PBH contract creation is not supported"));
         };
-        let request = TransactionRequest {
-            from: self.expected,
-            to,
-            gas: format!("0x{:x}", transaction.gas_limit),
-            nonce: format!("0x{:x}", transaction.nonce),
-            chain_id: format!("0x{:x}", transaction.chain_id),
-            value: format!("0x{:x}", transaction.value),
-            max_fee_per_gas: format!("0x{:x}", transaction.max_fee_per_gas),
-            max_priority_fee_per_gas: format!("0x{:x}", transaction.max_priority_fee_per_gas),
-            input: HexBytes(&transaction.input),
-            access_list: &transaction.access_list,
-        };
+        let method = Method::Transaction;
         self.transport
-            .call(Method::Transaction, Some(&request), deadline, |value| {
-                verify_transaction(value, transaction, self.expected)
-            })
+            .sign(
+                method,
+                deadline,
+                |wire, id| match wire {
+                    SigningTransport::JsonRpc => {
+                        if transaction.input.len() > TRANSACTION_BODY / 2 {
+                            return Err(Error::TooLarge("transaction calldata"));
+                        }
+                        encode_request(
+                            method,
+                            id,
+                            Some(&TransactionRequest {
+                                from: self.expected,
+                                to,
+                                gas: format!("0x{:x}", transaction.gas_limit),
+                                nonce: format!("0x{:x}", transaction.nonce),
+                                chain_id: format!("0x{:x}", transaction.chain_id),
+                                value: format!("0x{:x}", transaction.value),
+                                max_fee_per_gas: format!("0x{:x}", transaction.max_fee_per_gas),
+                                max_priority_fee_per_gas: format!(
+                                    "0x{:x}",
+                                    transaction.max_priority_fee_per_gas
+                                ),
+                                input: HexBytes(&transaction.input),
+                                access_list: &transaction.access_list,
+                            }),
+                        )
+                    }
+                    SigningTransport::Binary => {
+                        let payload_len =
+                            Address::len_bytes() + transaction.payload_len_for_signature();
+                        encode_binary_request(method, id, payload_len, |body| {
+                            body.extend_from_slice(self.expected.as_slice());
+                            transaction.encode_for_signing(body);
+                        })
+                    }
+                },
+                |value| verify_transaction(value, transaction, self.expected),
+            )
             .await
     }
 }
 
-fn verify_transaction(value: &str, expected: &TxEip1559, address: Address) -> Result<Signature> {
-    let raw = decode_hex(value, TRANSACTION_BODY)?;
-    let mut bytes = raw.as_slice();
+fn verify_transaction(raw: &[u8], expected: &TxEip1559, address: Address) -> Result<Signature> {
+    let mut bytes = raw;
     let envelope = TxEnvelope::decode_2718(&mut bytes)
         .map_err(|_| Error::InvalidResponse("invalid signed transaction"))?;
     if !bytes.is_empty() || envelope.encoded_2718() != raw {
@@ -103,6 +124,7 @@ fn verify_transaction(value: &str, expected: &TxEip1559, address: Address) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transport::decode_hex;
     use serde::Deserialize;
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -130,10 +152,10 @@ mod tests {
             };
             let tx = signed.tx();
             assert_eq!(
-                verify_transaction(&vector.signed_transaction, tx, corpus.signer),
+                verify_transaction(&bytes, tx, corpus.signer),
                 Ok(*signed.signature())
             );
-            assert!(verify_transaction(&vector.signed_transaction, tx, Address::ZERO).is_err());
+            assert!(verify_transaction(&bytes, tx, Address::ZERO).is_err());
             for field in 0..9 {
                 let mut changed = tx.clone();
                 match field {
@@ -147,14 +169,11 @@ mod tests {
                     7 => changed.input = vec![1].into(),
                     _ => changed.access_list.0.push(Default::default()),
                 }
-                assert!(
-                    verify_transaction(&vector.signed_transaction, &changed, corpus.signer)
-                        .is_err()
-                );
+                assert!(verify_transaction(&bytes, &changed, corpus.signer).is_err());
             }
-            assert!(
-                verify_transaction(&(vector.signed_transaction + "00"), tx, corpus.signer).is_err()
-            );
+            let mut trailing = bytes;
+            trailing.push(0);
+            assert!(verify_transaction(&trailing, tx, corpus.signer).is_err());
         }
     }
 }

@@ -1,7 +1,10 @@
 use crate::{
     Error, Result,
-    config::Ed25519Config,
-    transport::{AUTHORIZATION_RLP, Method, PUBLICATION_RLP, Transport, decode_hex},
+    config::{Ed25519Config, SigningTransport},
+    transport::{
+        AUTHORIZATION_RLP, Method, PUBLICATION_RLP, Transport, encode_binary_request,
+        encode_request,
+    },
 };
 use alloy_primitives::{B256, FixedBytes};
 use ed25519_dalek::{Signature, VerifyingKey};
@@ -42,9 +45,8 @@ fn verifying_key(config: &Ed25519Config) -> Result<VerifyingKey> {
     Ok(key)
 }
 
-fn verify(key: &VerifyingKey, digest: &blake3::Hash, value: &str) -> Result<Signature> {
-    let bytes = decode_hex(value, 64)?;
-    let signature = Signature::from_slice(&bytes).map_err(|_| Error::InvalidSignature)?;
+fn verify(key: &VerifyingKey, digest: &blake3::Hash, bytes: &[u8]) -> Result<Signature> {
+    let signature = Signature::from_slice(bytes).map_err(|_| Error::InvalidSignature)?;
     key.verify_strict(digest.as_bytes(), &signature)
         .map_err(|_| Error::InvalidSignature)?;
     Ok(signature)
@@ -83,21 +85,37 @@ impl GrantSigner {
         publisher: B256,
         deadline: Instant,
     ) -> Result<Signature> {
-        let request = GrantRequest {
-            key_id: self.key_id,
-            payload_id,
-            timestamp: format!("0x{timestamp:x}"),
-            publisher_public_key: publisher,
-        };
-        let mut preimage = [0u8; 48];
-        preimage[..8].copy_from_slice(payload_id.as_slice());
-        preimage[8..16].copy_from_slice(&timestamp.to_le_bytes());
-        preimage[16..].copy_from_slice(publisher.as_slice());
-        let digest = blake3::hash(&preimage);
+        let method = Method::Grant;
         self.transport
-            .call(Method::Grant, Some(&request), deadline, |value| {
-                verify(&self.expected, &digest, value)
-            })
+            .sign(
+                method,
+                deadline,
+                |wire, id| match wire {
+                    SigningTransport::JsonRpc => encode_request(
+                        method,
+                        id,
+                        Some(&GrantRequest {
+                            key_id: self.key_id,
+                            payload_id,
+                            timestamp: format!("0x{timestamp:x}"),
+                            publisher_public_key: publisher,
+                        }),
+                    ),
+                    SigningTransport::Binary => encode_binary_request(method, id, 80, |body| {
+                        body.extend_from_slice(self.key_id.as_slice());
+                        body.extend_from_slice(payload_id.as_slice());
+                        body.extend_from_slice(&timestamp.to_be_bytes());
+                        body.extend_from_slice(publisher.as_slice());
+                    }),
+                },
+                |value| {
+                    let mut preimage = [0u8; 48];
+                    preimage[..8].copy_from_slice(payload_id.as_slice());
+                    preimage[8..16].copy_from_slice(&timestamp.to_le_bytes());
+                    preimage[16..].copy_from_slice(publisher.as_slice());
+                    verify(&self.expected, &blake3::hash(&preimage), value)
+                },
+            )
             .await
     }
 }
@@ -147,18 +165,38 @@ impl PublicationSigner {
         deadline: Instant,
     ) -> Result<Signature> {
         validate_publication(message.len(), authorization.len())?;
-        let request = PublicationRequest {
-            key_id: self.key_id,
-            message_rlp: HexBytes(message),
-            authorization_rlp: HexBytes(authorization),
-        };
+        let method = Method::Publication;
         self.transport
-            .call(Method::Publication, Some(&request), deadline, |value| {
-                let mut hash = blake3::Hasher::new();
-                hash.update(message);
-                hash.update(authorization);
-                verify(&self.expected, &hash.finalize(), value)
-            })
+            .sign(
+                method,
+                deadline,
+                |wire, id| match wire {
+                    SigningTransport::JsonRpc => encode_request(
+                        method,
+                        id,
+                        Some(&PublicationRequest {
+                            key_id: self.key_id,
+                            message_rlp: HexBytes(message),
+                            authorization_rlp: HexBytes(authorization),
+                        }),
+                    ),
+                    SigningTransport::Binary => {
+                        let payload_len = 32 + 4 + message.len() + authorization.len();
+                        encode_binary_request(method, id, payload_len, |body| {
+                            body.extend_from_slice(self.key_id.as_slice());
+                            body.extend_from_slice(&(message.len() as u32).to_be_bytes());
+                            body.extend_from_slice(message);
+                            body.extend_from_slice(authorization);
+                        })
+                    }
+                },
+                |value| {
+                    let mut hash = blake3::Hasher::new();
+                    hash.update(message);
+                    hash.update(authorization);
+                    verify(&self.expected, &hash.finalize(), value)
+                },
+            )
             .await
     }
 }

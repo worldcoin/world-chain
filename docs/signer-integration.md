@@ -3,7 +3,7 @@
 [BLO-1335](https://linear.app/worldcoin/issue/BLO-1335) tracks these adapters;
 [BLO-1446](https://linear.app/worldcoin/issue/BLO-1446) records the v0.1.0 pairing baseline;
 [BLO-1453](https://linear.app/worldcoin/issue/BLO-1453) tracks the extended profile.
-Pin host pairing to [KMS TEE Signer v0.1.1](https://github.com/worldcoin/kms-tee-signer/releases/tag/v0.1.1),
+The JSON-RPC compatibility baseline is [KMS TEE Signer v0.1.1](https://github.com/worldcoin/kms-tee-signer/releases/tag/v0.1.1),
 source `dbd2ca689b832f10bbe0666c9beccc576404d0dc`.
 The [V1 contract](https://github.com/worldcoin/kms-tee-signer/blob/dbd2ca689b832f10bbe0666c9beccc576404d0dc/docs/signer-protocol-v1.md)
 and [client-pairing runbook](https://github.com/worldcoin/kms-tee-signer/blob/dbd2ca689b832f10bbe0666c9beccc576404d0dc/docs/runbooks/host-client-pairing.md)
@@ -18,6 +18,10 @@ The v0.1.1 development profile accepts 261,909 complete batcher calldata bytes
 and at most 16,777,216 L1 transaction gas. World Chain's PBH and Flashblock wire
 contracts and limits are unchanged. This profile does not change L2 block gas;
 OP batcher pairing and shared-load qualification are tracked separately.
+
+The binary pairing harness is pinned to signer source
+`47f267856dfb08660e1c9bbee123c9e9f93397d6`. Enable binary only with a signer
+serving the [full binary API](https://github.com/worldcoin/kms-tee-signer/blob/47f267856dfb08660e1c9bbee123c9e9f93397d6/docs/signer-protocol-v1.md#binary-signing-transport).
 
 ## Roles and wire compatibility
 
@@ -92,6 +96,7 @@ PBH JSON:
 {
   "connection": {
     "endpoint": "https://signer.example.invalid:8443/",
+    "transport": "json-rpc",
     "tls": {"ca": "ca.pem", "certificate": "pbh.pem", "privateKey": "pbh.key"}
   },
   "expectedAddress": "0x<independently-approved-PBH-address>"
@@ -105,10 +110,17 @@ fields, oversized files, invalid endpoint/keys and missing/malformed mTLS materi
 fail startup. No credentials or private-key contents are logged. TLS credentials
 are host-side client authentication, not exports of the protected chain keys.
 
-TLS 1.3 and HTTP/1.1 POST `/` are required, with explicit CA/hostname verification
-and separate client identities. No redirects, compression, automatic signing
-retries, downgrade or local fallback. `health_status` means protocol reachability;
-it does not prove signing authorization, custody or execution correctness. Signer
+Set `connection.transport` to `binary` to opt in for each role independently.
+Omitting it selects `json-rpc`. Rollback is a configuration change back to
+`json-rpc`. Both formats use TLS 1.3 and sequential HTTP/1.1 POSTs with explicit
+CA/hostname verification and separate client identities. JSON-RPC signs at `/`.
+Binary uses the fixed `/v1/sign/flashblock-authorization`,
+`/v1/sign/flashblock-publication` and `/v1/sign/transaction` routes.
+Binary publication sends the original message and grant RLP, including metadata
+and access-list bytes. Binary PBH sends the canonical type-2 signing preimage.
+The client accepts no redirects, compression, automatic signing retries,
+downgrade or local fallback. `health_status` remains a JSON-RPC protocol
+reachability probe. Signer
 availability is not a new process-liveness dependency; failures affect the owning
 build/publication operation.
 
@@ -221,15 +233,18 @@ rustup run 1.99.1 cargo build --release --locked -p tee-kms-signer \
   --features flashblocks,transactions --example block-runtime-simulation \
   --target-dir "$signer_target"
 export WORLD_CHAIN_SIGNER_HARNESS_BINARY="$signer_target/release/examples/block-runtime-simulation"
-export WORLD_CHAIN_SIGNER_HARNESS_REVISION=dbd2ca689b832f10bbe0666c9beccc576404d0dc
+export WORLD_CHAIN_SIGNER_HARNESS_REVISION=47f267856dfb08660e1c9bbee123c9e9f93397d6
 ```
 
 From the World Chain checkout, run the actual-client suite:
 
 ```sh
-cargo nextest run --locked -p world-chain-signer -p world-chain-builder -p world-chain-cli \
-  -p world-chain-p2p -p world-chain-payload --run-ignored only --test-threads 1 \
-  -E 'test(/actual_role_clients|actual_client_signs_complete|production_nullifier_transaction|remote_controls_payload|protected_startup_loads|remote_job/)'
+for transport in json-rpc binary; do
+  WORLD_CHAIN_SIGNER_HARNESS_TRANSPORT="$transport" \
+    cargo nextest run --locked -p world-chain-signer -p world-chain-builder -p world-chain-cli \
+    -p world-chain-p2p -p world-chain-payload --run-ignored only --test-threads 1 \
+    -E 'test(/actual_role_clients|actual_client_signs_complete|production_nullifier_transaction|remote_controls_payload|remote_grant|protected_startup_loads|remote_job/)'
+done
 ```
 
 `WORLD_CHAIN_SIGNER_HARNESS_BINARY` identifies the disposable executable;

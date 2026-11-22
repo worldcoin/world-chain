@@ -573,6 +573,7 @@ mod tests {
         let connection = |c: world_chain_signer::config::ConnectionConfig| {
             serde_json::json!({
                 "endpoint": c.endpoint,
+                "transport": c.transport,
                 "tls": {
                     "ca": c.tls.ca,
                     "certificate": c.tls.certificate,
