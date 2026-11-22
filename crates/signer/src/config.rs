@@ -20,11 +20,22 @@ pub struct TlsFiles {
     pub private_key: PathBuf,
 }
 
+/// Wire format used for signing on this connection. Health remains a JSON-RPC probe.
+#[derive(Clone, Copy, Debug, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SigningTransport {
+    #[default]
+    JsonRpc,
+    Binary,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConnectionConfig {
     pub endpoint: Url,
     pub tls: TlsFiles,
+    #[serde(default)]
+    pub transport: SigningTransport,
 }
 
 #[derive(Clone, Deserialize)]
@@ -129,6 +140,7 @@ mod tests {
         std::fs::write(&path, config("https://signer.example/").to_string())
             .expect("configuration");
         let loaded = PbhConfig::load(&path).expect("valid configuration");
+        assert_eq!(loaded.connection.transport, SigningTransport::JsonRpc);
         assert_eq!(loaded.connection.tls.ca, directory.path().join("ca.pem"));
         assert_eq!(
             loaded.connection.tls.certificate,
@@ -138,6 +150,22 @@ mod tests {
             loaded.connection.tls.private_key,
             directory.path().join("client.key")
         );
+    }
+
+    #[test]
+    fn signing_transport_is_explicit_and_strict() {
+        for (name, expected) in [
+            ("json-rpc", SigningTransport::JsonRpc),
+            ("binary", SigningTransport::Binary),
+        ] {
+            let mut value = config("https://signer.example/");
+            value["connection"]["transport"] = name.into();
+            let config: PbhConfig = serde_json::from_value(value).expect("supported transport");
+            assert_eq!(config.connection.transport, expected);
+        }
+        let mut value = config("https://signer.example/");
+        value["connection"]["transport"] = "auto".into();
+        assert!(serde_json::from_value::<PbhConfig>(value).is_err());
     }
 
     #[test]

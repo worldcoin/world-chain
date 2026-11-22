@@ -8,14 +8,17 @@ use std::{
     time::Duration,
 };
 use tokio::time::Instant;
-use world_chain_signer::config::{ConnectionConfig, Ed25519Config, PbhConfig, TlsFiles};
+use world_chain_signer::config::{
+    ConnectionConfig, Ed25519Config, PbhConfig, SigningTransport, TlsFiles,
+};
 
-pub const SIGNER_REVISION: &str = "dbd2ca689b832f10bbe0666c9beccc576404d0dc";
+pub const SIGNER_REVISION: &str = "47f267856dfb08660e1c9bbee123c9e9f93397d6";
 
 pub struct Harness {
     child: Child,
     directory: tempfile::TempDir,
     metadata: Value,
+    transport: SigningTransport,
 }
 
 impl Drop for Harness {
@@ -45,6 +48,11 @@ impl Harness {
             revision, SIGNER_REVISION,
             "use the reviewed merged signer source"
         );
+        let transport = match std::env::var("WORLD_CHAIN_SIGNER_HARNESS_TRANSPORT").as_deref() {
+            Ok("binary") => SigningTransport::Binary,
+            Ok("json-rpc") | Err(std::env::VarError::NotPresent) => SigningTransport::JsonRpc,
+            _ => panic!("set harness transport to binary or json-rpc"),
+        };
         let directory = tempfile::tempdir().expect("private test directory");
         let run = directory.path().join("runtime");
         let mut child = Command::new(executable)
@@ -60,6 +68,7 @@ impl Harness {
             child,
             directory,
             metadata: Value::Null,
+            transport,
         };
         let ready = tokio::task::spawn_blocking(move || {
             let mut line = String::new();
@@ -121,6 +130,7 @@ impl Harness {
                 .expect("endpoint")
                 .parse()
                 .expect("URL"),
+            transport: self.transport,
             tls: TlsFiles {
                 ca: directory.join("simulation-ca.pem"),
                 certificate: directory.join(format!("simulation-{role}.pem")),

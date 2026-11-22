@@ -1,8 +1,9 @@
-use alloy_primitives::{Bytes, FixedBytes};
+use alloy_primitives::{Address, Bytes, FixedBytes, U256};
 use alloy_rlp::{Encodable, Header};
 use ed25519_dalek::{Signature, Signer, SigningKey};
 use serde_json::Value;
 use world_chain_primitives::{
+    access_list::{FlashblockAccessList, FlashblockAccessListData, access_list_hash},
     p2p::{Authorization, FlashblocksP2PMsg},
     primitives::FlashblocksPayloadV1,
 };
@@ -66,6 +67,18 @@ pub fn large_publication() -> LargePublication {
             ..Default::default()
         };
         payload.diff.transactions = vec![Bytes::from(vec![1; padding])];
+        let mut access_list = FlashblockAccessList {
+            min_tx_index: 0,
+            max_tx_index: 1,
+            ..Default::default()
+        };
+        access_list.changes.push(Default::default());
+        access_list.changes[0].address = Address::with_last_byte(0x42);
+        access_list.changes[0].storage_reads.push(U256::from(4));
+        payload.diff.access_list_data = Some(FlashblockAccessListData {
+            access_list_hash: access_list_hash(&access_list),
+            access_list,
+        });
         let mut message = Vec::new();
         Header {
             list: true,

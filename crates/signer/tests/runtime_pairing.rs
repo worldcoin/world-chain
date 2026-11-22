@@ -385,7 +385,7 @@ async fn check_bridge_cancellation_and_cross_job_admission(harness: &Harness) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires a reviewed 16 MiB signer harness; run separately from old-profile pairing"]
+#[ignore = "requires the reviewed disposable signer harness binary and revision"]
 async fn actual_client_signs_complete_maximum_world_chain_frame() {
     let frame = large_publication();
     let harness = Harness::start().await;
