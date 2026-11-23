@@ -92,6 +92,8 @@ def check_draft(record, identifier, version, source):
             or record.get("draft") is not True or record.get("published_at") is not None
             or record.get("tag_name") != version or record.get("target_commitish") != source):
         raise ValueError("release must remain a draft with the expected ID, version and full target commit")
+    if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*", version) and record.get("prerelease") is not True:
+        raise ValueError("release candidate draft must be marked as a prerelease")
 
 
 def remote_draft(identifier, version, source):

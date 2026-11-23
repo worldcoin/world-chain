@@ -20,6 +20,9 @@ on:
       prepared_manifest_sha256:
         description: Independently reviewed release-manifest.json SHA-256
         type: string
+      qualified_image_digests:
+        description: RC-only JSON map of six immutable staged image digests for GHCR publication
+        type: string
 
 concurrency:
   group: release
@@ -49,6 +52,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
           PREPARED_RELEASE_ID: ${{ inputs.prepared_release_id }}
           PREPARED_MANIFEST_SHA256: ${{ inputs.prepared_manifest_sha256 }}
+          QUALIFIED_IMAGE_DIGESTS: ${{ inputs.qualified_image_digests }}
           INPUT_REF: ${{ inputs.ref }}
         run: |
           python3 - <<'PY'
@@ -57,7 +61,15 @@ jobs:
           if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?', version):
               raise SystemExit('Invalid release version')
           identifier, digest = os.environ['PREPARED_RELEASE_ID'], os.environ['PREPARED_MANIFEST_SHA256']
-          if identifier:
+          images = os.environ['QUALIFIED_IMAGE_DIGESTS']
+          if images:
+              if identifier or digest or os.environ['GITHUB_REF'] != 'refs/heads/main':
+                  raise SystemExit('RC image publication must run alone from main')
+              if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*', version):
+                  raise SystemExit('Qualified image publication is RC-only')
+              if not re.fullmatch(r'[0-9a-f]{40}', os.environ['INPUT_REF']):
+                  raise SystemExit('Qualified image publication requires a full immutable source commit')
+          elif identifier:
               if os.environ['GITHUB_REF'] != 'refs/heads/main':
                   raise SystemExit('Dispatch the prepared-assets workflow from main')
               if not re.fullmatch(r'[1-9][0-9]{0,19}', identifier) or not re.fullmatch(r'[0-9a-f]{64}', digest):
@@ -70,7 +82,7 @@ jobs:
           PY
 
   approve-release:
-    if: inputs.prepared_release_id == ''
+    if: inputs.prepared_release_id == '' && inputs.qualified_image_digests == ''
     needs: validate-mode
     name: approve release
     runs-on: ubuntu-latest
@@ -80,7 +92,7 @@ jobs:
 
   prepared-release:
     name: sign prepared distribution draft
-    if: inputs.prepared_release_id != ''
+    if: inputs.prepared_release_id != '' && inputs.qualified_image_digests == ''
     needs: validate-mode
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -105,7 +117,13 @@ jobs:
           source_commit=$(git rev-parse --verify --end-of-options "${INPUT_REF}^{commit}")
           version="v${INPUT_VERSION#v}"
           manifest_version=$(git cat-file blob "${source_commit}:Cargo.toml" | sed -n 's/^version = "\([^"]*\)"/\1/p')
-          test "${version#v}" = "$manifest_version"
+          if [[ "$version" != "v$manifest_version" ]]; then
+            if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$ ]] || \
+               [[ "${version%-rc.*}" != "v$manifest_version" ]]; then
+              echo "Release version $version does not match Cargo.toml version $manifest_version" >&2
+              exit 1
+            fi
+          fi
           if git show-ref --verify --quiet "refs/tags/$version"; then
             test "$(git rev-parse "refs/tags/${version}^{commit}")" = "$source_commit"
           fi
@@ -163,8 +181,77 @@ jobs:
         if: always()
         run: rm -rf -- prepared prepared-changes.md
 
+  approve-qualified-images:
+    name: approve qualified RC image publication
+    if: inputs.qualified_image_digests != ''
+    needs: validate-mode
+    runs-on: ubuntu-latest
+    environment: release
+    permissions: {}
+    steps:
+      - run: true
+
+  publish-qualified-images:
+    name: copy qualified RC images to GHCR
+    if: inputs.qualified_image_digests != ''
+    needs: approve-qualified-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment:
+      name: dev
+      deployment: false
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      INPUT_VERSION: ${{ inputs.version }}
+      INPUT_REF: ${{ inputs.ref }}
+      QUALIFIED_IMAGE_DIGESTS: ${{ inputs.qualified_image_digests }}
+      STAGING_IMAGE: 348981876543.dkr.ecr.us-east-1.amazonaws.com/world-chain-builder
+      DESTINATION_IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check source version
+        run: |
+          source_commit=$(git rev-parse --verify --end-of-options "${INPUT_REF}^{commit}")
+          test "$source_commit" = "$INPUT_REF"
+          git merge-base --is-ancestor "$source_commit" "${GITHUB_SHA}"
+          version="v${INPUT_VERSION#v}"
+          manifest_version=$(git cat-file blob "${source_commit}:Cargo.toml" | sed -n 's/^version = "\([^"]*\)"/\1/p')
+          test "${version%-rc.*}" = "v$manifest_version"
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::348981876543:role/oidc/github-deploy
+      - name: Log in to staging registry
+        run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${STAGING_IMAGE%%/*}"
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Publish and verify exact platform manifests
+        run: |
+          python3 .github/scripts/distribution-publish-images.py \
+            --version "v${INPUT_VERSION#v}" --source-commit "$INPUT_REF" \
+            --digests "$QUALIFIED_IMAGE_DIGESTS" --staging "$STAGING_IMAGE" \
+            --destination "$DESTINATION_IMAGE" --output ghcr-image-bindings.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ghcr-image-bindings
+          path: ghcr-image-bindings.json
+          if-no-files-found: error
+          retention-days: 7
+
   prepare-release:
     name: prepare release
+    if: inputs.qualified_image_digests == ''
     needs: approve-release
     runs-on: ubuntu-latest
     steps:

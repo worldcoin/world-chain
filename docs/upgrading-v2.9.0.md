@@ -1,7 +1,7 @@
 # Upgrading to World Chain v2.9.0
 
 World Chain v2.9.0 embeds op-reth v2.9.0 and the OP-patched Reth
-`op-v2.7.0-0` release. World Chain, op-reth and core Reth have separate
+`op-v2.7.0-1` maintenance release. World Chain, op-reth and core Reth have separate
 version numbers. Deploy the World Chain image for World Chain's PBH and
 Flashblock functionality.
 
