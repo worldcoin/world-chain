@@ -41,15 +41,15 @@ class PublishImagesTest(unittest.TestCase):
         child_digest = "sha256:" + hashlib.sha256(raw_child).hexdigest()
         index = {"mediaType": "application/vnd.oci.image.index.v1+json", "manifests": [
             {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": child_digest,
-             "platform": {"os": "linux", "architecture": "amd64"}}]}
+             "platform": {"os": "linux", "architecture": "arm64", "variant": "v8"}}]}
         raw_index = json.dumps(index).encode()
         index_digest = "sha256:" + hashlib.sha256(raw_index).hexdigest()
         with patch.object(publisher, "command", side_effect=[raw_index, raw_child]):
-            pins = publisher.platform_manifest("staging.example/repo", index_digest, "linux/amd64")
+            pins = publisher.platform_manifest("staging.example/repo", index_digest, "linux/arm64")
         self.assertEqual(pins, {"manifest_digest": child_digest, "config_digest": child["config"]["digest"]})
         with patch.object(publisher, "command", return_value=raw_index):
             with self.assertRaisesRegex(ValueError, "index does not match"):
-                publisher.platform_manifest("staging.example/repo", "sha256:" + "b" * 64, "linux/amd64")
+                publisher.platform_manifest("staging.example/repo", "sha256:" + "b" * 64, "linux/arm64")
 
     def test_attestation_must_bind_the_staged_platform_manifest(self):
         raw_attestation = json.dumps({"mediaType": "application/vnd.oci.image.manifest.v1+json"}).encode()
@@ -83,7 +83,10 @@ class PublishImagesTest(unittest.TestCase):
         descriptors = []
         records = {}
         for platform, pins in expected.items():
-            descriptors.append({"platform": {"os": "linux", "architecture": platform.split("/")[1]},
+            descriptor_platform = {"os": "linux", "architecture": platform.split("/")[1]}
+            if platform == "linux/arm64":
+                descriptor_platform["variant"] = "v8"
+            descriptors.append({"platform": descriptor_platform,
                                 "digest": pins["manifest_digest"]})
             records[repo + "@" + pins["manifest_digest"]] = (pins["manifest_digest"][7:],
                                                                 {"config": {"digest": pins["config_digest"]}})

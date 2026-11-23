@@ -76,8 +76,10 @@ def platform_manifest(registry, digest, platform):
                 and isinstance(item.get("platform"), dict) and item["platform"].get("os") == "linux"]
     if len(runnable) != 1:
         raise ValueError("staged image must contain exactly one runnable platform")
-    matches = [item for item in descriptors if isinstance(item, dict) and item.get("platform") == {
-        "os": "linux", "architecture": platform.split("/", 1)[1]}]
+    matches = [item for item in descriptors if isinstance(item, dict)
+               and isinstance(item.get("platform"), dict)
+               and item["platform"].get("os") == "linux"
+               and item["platform"].get("architecture") == platform.split("/", 1)[1]]
     if len(matches) != 1 or matches[0].get("mediaType") not in MANIFEST_TYPES:
         raise ValueError(f"staged image has no unique {platform} manifest")
     child = matches[0].get("digest")
@@ -136,7 +138,9 @@ def verify_published(reference, expected, attestations=None):
                 raise ValueError(f"published {platform} attestation manifest changed")
     for platform, pins in expected.items():
         descriptors = [item for item in index["manifests"] if isinstance(item, dict)
-                       and item.get("platform") == {"os": "linux", "architecture": platform.split("/", 1)[1]}]
+                       and isinstance(item.get("platform"), dict)
+                       and item["platform"].get("os") == "linux"
+                       and item["platform"].get("architecture") == platform.split("/", 1)[1]]
         if len(descriptors) != 1 or descriptors[0].get("digest") != pins["manifest_digest"]:
             raise ValueError(f"published {platform} image changed from the staged manifest")
         child_hash, child = inspect(f"{reference.rsplit(':', 1)[0]}@{pins['manifest_digest']}")
