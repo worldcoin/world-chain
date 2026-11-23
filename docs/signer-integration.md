@@ -1,8 +1,5 @@
 # Protected World Chain signing
 
-[BLO-1335](https://linear.app/worldcoin/issue/BLO-1335) tracks these adapters;
-[BLO-1446](https://linear.app/worldcoin/issue/BLO-1446) records the v0.1.0 pairing baseline;
-[BLO-1453](https://linear.app/worldcoin/issue/BLO-1453) tracks the extended profile.
 The JSON-RPC compatibility baseline is [KMS TEE Signer v0.1.1](https://github.com/worldcoin/kms-tee-signer/releases/tag/v0.1.1),
 source `dbd2ca689b832f10bbe0666c9beccc576404d0dc`.
 The [V1 contract](https://github.com/worldcoin/kms-tee-signer/blob/dbd2ca689b832f10bbe0666c9beccc576404d0dc/docs/signer-protocol-v1.md)
@@ -255,11 +252,9 @@ results when qualifying a new signer revision.
 
 The numbered release supplies a development/test runtime; it does not authorize
 production activation. This host simulation does not qualify a deployed Nitro
-enclave, custody, production time/revocation, approved network policies, maximum-load memory/p99,
-or the configured publishing cadence. Qualify representative 5/s and 6/s traffic
-with per-role and aggregate accounting under [BLO-1447](https://linear.app/worldcoin/issue/BLO-1447);
-the release's 200/s stress results do not establish that acceptance or the 2 ms
-production p99 target. Devnet full-stack and mixed-version/outage validation must
+enclave, custody, production time/revocation, approved network policies or the
+configured publishing cadence. Qualify representative load with per-role and
+aggregate accounting. Devnet full-stack and mixed-version/outage validation must
 precede Sepolia, then mainnet. Use an independently enrolled devnet policy: the
 supplied harness is deliberately restricted to public keys, L2 480 and a synthetic
 PBH entry point. Keep proof-result signing within measured execution. No measured

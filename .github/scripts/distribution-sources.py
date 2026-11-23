@@ -233,7 +233,8 @@ def guide_paths(world_chain, files):
     return result
 
 
-def package(inputs, world_chain, optimism, repositories, build_record, output, *, private_review=False):
+def package(inputs, world_chain, optimism, repositories, build_record, output, *, private_review=False,
+            documentation_commit=None):
     plan = distribution.release_plan(inputs)
     distribution.object_fields(build_record, ("schema_version", "inputs", "materials"), "build record")
     if (type(build_record["schema_version"]) is not int or build_record["schema_version"] != 1
@@ -254,7 +255,25 @@ def package(inputs, world_chain, optimism, repositories, build_record, output, *
     epoch = timestamps["world-chain"]
     if not 0 <= epoch <= 0xFFFFFFFF:
         raise ValueError("source epoch must be an unsigned 32-bit timestamp")
-    guides = guide_paths(wc["repository"], next(files for node, (files, _) in zip(nodes, inventories) if node["prefix"] == "world-chain"))
+    files, _ = next(inventory for node, inventory in zip(nodes, inventories) if node is wc)
+    guides = guide_paths(wc["repository"], files)
+    example_node, example_guides = wc, guides
+    if documentation_commit is not None:
+        distribution.commit(documentation_commit, "documentation source")
+        repo = wc["repository"]
+        if git(repo, "cat-file", "-t", documentation_commit).strip() != b"commit":
+            raise ValueError("documentation source must be a commit")
+        git(repo, "merge-base", "--is-ancestor", wc["commit"], documentation_commit)
+        example_node = {**wc, "entries": tree_entries(repo, documentation_commit)}
+        example_entries, _ = object_sizes(example_node)
+        example_guides = guide_paths(repo, example_entries)
+    example_node = {**example_node, "entries": [
+        entry for entry in example_node["entries"]
+        if entry[0].startswith("examples/distribution/") or entry[0] in example_guides
+    ]}
+    example_files, example_sizes = object_sizes(example_node)
+    if not example_files or sum(example_sizes) > MAX_BYTES:
+        raise ValueError("deployment examples are missing or exceed the source export size limit")
     when = datetime.fromtimestamp(max(epoch, 315532800), timezone.utc)
     timestamp = (when.year, when.month, when.day, when.hour, when.minute, when.second // 2 * 2)
     metadata = {"schema_version": 1, "inputs": inputs, "source_date_epoch": epoch,
@@ -281,14 +300,19 @@ def package(inputs, world_chain, optimism, repositories, build_record, output, *
                 record = {"git_blob": oid, "mode": mode, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
                 zip_entry(sources, name, data, mode, timestamp)
                 indexes["sources"][name] = record
-                if node["prefix"] == "world-chain" and (path.startswith("examples/distribution/") or path in guides):
-                    zip_entry(examples, path, data, mode, timestamp)
-                    indexes["examples"][path] = record
-        if not indexes["examples"]:
-            raise ValueError("source has no committed deployment examples")
+        for path, mode, oid, data in blobs(example_node, example_files, example_sizes, output):
+            zip_entry(examples, path, data, mode, timestamp)
+            indexes["examples"][path] = {
+                "git_blob": oid, "mode": mode, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()
+            }
+        example_metadata = metadata
+        if documentation_commit is not None:
+            example_metadata = {**metadata, "documentation_commit": documentation_commit,
+                                "guides": sorted(example_guides)}
         for kind, archive in (("sources", sources), ("examples", examples)):
             validate_symlinks(archive)
-            zip_entry(archive, "release-metadata/sources.json", packaging.json_bytes(metadata), "100644", timestamp)
+            zip_metadata = example_metadata if kind == "examples" else metadata
+            zip_entry(archive, "release-metadata/sources.json", packaging.json_bytes(zip_metadata), "100644", timestamp)
             zip_entry(archive, "release-metadata/files.json", packaging.json_bytes(indexes[kind]), "100644", timestamp)
     receipt = {"schema_version": 1, "inputs": inputs, "source_date_epoch": epoch, "assets": {}}
     for kind in ("sources", "examples"):
@@ -306,10 +330,12 @@ def main():
         parser.add_argument(f"--{name}", required=True, type=Path)
     parser.add_argument("--repository", action="append", type=Path, default=[], help="additional checkout containing pinned submodule objects")
     parser.add_argument("--private-review", action="store_true", help="mark both ZIPs as ineligible for release finalization")
+    parser.add_argument("--documentation-commit", help="full descendant commit for the examples ZIP only")
     args = parser.parse_args()
     try:
         package(distribution.load_inputs(args.inputs), args.world_chain_repo, args.optimism_repo,
-                args.repository, release.load_record(args.build_record), args.output, private_review=args.private_review)
+                args.repository, release.load_record(args.build_record), args.output, private_review=args.private_review,
+                documentation_commit=args.documentation_commit)
         print(f"Exported source/examples assets to {args.output}; independent qualification remains required")
     except (OSError, ValueError, subprocess.SubprocessError, UnicodeError) as error:
         print(f"source export failed: {error}", file=sys.stderr)

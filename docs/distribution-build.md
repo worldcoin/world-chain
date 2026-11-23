@@ -1,9 +1,8 @@
 # Docker build instructions
 
 This reference covers source builds and assembly of three image variants from
-one platform payload. Payload production, source/example exports and final
-release qualification are tracked in BLO-1253. Local image builds do not publish
-the proposed tags or qualify a deployment.
+one platform payload. See the release manifest for the source, artifacts and
+published image digests.
 
 ## Inputs and prerequisites
 
@@ -306,6 +305,14 @@ The examples ZIP includes committed
 links use the corresponding source ZIP. Local checkout paths are excluded from
 source metadata.
 
+When the operator guides change after an executable build, run the exporter
+from a revision that supports `--documentation-commit` and pass the full
+reviewed descendant commit with that option.
+The examples ZIP then contains the examples and linked guides from that revision.
+Its metadata records `documentation_commit` separately from the build inputs.
+The source ZIP continues to reproduce the exact build source. Verify each ZIP
+against its recorded revision.
+
 The intermediate `source-manifest.json` records ZIP checksums. Existing output is
 preserved, and a failed export retains `INCOMPLETE`/partial output. Finalization
 rejects an incomplete source or binary assembly. Add `--private-review` when
@@ -379,10 +386,20 @@ assembly receipt on both platforms, check entrypoints and exact variant subsets,
 run each service/helper and retain all native runtime/library versions. The
 assembler's ELF checks and Docker version probes do not prove correct chain
 execution, source provenance or complete license coverage. Complete source/example
-ZIP creation, Compose/systemd and builder/signer qualification under BLO-1253,
-then finalize the external receipt with resolved materials and image digests.
-The table-based release-page layout is approved under BLO-1252. The existing
-release environment approval remains required for publication.
+ZIP creation, Compose/systemd and builder/signer qualification, then finalize the
+external receipt with resolved materials and image digests. Publication requires
+approval in the `release` environment.
+
+### Promote qualified RC images
+
+For a prerelease, dispatch the existing `release.yml` workflow from `main`
+with the full executable build commit in `ref`, the RC version in `version`
+and the six verified staging index digests in `qualified_image_digests`.
+Supply one digest for each platform (`linux/amd64` and `linux/arm64`) under
+each variant (`world-chain`, `op` and `combined`). The workflow publishes
+the three versioned GHCR references after release environment approval and
+returns `ghcr-image-bindings.json`. Verify the public digests before binding
+them into the final release manifest.
 
 ### Finalize the unsigned release assets
 

@@ -1,10 +1,10 @@
-# Deployment examples (draft)
+# Deployment examples
 
-These examples define the standard configuration for the planned distributions.
-The new OP and combined image tags have not been published by this change.
-Configuration parsing is separate from end-to-end network and image qualification.
-Release assembly must qualify these examples with the actual payloads before
-presenting them as supported release instructions.
+These examples define the standard follower configuration for the World Chain,
+OP and combined distributions. Select image digests from the release manifest.
+Verify the selected artifacts and deployment before serving traffic. Review the
+[upgrade and rollback guide](../../docs/upgrading-v2.9.0.md) before reusing data
+or pairing the execution client with an operator-managed op-node.
 
 Run the commands from `examples/distribution/`. The examples ZIP retains the
 repository-relative `examples/` and `docs/` layout so the included guide links work.
@@ -114,10 +114,13 @@ then start the services and qualify sync/readiness again.
 The image and installation layout also serve builders, but this follower example
 does not enable sequencing or builder signing. A production builder needs its
 authorized signer integration, PBH/Flashblocks configuration and coordinator
-connections. The current CLI still has a test default builder private key;
-enabling `--builder.enabled` without the completed signer configuration is not a
-production builder setup. The final release examples must include qualified
-builder overrides once the remote signer adapters expose their actual options;
-do not invent flags or distribute a plaintext Foundation key as a workaround.
+connections. Enabling `--builder.enabled` requires an explicit
+`--builder.private-key` or `--builder.signer-config`; there is no default key.
+Protected signing uses `--builder.signer-config` for PBH and
+`--flashblocks.signer-config` for publication. An in-process grant signer also
+uses `--flashblocks.authorizer-signer-config` and an independently pinned
+`--flashblocks.authorizer-vk`. Follow the
+[signer integration guide](../../docs/signer-integration.md) for the mTLS
+configuration and role requirements.
 
 See [Docker build instructions](../../docs/distribution-build.md).

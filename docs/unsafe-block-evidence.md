@@ -1,6 +1,5 @@
 # Unsafe-block evidence through the execution-client RPC
 
-Tracked by [PROTO-5229](https://linear.app/worldcoin/issue/PROTO-5229).
 The execution client forwards two read-only methods to its paired op-node:
 
 - `optimism_unsafeBlockEvidenceCapabilities`, with no parameters.
@@ -9,7 +8,8 @@ The execution client forwards two read-only methods to its paired op-node:
 Forwarding defaults off. Configure
 `--rpc.unsafe-block-evidence-url http://127.0.0.1:9545` (or
 `WORLD_CHAIN_UNSAFE_BLOCK_EVIDENCE_URL`) on the execution client and enable
-`--rpc.unsafe-block-evidence` on its P2P-enabled op-node. Methods are installed on
+`--rpc.unsafe-block-evidence` on its P2P-enabled op-node. This requires the
+bundled World Chain op-node's evidence API. Methods are installed on
 HTTP/WebSocket transports serving `eth`, excluding IPC and authenticated Engine
 RPC. Opt-in applies to every such transport: inspect both listeners and their
 existing network/proxy access policies. No new public endpoint or blanket
