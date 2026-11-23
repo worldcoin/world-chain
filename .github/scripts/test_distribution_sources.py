@@ -64,9 +64,10 @@ class SourceExportTest(unittest.TestCase):
             return None
         self.fail(f"Unexpected Git fixture command: {args}")
 
-    def package(self, *, private_review=False):
+    def package(self, *, private_review=False, documentation_commit=None):
         with patch.object(sources, "source_nodes", return_value=self.nodes), patch.object(sources, "git", side_effect=self.fake_git):
-            return sources.package(self.inputs, self.root, self.root, [], self.build, self.output, private_review=private_review)
+            return sources.package(self.inputs, self.root, self.root, [], self.build, self.output,
+                                   private_review=private_review, documentation_commit=documentation_commit)
 
     def test_export_preserves_blobs_modes_inputs_guides_and_reproducibility(self):
         (self.root / "untracked.env").write_text("Synthetic untracked sentinel")
@@ -109,6 +110,36 @@ class SourceExportTest(unittest.TestCase):
             archive = self.output / name
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "private publication review"):
                 sources.release.verify_zip_inputs(archive, self.inputs)
+
+    def test_documentation_commit_refreshes_only_examples_and_records_provenance(self):
+        baseline = self.package()
+        self.output = self.root / "updated"
+        revision = "b" * 40
+        new_guide = b"Updated setup guide.\n"
+        self.data["updated.md"] = new_guide
+        entries = [(name, mode, oid(new_guide) if name == "docs/setup.md" else blob)
+                   for name, mode, blob in self.nodes[0]["entries"]]
+        original_git = self.fake_git
+
+        def git(repo, *args, **kwargs):
+            if args == ("cat-file", "-t", revision):
+                return b"commit\n"
+            if args == ("merge-base", "--is-ancestor", self.nodes[0]["commit"], revision):
+                return b""
+            return original_git(repo, *args, **kwargs)
+
+        with patch.object(self, "fake_git", side_effect=git), patch.object(sources, "tree_entries", return_value=entries):
+            updated = self.package(documentation_commit=revision)
+        source = next(name for name in updated["assets"] if name.endswith("-sources.zip"))
+        examples = next(name for name in updated["assets"] if name.endswith("-examples.zip"))
+        self.assertEqual(baseline["assets"][source], updated["assets"][source])
+        with zipfile.ZipFile(self.output / examples) as archive:
+            self.assertEqual(archive.read("docs/setup.md"), new_guide)
+            self.assertNotIn("docs/nested.md", archive.namelist())
+            metadata = json.loads(archive.read("release-metadata/sources.json"))
+            self.assertEqual(metadata["inputs"], self.inputs)
+            self.assertEqual(metadata["documentation_commit"], revision)
+            self.assertNotIn("docs/nested.md", metadata["guides"])
 
     def test_invalid_materials_and_existing_output_fail_without_overwriting(self):
         original = self.build

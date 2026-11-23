@@ -1,28 +1,20 @@
 # Proof signing boundaries
 
-[BLO-1336](https://linear.app/worldcoin/issue/BLO-1336) tracks this audit and the
-remaining dependency remediation. Source baseline: `868854ed622bde422afa319a81d2e002e84f71a8`.
-This is a source audit, not evidence of deployed keys, enabled backends or runtime qualification.
+This audit covers source baseline `868854ed622bde422afa319a81d2e002e84f71a8`.
+Verify deployed keys, enabled backends and runtime qualification separately.
 
 ## Deployment scope
 
-Operator clarification on 2026-11-15: **SP1 is used on devnet only, not on
-testnet or mainnet**. Its SDK, Network account, deposit wallet and guest-program
-migration are a separate devnet workstream, not a prerequisite for testnet/mainnet
-signing remediation.
-
-Assess testnet/mainnet against the actual deployed binaries, enabled signing roles
-and signing backends. Neither a repository lockfile nor compilation of an unused
-SDK proves its secret-signing path is active. Establish Nitro and other proof-service
-deployment separately; their inclusion below is a source inventory, not a claim
-that they run on testnet/mainnet.
+Assess each network against the deployed binaries, enabled signing roles and
+signing backends. Confirm that SP1 or Nitro is active before applying guidance
+for that backend.
 
 ## Roles
 
 | Role | Current implementation and authority | Integration decision |
 | --- | --- | --- |
 | Nitro proof-result key | [`enclave.rs`](../../proofs/measured/nitro-enclave/src/enclave.rs) generates an ephemeral secp256k1 key from NSM entropy at startup. `handle_range` derives transition public values by executing the range, checks any supplied expectation, then signs their ABI commitment. The public key is bound to PCRs by NSM attestation. | Keep the key and result signing inside this measured proof enclave. A general external digest signer would lose the binding between the registered key and the computation. |
-| SP1 range/aggregation proof (devnet only) | [Range guest](../../proofs/measured/sp1-programs/range-ethereum/src/main.rs) executes the range and commits its output; [aggregation guest](../../proofs/measured/sp1-programs/aggregation/src/main.rs) verifies range proofs and commits aggregation public values. | These guests do not use a service wallet to sign their proof results. Preserve their guest programs and verification-key binding when the devnet stack changes. |
+| SP1 range/aggregation proof | [Range guest](../../proofs/measured/sp1-programs/range-ethereum/src/main.rs) executes the range and commits its output; [aggregation guest](../../proofs/measured/sp1-programs/aggregation/src/main.rs) verifies range proofs and commits aggregation public values. | These guests do not use a service wallet to sign proof results. Preserve their guest programs and verification-key binding. |
 | Proposer L1 wallet | [`proposer/src/main.rs`](../../proofs/services/proposer/src/main.rs): `PROPOSER_KEY` or `PROPOSER_KMS_KEY_ID`; signs game creation and lifecycle transactions. | Existing native KMS is an available backend. A future restricted signer must cover the actual lifecycle calls, not just proposal creation. |
 | Challenger L1 wallet | [`challenger/src/main.rs`](../../proofs/services/challenger/src/main.rs): `CHALLENGER_KEY` or `CHALLENGER_KMS_KEY_ID`; signs challenges and lifecycle transactions. | Separate wallet and permissions from proposer/defender; native KMS already supported. |
 | Defender L1 wallet | [`defender/src/main.rs`](../../proofs/services/defender/src/main.rs): `DEFENDER_KEY` or `DEFENDER_KMS_KEY_ID`; submits completed proof lanes and lifecycle transactions. | Paying for/submitting a proof does not make this wallet its proof-result key. Native KMS already supported. |
