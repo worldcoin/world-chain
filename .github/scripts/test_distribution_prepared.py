@@ -91,6 +91,14 @@ class PreparedReleaseTest(unittest.TestCase):
             with self.subTest(version=version, source=source), self.assertRaisesRegex(ValueError, "approved release"):
                 prepared.verify_assets(self.directory, self.digest, version, source)
 
+    def test_release_candidate_draft_requires_prerelease_flag(self):
+        version = "v2.9.0-rc.1"
+        record = dict(self.record, tag_name=version, prerelease=True)
+        prepared.check_draft(record, "12", version, self.source)
+        record["prerelease"] = False
+        with self.assertRaisesRegex(ValueError, "marked as a prerelease"):
+            prepared.check_draft(record, "12", version, self.source)
+
     def test_unexpected_and_duplicate_draft_assets_are_rejected(self):
         extra = {"id": 123, "name": "../../outside", "size": 10, "state": "uploaded"}
         self.record["assets"].append(extra)
@@ -197,33 +205,65 @@ class RemoteBoundsTest(unittest.TestCase):
 
 
 class WorkflowModeTest(unittest.TestCase):
+    def test_prepared_source_version_accepts_matching_rc_only(self):
+        workflow = (SCRIPT.parents[1] / "workflows/release.yml").read_text()
+        guard = workflow.split('          if [[ "$version" != "v$manifest_version" ]]; then\n', 1)[1]
+        guard = 'if [[ "$version" != "v$manifest_version" ]]; then\n' + guard.split('          if git show-ref', 1)[0]
+        for version, cargo, success in (
+            ("v2.9.0", "2.9.0", True),
+            ("v2.9.0-rc.1", "2.9.0", True),
+            ("v2.9.0-rc.0", "2.9.0", False),
+            ("v2.9.0-rc.1", "2.9.1", False),
+            ("v2.9.0-beta.1", "2.9.0", False),
+        ):
+            env = dict(os.environ, version=version, manifest_version=cargo)
+            result = subprocess.run(["bash", "-c", textwrap.dedent(guard)], env=env,
+                                    capture_output=True, timeout=5)
+            with self.subTest(version=version, cargo=cargo):
+                self.assertEqual(result.returncode == 0, success, result.stderr.decode())
+
     def test_prepared_mode_and_legacy_cutoff_use_the_real_workflow_guard(self):
         workflow = SCRIPT.parents[1] / "workflows/release.yml"
         text = workflow.read_text()
         guard = re.search(r"python3 - <<'PY'\n(.*?)          PY", text, re.S)
         self.assertIsNotNone(guard)
         program = textwrap.dedent(guard[1])
-        for version, identifier, digest, ref, success in (
-            ("v2.8.3", "", "", "refs/heads/main", True),
-            ("v2.9.0", "", "", "refs/heads/main", False),
-            ("v2.9.0", "12", "a" * 64, "refs/heads/main", True),
-            ("v2.9.0", "12", "a" * 64, "refs/heads/unreviewed", False),
-            ("v2.9.0", "../bad", "a" * 64, "refs/heads/main", False),
+        for version, identifier, digest, images, ref, success in (
+            ("v2.8.3", "", "", "", "refs/heads/main", True),
+            ("v2.9.0", "", "", "", "refs/heads/main", False),
+            ("v2.9.0", "12", "a" * 64, "", "refs/heads/main", True),
+            ("v2.9.0-rc.1", "12", "a" * 64, "", "refs/heads/main", True),
+            ("v2.9.0-rc.1", "", "", "{}", "refs/heads/main", True),
+            ("v2.9.0", "", "", "{}", "refs/heads/main", False),
+            ("v2.9.0-rc.1", "12", "a" * 64, "{}", "refs/heads/main", False),
+            ("v2.9.0-rc.1", "", "", "{}", "refs/heads/unreviewed", False),
+            ("v2.9.0", "12", "a" * 64, "", "refs/heads/unreviewed", False),
+            ("v2.9.0", "../bad", "a" * 64, "", "refs/heads/main", False),
         ):
             env = dict(os.environ, INPUT_VERSION=version, PREPARED_RELEASE_ID=identifier,
-                       PREPARED_MANIFEST_SHA256=digest, GITHUB_REF=ref, INPUT_REF="1" * 40)
+                       PREPARED_MANIFEST_SHA256=digest, QUALIFIED_IMAGE_DIGESTS=images,
+                       GITHUB_REF=ref, INPUT_REF="1" * 40)
             result = subprocess.run([sys.executable, "-c", program], env=env, capture_output=True, timeout=5)
             with self.subTest(version=version, identifier=identifier, ref=ref):
                 self.assertEqual(result.returncode == 0, success, result.stderr.decode())
         env.update(INPUT_VERSION="v2.9.0", PREPARED_RELEASE_ID="12", PREPARED_MANIFEST_SHA256="a" * 64,
-                   GITHUB_REF="refs/heads/main", INPUT_REF="main")
+                   QUALIFIED_IMAGE_DIGESTS="", GITHUB_REF="refs/heads/main", INPUT_REF="main")
         self.assertNotEqual(subprocess.run([sys.executable, "-c", program], env=env, capture_output=True, timeout=5).returncode, 0)
-        prepared_job = text.split("  prepared-release:\n", 1)[1].split("\n  prepare-release:\n", 1)[0]
+        prepared_job = text.split("  prepared-release:\n", 1)[1].split("\n  publish-qualified-images:\n", 1)[0]
         self.assertIn("environment: release", prepared_job)
         self.assertIn("ref: ${{ github.workflow_sha }}", prepared_job)
         self.assertIn("--verify-uploaded", prepared_job)
         self.assertNotIn("--draft=false", prepared_job)
         self.assertNotIn("docker push", prepared_job)
+        approval_job = text.split("  approve-qualified-images:\n", 1)[1].split("\n  publish-qualified-images:\n", 1)[0]
+        self.assertIn("environment: release", approval_job)
+        image_job = text.split("  publish-qualified-images:\n", 1)[1].split("\n  prepare-release:\n", 1)[0]
+        self.assertIn("needs: approve-qualified-images", image_job)
+        self.assertIn("name: dev", image_job)
+        self.assertIn("packages: write", image_job)
+        self.assertIn("distribution-publish-images.py", image_job)
+        self.assertIn("git merge-base --is-ancestor", image_job)
+        self.assertNotIn("type=raw,value=latest", image_job)
 
 
 class ImageBindingTest(unittest.TestCase):
