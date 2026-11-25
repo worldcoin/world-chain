@@ -184,7 +184,7 @@ pub struct StopPublish;
 
 ## Flashblocks P2P Protocol
 
-> **See also:** [Flashblocks P2P Protocol v2](./flashblocks_p2p_v2.md) amends this section with bounded, latency-optimized peer selection.
+> **See also:** [Flashblocks P2P Protocol v2](./p2p_v2.md) amends this section with bounded, latency-optimized peer selection.
 
 ### Protocol Overview
 

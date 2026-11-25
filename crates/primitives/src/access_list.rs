@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
     Clone, Debug, PartialEq, Default, Deserialize, Serialize, Eq, RlpEncodable, RlpDecodable,
 )]
 pub struct FlashblockAccessListData {
-    /// The [`FlashblockAccessList`] containing all [`AccountChanges`] that occured throughout execution of a
+    /// The [`FlashblockAccessList`] containing all [`AccountChanges`] that occurred throughout execution of a
     /// single Flashblock `diff`
     pub access_list: FlashblockAccessList,
     /// The associated Keccak256 hash of the RLP-Encoding of [`FlashblockAccessList`]
